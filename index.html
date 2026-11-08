@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en" data-theme="paper">
 <head>
-<script>try{var t=window.localStorage.getItem("lbl-theme");if(["paper","slate","scope","blueprint"].indexOf(t)>=0)document.documentElement.dataset.theme=t;}catch(e){}</script>
+<script>try{var t=window.localStorage.getItem("lbl-theme");if(["paper","slate","scope","blueprint"].indexOf(t)>=0)document.documentElement.dataset.theme=t;}catch(e){}window.__uxInteracted=false;["pointerdown","keydown","wheel","touchstart"].forEach(function(ev){window.addEventListener(ev,function(){window.__uxInteracted=true;},{passive:true});});try{history.scrollRestoration="manual";}catch(e){}</script>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="color-scheme" content="light dark" />
@@ -3115,7 +3115,8 @@ function renderTruth() {
     ? "All " + rows.length + " rows enumerated by the engine — the highlighted row is your current switch setting."
     : "The engine enumerated all " + rows.length + " combinations; showing the rows around your current setting (highlighted).";
   const act = tbl.querySelector("tr.active");
-  if (act && act.scrollIntoView) act.scrollIntoView({ block: "nearest" });
+  /* no anchor scrolling before the user has interacted (fresh loads land at the top) */
+  if (act && act.scrollIntoView && window.__uxInteracted) act.scrollIntoView({ block: "nearest" });
 }
 </script>
 
@@ -14656,5 +14657,944 @@ renderStage = function () {
   var menuControl = controls.querySelector(".menu-control");
   if (menuControl) controls.insertBefore(tog, menuControl); else controls.appendChild(tog);
   if (searchInput) searchInput.addEventListener("keydown", function (e) { if (e.key === "Escape" && mq.matches) { sticky.classList.remove("search-open"); tog.setAttribute("aria-expanded", "false"); window.dispatchEvent(new Event("resize")); } });
+})();
+</script>
+
+<style>
+.fgs-ta{width:100%;box-sizing:border-box;font-family:"IBM Plex Mono",monospace;font-size:11.5px;padding:8px;border:1px solid var(--line2);border-radius:8px;background:var(--panel2);color:var(--ink);resize:vertical}
+.fgs-in{width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid var(--line2);border-radius:8px;background:var(--panel);color:var(--ink);font-size:13.5px}
+.fgs-sec{margin-top:14px;border-top:1px solid var(--line);padding-top:12px}
+.fgs-digest-wrap{max-height:300px;overflow:auto;margin-top:8px}
+.fgs-digest-wrap table.tt td,.fgs-digest-wrap table.tt th{white-space:normal;text-align:left}
+.fgs-low td{background:var(--amber-soft)}
+.fgs-assign{border:1px solid var(--line2);border-radius:10px;padding:10px 12px;margin-top:10px;background:var(--panel2)}
+.fgs-assign h4{margin:0 0 2px;font-size:14.5px}
+.fgs-badge{display:inline-block;font-size:11px;font-weight:700;border-radius:999px;padding:2px 8px;margin-left:6px;vertical-align:middle}
+.fgs-badge.due{background:var(--amber-soft);color:var(--amber)}
+.fgs-badge.over{background:#fee2e2;color:#b91c1c}
+.fgs-badge.done{background:#dcfce7;color:#15803d}
+@media (prefers-color-scheme: dark){.fgs-badge.over{background:#7f1d1d;color:#fecaca}.fgs-badge.done{background:#14532d;color:#bbf7d0}}
+.fgs-ticklist{list-style:none;margin:8px 0 0;padding:0}
+.fgs-ticklist li{display:flex;gap:8px;align-items:baseline;padding:4px 0;border-bottom:1px dashed var(--line);font-size:13.5px}
+.fgs-ticklist li:last-child{border-bottom:0}
+.fgs-tick{flex:none;width:18px;text-align:center;font-weight:700}
+.fgs-tick.on{color:var(--green)}
+.fgs-tick.off{color:var(--muted)}
+.fgs-ticklist .sub{margin-left:auto;flex:none;font-size:11.5px;color:var(--muted)}
+.fgs-pick{max-height:260px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:6px 10px;margin-top:6px}
+.fgs-pick .grp{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);margin:10px 0 2px}
+.fgs-pick label{display:flex;gap:8px;align-items:baseline;padding:3px 0;font-size:13px;cursor:pointer}
+.fgs-pick input{flex:none}
+</style>
+<script>
+"use strict";
+/* ================================================================
+   ROUND K — the instructor side, on the same no-server pattern as
+   the rest of the site: nothing is sent anywhere. A student exports
+   a progress code (FGS1:) and carries it to the instructor; the
+   instructor pastes codes here to build a class digest locally;
+   assignments travel as codes / #assign- links (FGA1:) and are
+   stored additively in the existing lbl-progress store (fgs field).
+   Lab check results are recorded by observing the existing lab
+   Check buttons — no existing control or handler is changed.
+   ================================================================ */
+(function roundK() {
+  const $K = id => document.getElementById(id);
+  const escK = s => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+  /* ---------- storage (additive field on the existing store) ---------- */
+  function store() {
+    const p = lsGet("lbl-progress", { areas: {}, circuits: {} });
+    if (!p.fgs || typeof p.fgs !== "object") p.fgs = { name: "", labs: {}, assigns: [], last: 0 };
+    if (!p.fgs.labs || typeof p.fgs.labs !== "object") p.fgs.labs = {};
+    if (!Array.isArray(p.fgs.assigns)) p.fgs.assigns = [];
+    return p;
+  }
+  function saveStore(p) { lsSet("lbl-progress", p); }
+  function visitedSet() {
+    try { return new Set(JSON.parse(window.localStorage.getItem("lbl-visited") || "[]")); }
+    catch (e) { return new Set(); }
+  }
+
+  /* ---------- catalogues (read from the live site) ---------- */
+  function labCatalog() {
+    const out = [];
+    try {
+      if (typeof RE_LAB_INDEX !== "undefined" && RE_LAB_INDEX) Object.keys(RE_LAB_INDEX).forEach(id => out.push(RE_LAB_INDEX[id]));
+    } catch (e) {}
+    if (!out.length) {
+      try { if (typeof OS_LABS !== "undefined") OS_LABS.forEach(l => out.push(l)); } catch (e) {}
+      try { if (typeof OSC_LABS !== "undefined") OSC_LABS.forEach(l => out.push(l)); } catch (e) {}
+      try { if (typeof ARCH_LABS !== "undefined") ARCH_LABS.forEach(l => out.push(l)); } catch (e) {}
+      try { if (typeof ORG_LABS !== "undefined") ORG_LABS.forEach(l => out.push(l)); } catch (e) {}
+    }
+    return out.filter(l => l && l.id && Array.isArray(l.checks));
+  }
+  const LABS = labCatalog();
+  const LAB_BY_ID = {}; LABS.forEach(l => LAB_BY_ID[l.id] = l);
+  function activityCatalog() {
+    const list = $K("menuList"); const out = []; let group = "";
+    if (!list) return out;
+    Array.prototype.slice.call(list.children).forEach(el => {
+      if (el.classList.contains("menu-group")) group = (el.dataset.group || el.textContent || "").trim();
+      else if (el.classList.contains("menu-item")) {
+        const lbl = el.querySelector(".mi-label");
+        out.push({ key: el.dataset.key || "", label: lbl ? lbl.textContent.trim() : el.textContent.trim(), group });
+      }
+    });
+    return out.filter(a => a.key);
+  }
+  function labStatus(labId, fgs) {
+    const lab = LAB_BY_ID[labId];
+    const of = lab ? lab.checks.length : 0;
+    const rec = (fgs && fgs.labs && fgs.labs[labId]) || { c: {} };
+    const score = Object.keys(rec.c || {}).filter(k => rec.c[k] === true && +k < of).length;
+    return { score, of, done: of > 0 && score >= of };
+  }
+  function actDone(key, fgs, vis) {
+    if (LAB_BY_ID[key]) return labStatus(key, fgs).done;
+    return vis.has(key);
+  }
+  function bbDoneIds(vis) {
+    const ids = [];
+    try {
+      if (typeof BBP_PROJECTS !== "undefined") BBP_PROJECTS.forEach(p => { if (vis.has("bb-" + p.id)) ids.push(p.id); });
+    } catch (e) {}
+    if (vis.has("breadboard")) ids.push("full");
+    return ids;
+  }
+
+  /* ---------- lab check recorder (observes existing Check buttons) ---------- */
+  document.addEventListener("click", e => {
+    const b = e.target.closest && e.target.closest("[data-check]");
+    if (!b) return;
+    const parts = String(b.dataset.check).split(":");
+    const labId = parts[0], idx = +parts[1];
+    if (!LAB_BY_ID[labId] || isNaN(idx)) return;
+    setTimeout(() => {
+      const fb = document.getElementById(labId + "-chk" + idx + "-fb");
+      if (!fb) return;
+      const ok = fb.textContent.indexOf("✓") === 0;
+      const p = store();
+      const rec = p.fgs.labs[labId] || (p.fgs.labs[labId] = { c: {}, a: 0 });
+      rec.a = (rec.a || 0) + 1; rec.t = Date.now();
+      if (ok) rec.c[idx] = true;
+      p.fgs.last = Date.now();
+      saveStore(p);
+      renderMyAssignments();
+    }, 0);
+  });
+
+  /* ---------- codecs (modelled on the sandbox design codec) ---------- */
+  function b64Encode(obj) {
+    return btoa(unescape(encodeURIComponent(JSON.stringify(obj)))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+  function b64Decode(str) {
+    if (typeof str !== "string" || !/^[A-Za-z0-9_-]+$/.test(str)) throw new Error("not base64url");
+    let b = str.replace(/-/g, "+").replace(/_/g, "/");
+    const rem = b.length % 4;
+    if (rem === 1) throw new Error("bad length");
+    if (rem) b += "=".repeat(4 - rem);
+    return JSON.parse(decodeURIComponent(escape(atob(b))));
+  }
+  function isStr(v, max) { return typeof v === "string" && v.length <= max; }
+  function decodeProgress(code) {
+    if (typeof code !== "string") return null;
+    const m = code.trim().match(/^FGS1:([A-Za-z0-9_-]+)$/);
+    if (!m) return null;
+    let o; try { o = b64Decode(m[1]); } catch (e) { return null; }
+    if (!o || typeof o !== "object" || o.v !== 1 || o.kind !== "progress") return null;
+    if (!isStr(o.name || "", 80)) return null;
+    if (!Array.isArray(o.visited) || o.visited.length > 400 || !o.visited.every(k => isStr(k, 80))) return null;
+    if (!o.labs || typeof o.labs !== "object" || Array.isArray(o.labs)) return null;
+    const labs = {};
+    Object.keys(o.labs).forEach(id => {
+      if (!LAB_BY_ID[id]) return;
+      const r = o.labs[id];
+      if (!r || typeof r !== "object") return;
+      const of = Math.min(50, Math.max(0, r.of | 0)), s = Math.min(of, Math.max(0, r.s | 0));
+      labs[id] = { s, of, done: r.done === true && of > 0 && s >= of };
+    });
+    LABS.forEach(l => { if (!labs[l.id]) labs[l.id] = { s: 0, of: l.checks.length, done: false }; });
+    const bb = Array.isArray(o.bb) ? o.bb.filter(x => isStr(x, 40)).slice(0, 60) : [];
+    const last = typeof o.last === "number" && isFinite(o.last) ? o.last : (typeof o.ts === "number" ? o.ts : 0);
+    return { name: o.name || "", visited: o.visited, labs, bb, last };
+  }
+  function decodeAssign(code) {
+    if (typeof code !== "string") return null;
+    const m = code.trim().match(/^FGA1:([A-Za-z0-9_-]+)$/);
+    if (!m) return null;
+    let o; try { o = b64Decode(m[1]); } catch (e) { return null; }
+    if (!o || typeof o !== "object" || o.v !== 1 || o.kind !== "assign") return null;
+    if (!isStr(o.title, 120) || !o.title.trim()) return null;
+    if (!isStr(o.due, 10) || !/^\d{4}-\d{2}-\d{2}$/.test(o.due)) return null;
+    const d = new Date(o.due + "T12:00:00"); if (isNaN(d.getTime())) return null;
+    if (!Array.isArray(o.items) || !o.items.length || o.items.length > 220 || !o.items.every(k => isStr(k, 80))) return null;
+    const known = {}; activityCatalog().forEach(a => known[a.key] = true);
+    const items = o.items.filter(k => known[k]);
+    if (!items.length) return null;
+    return { title: o.title.trim(), due: o.due, items: Array.from(new Set(items)) };
+  }
+  function buildProgressPayload() {
+    const p = store(); const fgs = p.fgs; const vis = visitedSet();
+    const labs = {};
+    LABS.forEach(l => { const st = labStatus(l.id, fgs); labs[l.id] = { s: st.score, of: st.of, done: st.done }; });
+    return { v: 1, kind: "progress", name: fgs.name || "", ts: Date.now(), last: fgs.last || 0, visited: Array.from(vis), labs, bb: bbDoneIds(vis) };
+  }
+  function encodeProgress() { return "FGS1:" + b64Encode(buildProgressPayload()); }
+  function encodeAssign(a) { return "FGA1:" + b64Encode({ v: 1, kind: "assign", title: a.title, due: a.due, items: a.items, ts: Date.now() }); }
+  function fmtDate(ts) {
+    if (!ts) return "—";
+    try { return new Date(ts).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }); } catch (e) { return "—"; }
+  }
+  function summaryText(payload, code) {
+    const labsDone = LABS.filter(l => payload.labs[l.id] && payload.labs[l.id].done).length;
+    return "From Gates to Systems — my progress" +
+      (payload.name ? "\nName: " + payload.name : "") +
+      "\nLabs completed: " + labsDone + " of " + LABS.length +
+      "\nActivities opened: " + payload.visited.length +
+      "\nBreadboard projects opened: " + (payload.bb.length ? payload.bb.length + " (" + payload.bb.join(", ") + ")" : "0") +
+      "\nLast active: " + fmtDate(payload.last || payload.ts) +
+      "\nShow this code to your instructor:\n" + code;
+  }
+
+  /* ---------- the panel (lives with Share & my saves) ---------- */
+  const shareCard = $K("shareCard");
+  if (!shareCard) return;
+  const card = document.createElement("div");
+  card.className = "card"; card.id = "fgsCard";
+  card.innerHTML =
+    '<h3>My progress &amp; instructor</h3>' +
+    '<p style="margin:0;font-size:13px">Nothing on this page is sent anywhere — your record lives on this device. To show your instructor, make a progress code below and hand it over (paste it, show your screen, print it). They read it with the Instructor panel on their own device.</p>' +
+    '<div class="fgs-sec"><div class="ctrl-label">Share my progress</div>' +
+    '<label class="fld" style="display:block;margin-bottom:8px">Your name — it travels inside your code <input type="text" class="fgs-in" id="fgsName" placeholder="e.g. Ada L." autocomplete="name" /></label>' +
+    '<div class="share-row"><button type="button" class="btn primary" id="fgsMake">Make my progress code</button></div>' +
+    '<textarea class="fgs-ta" id="fgsCodeOut" rows="3" readonly placeholder="Your FGS1: code appears here" aria-label="Your progress code"></textarea>' +
+    '<div class="share-row"><button type="button" class="btn" id="fgsCopyCode">Copy code</button><button type="button" class="btn" id="fgsCopySummary">Copy plain-text summary</button></div>' +
+    '<p class="progress-line" id="fgsShareMsg" aria-live="polite"></p></div>' +
+    '<div id="fgsMine"></div>' +
+    '<div class="fgs-sec"><div class="ctrl-label">Have an assignment?</div>' +
+    '<p style="margin:0 0 6px;font-size:13px">Paste an assignment code from your instructor (or open their #assign- link) and it becomes a checklist here, ticked live as you work: an activity ticks the first time you actually use it — flip its switches, run it, answer inside it; merely opening it is not enough — and a lab ticks when every one of its checks passes.</p>' +
+    '<textarea class="fgs-ta" id="fgsAssignIn" rows="2" placeholder="FGA1:…" aria-label="Assignment code"></textarea>' +
+    '<div class="share-row"><button type="button" class="btn" id="fgsAssignLoad">Load assignment</button></div>' +
+    '<p class="progress-line" id="fgsAssignMsg" aria-live="polite"></p></div>' +
+    '<details class="details-disclosure"><summary>Instructor — class digest &amp; set an assignment</summary>' +
+      '<div class="ctrl-label" style="margin-top:10px">Class digest — from student codes</div>' +
+      '<p style="margin:0 0 6px;font-size:13px">Paste the FGS1: codes your students gave you — one per line, or a whole pasted summary works too. The digest is computed here, on this device, from those codes only.</p>' +
+      '<textarea class="fgs-ta" id="fgsImport" rows="4" placeholder="FGS1:… (one per line)" aria-label="Student progress codes"></textarea>' +
+      '<div class="share-row"><button type="button" class="btn primary" id="fgsDigestBtn">Build class digest</button><button type="button" class="btn" id="fgsCsvBtn" disabled>Download digest as CSV</button></div>' +
+      '<p class="progress-line" id="fgsDigestMsg" aria-live="polite"></p>' +
+      '<div id="fgsDigest"></div>' +
+      '<div class="ctrl-label" style="margin-top:16px">Set an assignment</div>' +
+      '<label class="fld" style="display:block;margin-bottom:8px">Title <input type="text" class="fgs-in" id="fgsAsTitle" placeholder="e.g. Week 3 — adders and labs" /></label>' +
+      '<label class="fld" style="display:block;margin-bottom:8px">Due date <input type="date" class="fgs-in" id="fgsAsDue" /></label>' +
+      '<input type="text" class="fgs-in" id="fgsAsFilter" placeholder="Filter activities — try lab, cache, breadboard…" aria-label="Filter activities" />' +
+      '<div class="fgs-pick" id="fgsAsPick"></div>' +
+      '<p class="progress-line" id="fgsAsCount"></p>' +
+      '<div class="share-row"><button type="button" class="btn primary" id="fgsAsMake">Make assignment code &amp; link</button></div>' +
+      '<textarea class="fgs-ta" id="fgsAsCode" rows="3" readonly placeholder="FGA1: code appears here" aria-label="Assignment code"></textarea>' +
+      '<label class="fld" style="display:block;margin:8px 0">Link ending — add it to the end of this site\'s web address to make the student link <input type="text" class="fgs-in mono" id="fgsAsLink" readonly /></label>' +
+      '<div class="share-row"><button type="button" class="btn" id="fgsAsCopyCode">Copy code</button><button type="button" class="btn" id="fgsAsCopyLink">Copy ending</button></div>' +
+      '<p class="progress-line" id="fgsAsMsg" aria-live="polite"></p>' +
+    '</details>';
+  shareCard.after(card);
+
+  /* ---------- share my progress ---------- */
+  const nameIn = $K("fgsName");
+  nameIn.value = store().fgs.name || "";
+  nameIn.addEventListener("change", () => { const p = store(); p.fgs.name = nameIn.value.trim().slice(0, 80); saveStore(p); });
+  let lastCode = "", lastSummary = "";
+  function copyText(text, msgEl, okMsg) {
+    const done = ok => { msgEl.textContent = ok ? okMsg : "Copy is unavailable here — select the text above and copy it by hand."; };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(() => done(true), () => done(false));
+    else done(false);
+  }
+  $K("fgsMake").addEventListener("click", () => {
+    const p = store(); p.fgs.last = Date.now(); saveStore(p);
+    const payload = buildProgressPayload();
+    lastCode = encodeProgress(); lastSummary = summaryText(payload, lastCode);
+    $K("fgsCodeOut").value = lastCode;
+    const labsDone = LABS.filter(l => payload.labs[l.id].done).length;
+    $K("fgsShareMsg").textContent = "Code ready: " + labsDone + "/" + LABS.length + " labs completed (every check passed) · " + payload.visited.length + " activities opened · " + payload.bb.length + " breadboard projects opened. Show this code to your instructor.";
+  });
+  $K("fgsCopyCode").addEventListener("click", () => {
+    if (!lastCode) { $K("fgsShareMsg").textContent = "Make your code first."; return; }
+    copyText(lastCode, $K("fgsShareMsg"), "Progress code copied — hand it to your instructor.");
+  });
+  $K("fgsCopySummary").addEventListener("click", () => {
+    if (!lastSummary) { $K("fgsShareMsg").textContent = "Make your code first."; return; }
+    copyText(lastSummary, $K("fgsShareMsg"), "Summary copied — paste it anywhere; the code at the end is what your instructor's panel reads.");
+  });
+
+  /* ---------- assignments: student side ---------- */
+  function todayStr() { const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
+  function addAssignment(a, silent) {
+    const p = store();
+    const sig = a.title + "|" + a.due + "|" + a.items.join(",");
+    if (p.fgs.assigns.some(x => (x.title + "|" + x.due + "|" + x.items.join(",")) === sig)) {
+      if (!silent) $K("fgsAssignMsg").textContent = "That assignment is already on your list below.";
+      renderMyAssignments(); return false;
+    }
+    p.fgs.assigns.push({ title: a.title, due: a.due, items: a.items.slice(), added: Date.now() });
+    p.fgs.last = Date.now(); saveStore(p);
+    renderMyAssignments(); return true;
+  }
+  function renderMyAssignments() {
+    const host = $K("fgsMine"); if (!host) return;
+    const p = store(); const fgs = p.fgs; const vis = visitedSet();
+    const cat = {}; activityCatalog().forEach(a => cat[a.key] = a);
+    if (!fgs.assigns.length) { host.innerHTML = ""; return; }
+    host.innerHTML = '<div class="ctrl-label" style="margin-top:14px">My assignments</div>' + fgs.assigns.map((a, ai) => {
+      const states = a.items.map(k => ({ k, done: actDone(k, fgs, vis) }));
+      const doneN = states.filter(s => s.done).length;
+      const allDone = doneN === a.items.length;
+      const over = !allDone && a.due < todayStr();
+      const badge = allDone ? '<span class="fgs-badge done">Complete ✓</span>' : over ? '<span class="fgs-badge over">Past due</span>' : '<span class="fgs-badge due">Due ' + escK(a.due) + "</span>";
+      const lis = states.map(s => {
+        const c = cat[s.k];
+        let sub = "";
+        if (LAB_BY_ID[s.k]) { const st = labStatus(s.k, fgs); sub = st.done ? "lab checks " + st.of + "/" + st.of : "lab checks " + st.score + "/" + st.of; }
+        return '<li><span class="fgs-tick ' + (s.done ? "on" : "off") + '">' + (s.done ? "✓" : "○") + "</span><span>" + escK(c ? c.label : s.k) + "</span>" + (sub ? '<span class="sub">' + sub + "</span>" : "") + "</li>";
+      }).join("");
+      return '<div class="fgs-assign"><h4>' + escK(a.title) + badge + '</h4>' +
+        '<p class="progress-line" style="margin:0">' + doneN + " of " + a.items.length + " ticked · due " + escK(a.due) + (allDone ? " — finished, well done." : over ? " — past the due date; items still tick as you work through them." : "") + '</p>' +
+        '<ul class="fgs-ticklist">' + lis + "</ul>" +
+        '<div class="share-row" style="margin-top:8px"><button type="button" class="btn" data-fgs-remove="' + ai + '">Remove this assignment</button></div></div>';
+    }).join("");
+    host.querySelectorAll("[data-fgs-remove]").forEach(b => b.addEventListener("click", () => {
+      const p2 = store(); p2.fgs.assigns.splice(+b.dataset.fgsRemove, 1); saveStore(p2); renderMyAssignments();
+    }));
+  }
+  $K("fgsAssignLoad").addEventListener("click", () => {
+    const a = decodeAssign($K("fgsAssignIn").value);
+    if (!a) { $K("fgsAssignMsg").textContent = "That code could not be read — check it is a complete FGA1: assignment code, untruncated."; return; }
+    if (addAssignment(a)) $K("fgsAssignMsg").textContent = "Assignment loaded: “" + a.title + "” — your checklist is above, and it ticks live as you work through the activities.";
+  });
+  /* an #assign- link opened on this device loads the same way */
+  (function assignFromHash() {
+    const h = location.hash || "";
+    const m = h.match(/[#&]assign=([^&]+)/);
+    if (!m) return;
+    let a = null;
+    try { a = decodeAssign(decodeURIComponent(m[1])); } catch (e) { a = decodeAssign(m[1]); }
+    if (a && addAssignment(a, true)) {
+      const msg = $K("fgsAssignMsg");
+      if (msg) msg.textContent = "Assignment opened from a link: “" + a.title + "” — it is saved on this device, in My assignments above.";
+      setTimeout(() => { const c = $K("fgsCard"); if (c) c.scrollIntoView({ behavior: "smooth", block: "start" }); }, 350);
+    }
+  })();
+  /* live ticks: any navigation / completion click re-renders the checklists */
+  document.addEventListener("click", e => {
+    const t = e.target;
+    if (t.closest && (t.closest(".menu-item") || t.closest(".ux-act") || t.closest("[data-bbproj]"))) {
+      const p = store(); p.fgs.last = Date.now(); saveStore(p);
+      setTimeout(renderMyAssignments, 30);
+    }
+  });
+
+  /* ---------- instructor: class digest ---------- */
+  let digestStudents = null;
+  function buildDigest(students) {
+    const rows = students.map((s, i) => ({
+      name: s.name || ("Student " + (i + 1)),
+      labsDone: LABS.filter(l => s.labs[l.id] && s.labs[l.id].done).length,
+      acts: s.visited.length,
+      bb: s.bb.length,
+      last: s.last || 0
+    }));
+    const labCounts = LABS.map(l => ({ lab: l, done: students.filter(s => s.labs[l.id] && s.labs[l.id].done).length }));
+    const min = students.length ? Math.min.apply(null, labCounts.map(x => x.done)) : 0;
+    const lowest = labCounts.filter(x => x.done === min && min < students.length);
+    return { rows, labCounts, lowest, n: students.length };
+  }
+  function digestCsv(d) {
+    const q = v => '"' + String(v == null ? "" : v).replace(/"/g, '""') + '"';
+    const lines = [["Name", "Labs completed (of " + LABS.length + ")", "Activities opened", "Breadboard projects opened", "Last active"].join(",")];
+    d.rows.forEach(r => lines.push([q(r.name), r.labsDone, r.acts, r.bb, q(fmtDate(r.last))].join(",")));
+    lines.push("");
+    lines.push(["Lab", "Code", "Track", "Completed by", "Students"].join(","));
+    d.labCounts.forEach(x => lines.push([q(x.lab.code + " — " + x.lab.title), q(x.lab.code), q(x.lab.track || ""), x.done, d.n].join(",")));
+    return lines.join("\n");
+  }
+  $K("fgsDigestBtn").addEventListener("click", () => {
+    const text = $K("fgsImport").value || "";
+    const tokens = text.match(/FGS1:[A-Za-z0-9_-]+/g) || [];
+    const students = [], bad = { n: 0 };
+    tokens.forEach(tok => { const s = decodeProgress(tok); if (s) students.push(s); else bad.n++; });
+    digestStudents = students.length ? students : null;
+    $K("fgsCsvBtn").disabled = !students.length;
+    const host = $K("fgsDigest");
+    if (!students.length) {
+      host.innerHTML = "";
+      $K("fgsDigestMsg").textContent = tokens.length ? "None of the " + tokens.length + " code(s) pasted could be read — they may be truncated. Ask the student to copy the full FGS1: code." : "No FGS1: codes found in what you pasted.";
+      return;
+    }
+    const d = buildDigest(students);
+    const lowSet = {}; d.lowest.forEach(x => lowSet[x.lab.id] = true);
+    host.innerHTML =
+      '<div class="fgs-digest-wrap"><table class="tt"><thead><tr><th>Student</th><th>Labs completed</th><th>Activities opened</th><th>Breadboard opened</th><th>Last active</th></tr></thead><tbody>' +
+      d.rows.map(r => "<tr><td>" + escK(r.name) + "</td><td>" + r.labsDone + "/" + LABS.length + "</td><td>" + r.acts + "</td><td>" + r.bb + "</td><td>" + fmtDate(r.last) + "</td></tr>").join("") +
+      "</tbody></table></div>" +
+      '<div class="ctrl-label" style="margin-top:12px">Per-lab completion — lowest highlighted</div>' +
+      '<div class="fgs-digest-wrap"><table class="tt"><thead><tr><th>Lab</th><th>Done by</th></tr></thead><tbody>' +
+      d.labCounts.map(x => '<tr' + (lowSet[x.lab.id] ? ' class="fgs-low"' : "") + "><td>" + escK(x.lab.code + " — " + x.lab.title) + "</td><td>" + x.done + " of " + d.n + "</td></tr>").join("") +
+      "</tbody></table></div>" +
+      (d.lowest.length ? '<p class="progress-line">Needs attention — fewest completions (' + d.lowest[0].done + " of " + d.n + "): " + d.lowest.map(x => escK(x.lab.code)).join(", ") + ".</p>" : "");
+    $K("fgsDigestMsg").textContent = "Digest built from " + students.length + " student code(s), computed on this device." + (bad.n ? " " + bad.n + " code(s) could not be read (truncated?) and were skipped." : "");
+  });
+  $K("fgsCsvBtn").addEventListener("click", () => {
+    if (!digestStudents) return;
+    const csv = digestCsv(buildDigest(digestStudents));
+    try {
+      const blob = new Blob([csv], { type: "text/csv" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = "gates-to-systems-digest.csv";
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+      $K("fgsDigestMsg").textContent = "CSV downloaded — one row per student, then one row per lab.";
+    } catch (e) {
+      $K("fgsDigestMsg").textContent = "Download is unavailable in this preview — the digest above holds the same numbers.";
+    }
+  });
+
+  /* ---------- instructor: create an assignment ---------- */
+  const pickHost = $K("fgsAsPick");
+  const picked = new Set();
+  function renderPicker() {
+    const q = ($K("fgsAsFilter").value || "").trim().toLowerCase();
+    const cat = activityCatalog();
+    let html = "", lastGroup = null, shown = 0;
+    cat.forEach(a => {
+      if (q && (a.label + " " + a.group + " " + a.key).toLowerCase().indexOf(q) < 0) return;
+      if (a.group !== lastGroup) { html += '<div class="grp">' + escK(a.group || "Activities") + "</div>"; lastGroup = a.group; }
+      shown++;
+      html += '<label><input type="checkbox" data-fgs-pick="' + escK(a.key) + '"' + (picked.has(a.key) ? " checked" : "") + " /><span>" + escK(a.label) + (LAB_BY_ID[a.key] ? ' <span style="color:var(--muted)">(lab — ticks when all its checks pass)</span>' : "") + "</span></label>";
+    });
+    pickHost.innerHTML = html || '<p class="progress-line">No activity matches that filter.</p>';
+    pickHost.querySelectorAll("[data-fgs-pick]").forEach(cb => cb.addEventListener("change", () => {
+      if (cb.checked) picked.add(cb.dataset.fgsPick); else picked.delete(cb.dataset.fgsPick);
+      $K("fgsAsCount").textContent = picked.size + " activit" + (picked.size === 1 ? "y" : "ies") + " ticked for this assignment.";
+    }));
+    $K("fgsAsCount").textContent = picked.size + " activit" + (picked.size === 1 ? "y" : "ies") + " ticked for this assignment." + (q ? " Filter showing " + shown + " of " + cat.length + " — ticked items stay ticked when filtered out." : "");
+  }
+  $K("fgsAsFilter").addEventListener("input", renderPicker);
+  renderPicker();
+  $K("fgsAsMake").addEventListener("click", () => {
+    const title = $K("fgsAsTitle").value.trim();
+    const due = $K("fgsAsDue").value;
+    if (!title) { $K("fgsAsMsg").textContent = "Give the assignment a title first."; return; }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(due)) { $K("fgsAsMsg").textContent = "Pick a due date first."; return; }
+    if (!picked.size) { $K("fgsAsMsg").textContent = "Tick at least one activity."; return; }
+    const a = { title, due, items: Array.from(picked) };
+    const code = encodeAssign(a);
+    $K("fgsAsCode").value = code;
+    $K("fgsAsLink").value = "#assign=" + code;
+    $K("fgsAsMsg").textContent = "Assignment ready: " + a.items.length + " activities, due " + due + ". Give students the code, or the site address with the link ending added — when a student opens it, the checklist appears in their My progress & instructor card. Nothing reaches you automatically; students show you their progress codes.";
+  });
+  $K("fgsAsCopyCode").addEventListener("click", () => {
+    if (!$K("fgsAsCode").value) { $K("fgsAsMsg").textContent = "Make the assignment first."; return; }
+    copyText($K("fgsAsCode").value, $K("fgsAsMsg"), "Assignment code copied.");
+  });
+  $K("fgsAsCopyLink").addEventListener("click", () => {
+    if (!$K("fgsAsLink").value) { $K("fgsAsMsg").textContent = "Make the assignment first."; return; }
+    copyText($K("fgsAsLink").value, $K("fgsAsMsg"), "Link ending copied — add it to the end of the site's web address.");
+  });
+
+  renderMyAssignments();
+  window.__fgs = { buildProgressPayload, encodeProgress, decodeProgress, encodeAssign, decodeAssign, buildDigest, labStatus, store, renderAssignments: renderMyAssignments };
+})();
+</script>
+
+<style>
+/* ROUND L — first-time-student fixes */
+/* D5: on small screens the search input takes the full row; filters/labs drop to a second line */
+@media (max-width:720px){
+  .ux-sticky .ux-search{flex-wrap:wrap}
+  .ux-sticky .ux-search input[type="text"]{flex:1 1 100%;min-width:0;width:100%}
+}
+/* F2: live search results, under the input, page scroll untouched */
+.ux-search{position:relative}
+.ux-results{position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:60;background:var(--panel);border:1px solid var(--line2);border-radius:10px;box-shadow:0 10px 28px rgba(0,0,0,.18);padding:6px;max-height:320px;overflow:auto}
+.ux-results .ux-rcount{font-size:12px;color:var(--muted);padding:2px 8px 6px}
+.ux-result{display:flex;width:100%;gap:8px;align-items:baseline;text-align:left;border:0;background:transparent;border-radius:8px;padding:8px;font:inherit;font-size:13.5px;font-weight:600;color:var(--ink);cursor:pointer}
+.ux-result small{margin-left:auto;font-weight:500;color:var(--muted);font-size:11.5px;text-align:right;flex:none}
+.ux-result:hover,.ux-result:focus{background:var(--panel2)}
+/* F6: persistent filter-state chip */
+.ux-filterchip{display:none;margin-top:6px;align-items:center;gap:8px;font-size:12.5px;font-weight:600;color:var(--amber)}
+.ux-filterchip.on{display:flex}
+.ux-filterchip button{border:1px solid var(--line2);background:var(--panel);color:var(--ink);border-radius:999px;padding:2px 9px;font:inherit;font-size:12px;cursor:pointer}
+/* F7: rail edge fade + arrow while more modules sit off-screen */
+.ux-rail.ux-more{mask-image:linear-gradient(to right,#000 88%,transparent 99%);-webkit-mask-image:linear-gradient(to right,#000 88%,transparent 99%)}
+.ux-rail-arrow{position:absolute;right:2px;z-index:5;pointer-events:none;font-size:26px;font-weight:800;line-height:1;color:var(--amber);text-shadow:0 0 6px var(--panel),0 0 3px var(--panel)}
+/* F1: Start Here step ticks */
+.ux-step-tick{margin-left:auto;flex:none;color:var(--green);font-weight:800;font-size:16px}
+/* F4: course-labs jumps */
+.ux-labsjump{border:1px solid var(--line2);background:var(--amber-soft);color:var(--ink);border-radius:999px;padding:6px 12px;font:inherit;font-size:12.5px;font-weight:700;cursor:pointer}
+.ux-group h3 .ux-labsjump{margin-left:10px;vertical-align:middle}
+/* D3: banker table — compact cells + explicit swipe affordance on small screens */
+.ux-swipe-hint{display:none;margin:6px 0 0;font-size:12.5px;font-weight:700;color:var(--amber)}
+@media (max-width:720px){
+  .ux-swipe-hint{display:block}
+  #os-banker .tt-wrap{mask-image:linear-gradient(to right,#000 93%,transparent 100%);-webkit-mask-image:linear-gradient(to right,#000 93%,transparent 100%)}
+  #os-banker .matrix-inp{width:38px;padding:3px 2px;font-size:11.5px}
+  #os-banker table.tt td,#os-banker table.tt th{padding:2px 3px}
+}
+</style>
+<script>
+"use strict";
+/* ================================================================
+   ROUND L — fixes from the first-time-student walkthrough
+   (usability-20261108): D1 fresh load lands at top · D2 breadboard
+   projects get their own Boolean expressions · D3 Banker's table
+   fits/affords small screens · D4 Done credited on interaction
+   inside the activity, returner greeting only for returners ·
+   D5 phone search input full width · F1 Start Here is a working
+   path with ticks · F2 live search results, scroll never moves
+   while typing · F3 Banker's algorithm named on Lab L4 + cross-
+   links · F4 Course labs jumps · F5 scroll-spy follows the screen ·
+   F6 visible filter state · F7 rail edge affordance.
+   ================================================================ */
+(function roundL() {
+  const $L = id => document.getElementById(id);
+  const escL = s => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  const lsArr = (k) => { try { return JSON.parse(window.localStorage.getItem(k) || "[]"); } catch (e) { return []; } };
+  const lsSetArr = (k, a) => { try { window.localStorage.setItem(k, JSON.stringify(a)); } catch (e) {} };
+
+  /* ---------- catalogues from the live menu ---------- */
+  function catalog() {
+    const list = $L("menuList"); const out = []; let group = "";
+    if (!list) return out;
+    Array.prototype.slice.call(list.children).forEach(el => {
+      if (el.classList.contains("menu-group")) group = (el.dataset.group || el.textContent || "").trim();
+      else if (el.classList.contains("menu-item")) {
+        const lbl = el.querySelector(".mi-label");
+        out.push({ key: el.dataset.key || "", label: lbl ? lbl.textContent.trim() : el.textContent.trim(), group, search: (el.dataset.search || "") });
+      }
+    });
+    return out.filter(a => a.key);
+  }
+  function labKeySet() {
+    const s = new Set();
+    try { if (typeof RE_LAB_INDEX !== "undefined") Object.keys(RE_LAB_INDEX).forEach(k => s.add(k)); } catch (e) {}
+    return s;
+  }
+
+  /* ---------- D1: fresh load lands at the TOP ---------- */
+  (function landTop() {
+    const deep = /[#&](c|sb|assign)=/.test(location.hash || "");
+    if (deep) return;
+    const toTop = () => { if (!window.__uxInteracted) { try { window.scrollTo(0, 0); } catch (e) {} } };
+    toTop();
+    window.addEventListener("load", () => { toTop(); setTimeout(toTop, 300); setTimeout(toTop, 900); });
+    setTimeout(toTop, 120); setTimeout(toTop, 500);
+  })();
+
+  /* ---------- D4a: returner greeting only when a previous visit exists ---------- */
+  (function greetingGate() {
+    let returning = null;
+    try { returning = window.localStorage.getItem("lbl-returning"); } catch (e) {}
+    if (!returning) {
+      try { window.localStorage.setItem("lbl-returning", "1"); } catch (e) {}
+      const st = document.createElement("style");
+      st.textContent = "#uxContinue{display:none!important}";
+      document.head.appendChild(st);
+    }
+  })();
+
+  /* ---------- D4b: Done is credited on first interaction INSIDE the activity ---------- */
+  const engaged = new Set(lsArr("lbl-engaged"));
+  function saveEngaged() { lsSetArr("lbl-engaged", Array.from(engaged)); }
+  function getVisited() { return new Set(lsArr("lbl-visited")); }
+  function setVisited(set) { lsSetArr("lbl-visited", Array.from(set)); }
+  function refreshLabsChip() {
+    const b = $L("uxLabsBtn"); if (!b) return;
+    const labs = labKeySet(), vis = getVisited();
+    let n = 0; labs.forEach(k => { if (vis.has(k)) n++; });
+    b.textContent = "Labs · " + n + "/" + (labs.size || 32) + " opened";
+  }
+  function badge(key, on) {
+    document.querySelectorAll('.ux-act[data-key="' + (window.CSS && CSS.escape ? CSS.escape(key) : key) + '"]').forEach(c => {
+      const meta = c.querySelector(".ux-meta"); if (!meta) return;
+      const ex = meta.querySelector(".ux-badge.done");
+      if (on && !ex) { const s = document.createElement("span"); s.className = "ux-badge done"; s.textContent = "Done ✓"; meta.appendChild(s); }
+      if (!on && ex) ex.remove();
+    });
+  }
+  function unvisit(key) {
+    const vis = getVisited();
+    if (vis.has(key)) { vis.delete(key); setVisited(vis); }
+    badge(key, false); refreshLabsChip(); rerenderAssigns();
+  }
+  function visit(key) {
+    const vis = getVisited();
+    if (!vis.has(key)) { vis.add(key); setVisited(vis); }
+    badge(key, true); refreshLabsChip(); rerenderAssigns();
+  }
+  function rerenderAssigns() {
+    setTimeout(() => { try { if (window.__fgs && window.__fgs.renderAssignments) window.__fgs.renderAssignments(); } catch (e) {} }, 60);
+  }
+  let curKey = null;
+  try { curKey = window.sessionStorage.getItem("lbl-cur") || null; } catch (e) {}
+  function setCur(key) {
+    curKey = key;
+    try { if (key) window.sessionStorage.setItem("lbl-cur", key); else window.sessionStorage.removeItem("lbl-cur"); } catch (e) {}
+  }
+  const pendingNav = new Set();
+  function navigateTo(key) {
+    if (!key) { setCur(null); return; }
+    setCur(key);
+    if (!engaged.has(key)) { pendingNav.add(key); unvisit(key); }
+    else { pendingNav.delete(key); visit(key); }
+  }
+  /* Round J keeps its own in-memory visited set and re-serialises ALL of it on
+     every new mark, which would resurrect a pruned key on the next navigation.
+     Re-apply the prune after every click (and after gallery rebuilds) so a
+     navigated-but-not-engaged key can never stick. */
+  function reconcile() {
+    let changed = false;
+    const vis = getVisited();
+    pendingNav.forEach(k => {
+      if (engaged.has(k)) { pendingNav.delete(k); return; }
+      if (vis.has(k)) { vis.delete(k); changed = true; }
+      badge(k, false);
+    });
+    if (changed) { setVisited(vis); refreshLabsChip(); rerenderAssigns(); }
+  }
+  document.addEventListener("click", () => { reconcile(); setTimeout(reconcile, 90); }, false);
+  document.addEventListener("click", e => {
+    const t = e.target; if (!t.closest) return;
+    const mi = t.closest(".menu-item");
+    if (mi && mi.dataset.key) { navigateTo(mi.dataset.key); return; }
+    const card = t.closest(".ux-act");
+    if (card && card.dataset.key) { navigateTo(card.dataset.key); return; }
+    const bp = t.closest("[data-bbproj]");
+    if (bp) { navigateTo(bp.dataset.bbproj === "full" ? "breadboard" : "bb-" + bp.dataset.bbproj); return; }
+    if (t.closest("#sysPicker") || t.closest("#advPicker") || t.closest("#picker")) { setCur(null); return; }
+    const rg = t.closest("[data-rego]");
+    if (rg) {
+      const p = String(rg.dataset.rego).split(":");
+      if (p[0] === "labs" || p[0] === "org") navigateTo(p[1]);
+      else if (p[0] === "circ") navigateTo("circ-" + p[1]);
+      else setCur(null);
+      return;
+    }
+    if (t.closest("[data-re-concept]")) { setCur(null); return; }
+  }, false);
+  /* Round J's own visited listener runs at document CAPTURE phase, ahead of
+     the bubble-phase capture above: by the time navigateTo() prunes the
+     store, Round J's in-memory set already holds the key, and that set
+     re-serialises ALL of it into the store on every later mark — reviving
+     pruned keys (seen live: circ-gatelab back in an exported code after a
+     Start Here step-2 jump that never touched the activity). Record the
+     navigation at window capture time, ahead of Round J, and keep pruning
+     on a short interval so the store cannot stay poisoned between actions. */
+  window.addEventListener("click", e => {
+    const t = e.target; if (!t || !t.closest) return;
+    const mi = t.closest(".menu-item");
+    if (mi && mi.dataset.key) { navigateTo(mi.dataset.key); return; }
+    const card = t.closest(".ux-act");
+    if (card && card.dataset.key) { navigateTo(card.dataset.key); return; }
+    const bp = t.closest("[data-bbproj]");
+    if (bp) { navigateTo(bp.dataset.bbproj === "full" ? "breadboard" : "bb-" + bp.dataset.bbproj); return; }
+    const rg = t.closest("[data-rego]");
+    if (rg) {
+      const p = String(rg.dataset.rego).split(":");
+      if (p[0] === "labs" || p[0] === "org") navigateTo(p[1]);
+      else if (p[0] === "circ") navigateTo("circ-" + p[1]);
+    }
+  }, true);
+  setInterval(reconcile, 800);
+  function tryEngage(e) {
+    if (!curKey || engaged.has(curKey)) return;
+    const t = e.target; if (!t.closest) return;
+    if (t.closest("#uxSticky") || t.closest("#menuPanel") || t.closest(".ux-labsjump") || t.closest(".ux-nextbar")) return;
+    if (t.closest("#sysPicker") || t.closest("#advPicker") || t.closest("#picker")) return;
+    const inView = t.closest("#circuitsView") || t.closest("#advancedView") || t.closest("#systemsView") || t.closest("#conceptsView");
+    if (!inView) return;
+    /* the tools aside (share / saves / progress export) is not the activity */
+    if (t.closest("aside.side")) return;
+    /* a lab credits only from inside its own card, not a neighbouring lab */
+    if (labKeySet().has(curKey)) { const el = document.getElementById(curKey); if (!el || !el.contains(t)) return; }
+    if (!t.closest('button, input, select, textarea, a, summary, [data-toggle], [data-check]')) return;
+    engaged.add(curKey); saveEngaged();
+    pendingNav.delete(curKey);
+    visit(curKey);
+    tickSteps();
+  }
+  document.addEventListener("click", tryEngage, false);
+  document.addEventListener("pointerdown", tryEngage, false);
+
+  /* ---------- F1: Start Here — a working path, ticked on interaction ---------- */
+  function tickSteps() {
+    const done = { uxStep1: false, uxStep2: false, uxStep3: false };
+    try { done.uxStep1 = window.localStorage.getItem("lbl-demo") === "1"; } catch (e) {}
+    done.uxStep2 = engaged.has("circ-gatelab");
+    done.uxStep3 = engaged.has("oslab1");
+    Object.keys(done).forEach(id => {
+      const b = $L(id); if (!b) return;
+      let tick = b.querySelector(".ux-step-tick");
+      if (done[id] && !tick) { tick = document.createElement("span"); tick.className = "ux-step-tick"; tick.textContent = "✓ done"; b.appendChild(tick); }
+      if (!done[id] && tick) tick.remove();
+    });
+  }
+  ["uxDemoA", "uxDemoB"].forEach(id => { const b = $L(id); if (b) b.addEventListener("click", () => { try { window.localStorage.setItem("lbl-demo", "1"); } catch (e) {} tickSteps(); }); });
+  const dg = $L("uxDemoGate"); if (dg) dg.addEventListener("change", () => { try { window.localStorage.setItem("lbl-demo", "1"); } catch (e) {} tickSteps(); });
+  const s1 = $L("uxStep1");
+  if (s1) s1.addEventListener("click", () => { const d = $L("uxDemo"); if (d) { d.scrollIntoView({ behavior: "smooth", block: "center" }); d.style.outline = "2px solid var(--amber)"; setTimeout(() => d.style.outline = "", 1200); } });
+  const s2 = $L("uxStep2");
+  if (s2) s2.addEventListener("click", () => setTimeout(() => {
+    try { setTopArea("circuits"); selectCircuit("gatelab"); syncRail("circuits"); } catch (e) {}
+    navigateTo("circ-gatelab");
+    const st = $L("stageTitle"); if (st) setTimeout(() => st.scrollIntoView({ behavior: "smooth", block: "start" }), 120);
+  }, 90));
+  const s3 = $L("uxStep3");
+  if (s3) s3.addEventListener("click", () => setTimeout(() => { try { reGo("labs:oslab1"); } catch (e) {} navigateTo("oslab1"); }, 90));
+  tickSteps();
+
+  /* ---------- F3: Banker's algorithm — named on Lab L4, cross-linked ---------- */
+  (function bankerNames() {
+    const item = document.querySelector('#menuList .menu-item[data-key="oslab4"]');
+    if (item) {
+      const lbl = item.querySelector(".mi-label");
+      if (lbl && lbl.textContent.indexOf("Banker") < 0) lbl.textContent = lbl.textContent + " — Banker's algorithm";
+      item.dataset.search = ((item.dataset.search || "") + " banker banker's algorithm").trim();
+    }
+    const h2 = document.querySelector("#oslab4 .proj-head h2");
+    if (h2 && h2.textContent.indexOf("Banker") < 0) h2.textContent = h2.textContent + " — Banker's algorithm";
+    const card = $L("os-banker");
+    if (card && !card.querySelector("[data-fgs-xlink]")) {
+      const row = document.createElement("div");
+      row.className = "share-row"; row.style.marginTop = "10px";
+      row.innerHTML = '<button type="button" class="btn" data-rego="labs:oslab4" data-fgs-xlink="1">Work it as a lab: Lab L4 — Deadlock (Banker\'s algorithm) →</button>' +
+        '<span style="font-size:12.5px;color:var(--muted)">Simulator ↔ Lab L4 — this tool, with tasks and checked answers.</span>';
+      const out = $L("bankOut");
+      if (out) card.insertBefore(row, out); else card.appendChild(row);
+    }
+    try { if (window.__uxRoundJ && window.__uxRoundJ.buildGallery) window.__uxRoundJ.buildGallery(); } catch (e) {}
+  })();
+
+  /* ---------- D3: Banker's table swipe hint ---------- */
+  (function bankerHint() {
+    const tbl = $L("bankTable"); if (!tbl) return;
+    const wrap = tbl.closest(".tt-wrap"); if (!wrap || wrap.dataset.hint) return;
+    wrap.dataset.hint = "1";
+    const p = document.createElement("p");
+    p.className = "ux-swipe-hint";
+    p.textContent = "This table is wider than a phone — swipe it sideways to reach Max and Need →";
+    wrap.parentNode.insertBefore(p, wrap);
+  })();
+
+  /* ---------- D2: breadboard projects get THEIR OWN Boolean expressions ---------- */
+  (function projectBool() {
+    if (typeof renderBool !== "function" || typeof bbInProject !== "function") return;
+    const _rb = renderBool;
+    renderBool = function () {
+      _rb();
+      try {
+        if (!bbInProject()) return;
+        const P = BBH.projects[BBH.active]; if (!P || !P.def) return;
+        const body = $L("boolBody"); if (!body) return;
+        const rows = enumerateTruth(P.def);
+        let html = "";
+        P.def.outputs.forEach(outName => {
+          const a = analyseOutput(P.def, rows, outName);
+          html += '<div class="bool-out">Output ' + escL(outName) + '</div><p class="bool-words">' + a.words + "</p>";
+          if (a.parity) html += '<div class="bool-expr adv-only">' + escL(outName) + " = " + a.parity.join(" ⊕ ") + "</div>";
+          else if (a.sop) html += '<div class="bool-expr adv-only">' + escL(outName) + " = " + a.sop + " &nbsp;(minimal SOP, Quine–McCluskey on the engine's table)</div>";
+          else if (a.sopNote) html += '<div class="bool-expr adv-only">' + escL(outName) + ": " + a.sopNote + "</div>";
+        });
+        html += '<p class="bool-words" style="color:var(--muted);font-size:12.5px">Generated from this project\'s own netlist — ' + escL(P.name) + " on " + escL(P.build.join(" · ")) + ": " + escL(P.expr) + ".</p>";
+        body.innerHTML = html;
+      } catch (e) {}
+    };
+    if (typeof bbSync === "function") {
+      const _bs = bbSync;
+      bbSync = function () { _bs(); try { renderBool(); } catch (e) {} };
+    }
+    try { renderBool(); } catch (e) {}
+  })();
+
+  /* ---------- F2: live search results — typing never moves the page ---------- */
+  let searchInput = null, resultsBox = null;
+  (function liveSearch() {
+    const old = $L("uxSearch"); if (!old) return;
+    const clone = old.cloneNode(true);
+    old.replaceWith(clone);
+    searchInput = clone;
+    resultsBox = document.createElement("div");
+    resultsBox.className = "ux-results"; resultsBox.hidden = true;
+    resultsBox.setAttribute("role", "listbox"); resultsBox.setAttribute("aria-label", "Search results");
+    const sb = clone.closest(".ux-search"); if (sb) sb.appendChild(resultsBox);
+    let timer = null;
+    function hide() { resultsBox.hidden = true; }
+    function render() {
+      const q = (clone.value || "").trim().toLowerCase();
+      if (!q) { hide(); return; }
+      const cat = catalog();
+      const hits = cat.filter(a => (a.label + " " + a.group + " " + a.search).toLowerCase().indexOf(q) >= 0);
+      resultsBox.innerHTML = '<div class="ux-rcount">' + hits.length + " activit" + (hits.length === 1 ? "y" : "ies") + " match “" + escL(clone.value.trim()) + "” — tap one to go there</div>" +
+        hits.slice(0, 8).map(a => '<button type="button" class="ux-result" data-key="' + escL(a.key) + '" role="option"><span>' + escL(a.label) + "</span><small>" + escL(a.group) + "</small></button>").join("") +
+        (hits.length > 8 ? '<div class="ux-rcount">…and ' + (hits.length - 8) + " more — keep typing to narrow</div>" : "");
+      resultsBox.hidden = false;
+      resultsBox.querySelectorAll(".ux-result").forEach(b => b.addEventListener("click", () => {
+        const it = document.querySelector('#menuList .menu-item[data-key="' + (window.CSS && CSS.escape ? CSS.escape(b.dataset.key) : b.dataset.key) + '"]');
+        hide();
+        if (it) it.click();
+      }));
+    }
+    clone.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(() => { render(); updateFilterChip(); }, 110); });
+    clone.addEventListener("focus", () => { if ((clone.value || "").trim()) render(); });
+    clone.addEventListener("keydown", e => {
+      if (e.key === "Enter") { e.preventDefault(); const first = resultsBox.querySelector(".ux-result"); if (first) first.click(); }
+      if (e.key === "Escape") { hide(); const st = $L("uxSticky"); if (st) st.classList.remove("search-open"); }
+    });
+    document.addEventListener("click", e => { if (!e.target.closest || !e.target.closest(".ux-search")) hide(); });
+    const tog = document.querySelector(".ux-search-toggle");
+    if (tog) tog.addEventListener("click", () => setTimeout(() => { const i = $L("uxSearch"); if (i) i.focus(); }, 90));
+  })();
+
+  /* ---------- F6: filter state, visible and clearable ---------- */
+  let chipEl = null;
+  function updateFilterChip() {
+    if (!chipEl) return;
+    const parts = [];
+    const q = searchInput ? (searchInput.value || "").trim() : "";
+    if (q) parts.push("“" + q + "”");
+    const lb = $L("uxLabsBtn");
+    if (lb && lb.getAttribute("aria-pressed") === "true") parts.push("Labs only");
+    const lf = $L("uxLevelFacet"); if (lf && lf.value) parts.push(lf.value);
+    const tf = $L("uxTypeFacet"); if (tf && tf.value) parts.push(tf.value);
+    if (parts.length) {
+      chipEl.classList.add("on");
+      chipEl.querySelector("span").textContent = "Filtering: " + parts.join(" · ");
+    } else chipEl.classList.remove("on");
+  }
+  (function filterChip() {
+    const sticky = $L("uxSticky"); if (!sticky) return;
+    chipEl = document.createElement("div");
+    chipEl.className = "ux-filterchip"; chipEl.id = "uxFilterChip";
+    chipEl.innerHTML = "<span></span>";
+    const x = document.createElement("button");
+    x.type = "button"; x.textContent = "✕ Clear";
+    x.setAttribute("aria-label", "Clear all filters");
+    x.addEventListener("click", () => {
+      if (searchInput) { searchInput.value = ""; if (resultsBox) resultsBox.hidden = true; }
+      ["uxLevelFacet", "uxTypeFacet"].forEach(id => { const s = $L(id); if (s && s.value) { s.value = ""; s.dispatchEvent(new Event("change")); } });
+      const lb = $L("uxLabsBtn"); if (lb && lb.getAttribute("aria-pressed") === "true") lb.click();
+      try { if (window.__uxRoundJ) window.__uxRoundJ.buildGallery(); } catch (e) {}
+      updateFilterChip();
+    });
+    chipEl.appendChild(x);
+    sticky.appendChild(chipEl);
+    const lb = $L("uxLabsBtn"); if (lb) lb.addEventListener("click", () => setTimeout(updateFilterChip, 30));
+    ["uxLevelFacet", "uxTypeFacet"].forEach(id => { const s = $L(id); if (s) s.addEventListener("change", updateFilterChip); });
+    updateFilterChip();
+  })();
+
+  /* ---------- F7: rail edge affordance ---------- */
+  (function railAffordance() {
+    const rail = $L("uxRail"), sticky = $L("uxSticky");
+    if (!rail || !sticky) return;
+    const arrow = document.createElement("div");
+    arrow.className = "ux-rail-arrow"; arrow.textContent = "›"; arrow.setAttribute("aria-hidden", "true");
+    sticky.appendChild(arrow);
+    function place() {
+      const more = rail.scrollWidth - rail.clientWidth - rail.scrollLeft > 8;
+      rail.classList.toggle("ux-more", more);
+      arrow.style.display = more ? "" : "none";
+      arrow.style.top = (rail.offsetTop + rail.offsetHeight / 2 - 14) + "px";
+    }
+    rail.addEventListener("scroll", place, { passive: true });
+    window.addEventListener("resize", place);
+    setTimeout(place, 60); setTimeout(place, 600);
+  })();
+
+  /* ---------- F4: Course labs jumps ---------- */
+  (function labsJumps() {
+    const sp = $L("sysPicker");
+    if (sp && sp.parentNode && !$L("uxLabsJumpSys")) {
+      const b = document.createElement("button");
+      b.type = "button"; b.className = "ux-labsjump"; b.id = "uxLabsJumpSys"; b.textContent = "Course labs ↓";
+      b.style.margin = "8px 0 0 8px";
+      b.addEventListener("click", () => {
+        const pill = document.querySelector('#sysPicker [data-sys="labs"]'); if (pill) pill.click();
+        setCur(null);
+        setTimeout(() => { const t = $L("osTrack"); if (t) t.scrollIntoView({ behavior: "smooth", block: "start" }); }, 140);
+      });
+      sp.parentNode.insertBefore(b, sp.nextSibling);
+    }
+    const ap = $L("advPicker");
+    if (ap && ap.parentNode && !$L("uxLabsJumpAdv")) {
+      const b = document.createElement("button");
+      b.type = "button"; b.className = "ux-labsjump"; b.id = "uxLabsJumpAdv"; b.textContent = "Organization labs ↓";
+      b.style.margin = "8px 0 0 8px";
+      b.addEventListener("click", () => {
+        const pill = document.querySelector('#advPicker [data-adv="org"]'); if (pill) pill.click();
+        setCur(null);
+        setTimeout(() => { const t = $L("orgTrack"); if (t) t.scrollIntoView({ behavior: "smooth", block: "start" }); }, 140);
+      });
+      ap.parentNode.insertBefore(b, ap.nextSibling);
+    }
+    const gal = $L("uxGallery");
+    if (gal) {
+      const targets = { org: "labs:org-jump", arch: "labs:lab-arch-1", os: "labs:oslab1" };
+      const inject = () => {
+        gal.querySelectorAll(".ux-group").forEach(g => {
+          const m = g.dataset.module;
+          if (!targets[m]) return;
+          const h = g.querySelector("h3");
+          if (!h || h.querySelector(".ux-labsjump")) return;
+          const b = document.createElement("button");
+          b.type = "button"; b.className = "ux-labsjump"; b.textContent = "Course labs ↓";
+          b.addEventListener("click", () => {
+            if (m === "org") { try { reGo("org:lab-org-1"); } catch (e) {} navigateTo("lab-org-1"); }
+            else { try { reGo(targets[m]); } catch (e) {} navigateTo(m === "arch" ? "lab-arch-1" : "oslab1"); }
+          });
+          h.appendChild(b);
+        });
+      };
+      inject();
+      let deb = null;
+      new MutationObserver(() => { clearTimeout(deb); deb = setTimeout(() => { inject(); reconcile(); }, 200); }).observe(gal, { childList: true });
+    }
+  })();
+
+  /* ---------- F5: scroll-spy follows what is actually on screen ---------- */
+  (function scrollSpy() {
+    const rail = $L("uxRail"); if (!rail) return;
+    const sticky = $L("uxSticky");
+    function sysModule() {
+      const b = document.querySelector('#sysPicker [aria-pressed="true"]');
+      const v = b ? b.dataset.sys : "os";
+      return { assembly: "org", arch: "arch", os: "os", labs: "os" }[v] || "os";
+    }
+    function candidates() {
+      const out = [];
+      document.querySelectorAll("#uxGallery .ux-group").forEach(g => { if (g.dataset.module) out.push([g, g.dataset.module]); });
+      [["circuitsView", "logic"], ["advancedView", "boards"], ["systemsView", null], ["conceptsView", "concepts"]].forEach(([id, m]) => {
+        const el = $L(id); if (el) out.push([el, m]);
+      });
+      return out;
+    }
+    let ticking = false;
+    function apply() {
+      ticking = false;
+      const barH = sticky ? sticky.getBoundingClientRect().height : 120;
+      const line = barH + 24;
+      let chosen = null;
+      candidates().forEach(([el, m]) => {
+        const r = el.getBoundingClientRect();
+        if (r.height === 0) return;
+        if (r.top <= line && r.bottom > line) chosen = m || sysModule();
+      });
+      if (!chosen) return;
+      rail.querySelectorAll(".ux-chip").forEach(c => c.setAttribute("aria-current", c.dataset.module === chosen ? "true" : "false"));
+      document.querySelectorAll(".ux-modrow").forEach(r => r.setAttribute("aria-current", r.dataset.module === chosen ? "true" : "false"));
+    }
+    window.addEventListener("scroll", () => { if (!ticking) { ticking = true; requestAnimationFrame(apply); } }, { passive: true });
+  })();
+
+  window.__uxRoundL = { engaged, navigateTo, updateFilterChip };
 })();
 </script>
