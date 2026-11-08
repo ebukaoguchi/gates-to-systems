@@ -708,8 +708,7 @@ body.lvl-advanced #startHere{display:none}
 </head>
 <body>
 <div class="wrap">
-  <header class="site">
-    <div class="site-head-row">
+  <div class="site-head-row">
       <div>
         <h1>From Gates to Systems</h1>
       </div>
@@ -725,7 +724,7 @@ body.lvl-advanced #startHere{display:none}
           <span class="lt-label" id="menuLabel">Find</span>
           <button type="button" class="menu-btn" id="menuBtn" aria-haspopup="true" aria-expanded="false" aria-labelledby="menuLabel">☰ Menu</button>
           <div class="menu-panel" id="menuPanel" hidden role="menu" aria-label="Site menu">
-            <div class="menu-filter-row"><input type="text" id="menuFilter" placeholder="Find anything — try mux, cache, 555, carry…" aria-label="Filter menu items" /></div>
+            <div class="menu-filter-row"><input type="text" id="menuFilter" placeholder="Find anything — try mux, cache, 555, carry…" aria-label="Filter menu items" /><button type="button" class="menu-close-btn" id="menuCloseBtn" aria-label="Close menu">✕</button></div>
             <div class="menu-list" id="menuList"></div>
             <p class="menu-empty" id="menuEmpty" hidden>No item matches — try a shorter word.</p>
           </div>
@@ -744,7 +743,8 @@ body.lvl-advanced #startHere{display:none}
           </div>
         </div>
       </div>
-    </div>
+  </div>
+  <header class="site">
     <div class="legend" aria-hidden="true">
       <span><i class="sw one"></i> wire carries 1</span>
       <span><i class="sw"></i> wire carries 0</span>
@@ -4213,19 +4213,23 @@ function acSerial(p, text, newline) {
   while (el.textContent.split("\n").length > 60) el.textContent = el.textContent.split("\n").slice(10).join("\n");
   el.scrollTop = el.scrollHeight;
 }
+function acStepOnce(p) {
+  const now = performance.now();
+  if (p.idx >= p.steps.length) { p.steps = p.buildSteps(); p.idx = 0; if (!p.steps.length) return; }
+  const step = p.steps[p.idx++];
+  p.curLine = step.line;
+  if (step.act) step.act(p);
+  p.millis += (step.dur || 40);
+  p.waitUntil = now + (step.dur || 40) / p.speed;
+  p.render();
+}
 function acRunner(p) {
   if (p.timer) return;
   p.timer = setInterval(() => {
     if (!p.running) return;
     const now = performance.now();
     if (now < p.waitUntil) { if (p.onWait) p.onWait(p); return; }
-    if (p.idx >= p.steps.length) { p.steps = p.buildSteps(); p.idx = 0; if (!p.steps.length) return; }
-    const step = p.steps[p.idx++];
-    p.curLine = step.line;
-    if (step.act) step.act(p);
-    p.millis += (step.dur || 40);
-    p.waitUntil = now + (step.dur || 40) / p.speed;
-    p.render();
+    acStepOnce(p);
   }, 30);
 }
 function acMakeCard(cfg) {
@@ -4236,7 +4240,8 @@ function acMakeCard(cfg) {
     '<div class="proj-head"><h2>' + cfg.title + '</h2><span class="badge">' + cfg.badge + "</span></div>" +
     '<p class="what">' + cfg.intro + "</p>" +
     '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px">' +
-    '<button type="button" class="btn primary" data-ac="run">⏸ Pause</button>' +
+    '<button type="button" class="btn primary" data-ac="run">▶ Play</button>' +
+    '<button type="button" class="btn" data-ac="step">Step ▸</button>' +
     '<label class="fld">Speed <select data-ac="speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option></select></label>' +
     '<button type="button" class="btn" data-ac="reset">Reset</button>' +
     '<button type="button" class="btn" data-ac="copy">Copy sketch</button>' +
@@ -4247,7 +4252,7 @@ function acMakeCard(cfg) {
     '<p class="proj-teaches"><b>Teaches:</b> ' + cfg.teaches + '</p><p class="proj-parts"><b>You need:</b> ' + cfg.parts + "</p>";
   host.appendChild(card);
   const p = {
-    cfg, card, running: true, speed: 1, idx: 0, steps: [], waitUntil: 0, millis: 0,
+    cfg, card, running: false, speed: 1, idx: 0, steps: [], waitUntil: 0, millis: 0,
     vars: {}, pins: {}, curLine: -1, timer: null,
     codeEl: card.querySelector('[data-ac="code"]'), boardEl: card.querySelector('[data-ac="board"]'),
     serialEl: card.querySelector('[data-ac="serial"]'), statusEl: card.querySelector('[data-ac="status"]'),
@@ -4258,15 +4263,20 @@ function acMakeCard(cfg) {
     p.codeEl.querySelectorAll("div").forEach(d => d.classList.toggle("cur", +d.dataset.line === p.curLine));
     cfg.renderBoard(p);
   };
-  card.querySelector('[data-ac="run"]').addEventListener("click", e => {
+  const runBtn = card.querySelector('[data-ac="run"]');
+  runBtn.addEventListener("click", () => {
     p.running = !p.running;
-    e.target.textContent = p.running ? "⏸ Pause" : "▶ Run";
+    runBtn.textContent = p.running ? "⏸ Pause" : "▶ Play";
+  });
+  card.querySelector('[data-ac="step"]').addEventListener("click", () => {
+    if (p.running) { p.running = false; runBtn.textContent = "▶ Play"; }
+    acStepOnce(p);
   });
   card.querySelector('[data-ac="speed"]').addEventListener("change", e => p.speed = parseFloat(e.target.value));
   card.querySelector('[data-ac="reset"]').addEventListener("click", () => {
     p.idx = 0; p.steps = []; p.millis = 0; p.vars = {}; p.pins = {}; p.serialEl.textContent = ""; p.curLine = -1;
     if (cfg.reset) cfg.reset(p);
-    p.steps = p.buildSteps(); p.render();
+    p.steps = p.buildSteps(); p.curLine = p.steps.length ? p.steps[0].line : -1; p.render();
   });
   card.querySelector('[data-ac="copy"]').addEventListener("click", e => {
     const txt = cfg.code.join("\n");
@@ -4277,6 +4287,9 @@ function acMakeCard(cfg) {
   if (cfg.setup) cfg.setup(p);
   p.buildSteps = () => cfg.buildSteps(p);
   p.steps = p.buildSteps();
+  /* paused by default: parked on the first line, outputs in their
+     initial state, nothing executes until Play or Step */
+  p.curLine = p.steps.length ? p.steps[0].line : -1;
   p.render();
   acRunner(p);
   AC.push(p);
@@ -4520,13 +4533,15 @@ acMakeCard({
     p.boardEl.querySelector("[data-acsoil]").addEventListener("input", e => { p.env.moisturePct = parseFloat(e.target.value); p.render(); });
   }
 });
-/* soil-C environment physics: relay re-wets, air dries (checked twice a second) */
+/* soil-C environment physics: relay re-wets, air dries (checked twice
+   a second) — but only while the sketch is playing: paused means the
+   whole simulation, environment included, holds still */
 setInterval(() => {
   const p = AC[3];
-  if (!p || !p.env) return;
+  if (!p || !p.env || !p.running) return;
   let m = p.env.moisturePct + (p.vars.relay === 1 ? 0.55 : -0.06);
   m = Math.max(0, Math.min(50, m));
-  if (Math.abs(m - p.env.moisturePct) > 0.01) { p.env.moisturePct = m; if (p.running) p.render(); }
+  if (Math.abs(m - p.env.moisturePct) > 0.01) { p.env.moisturePct = m; p.render(); }
 }, 250);
 </script>
 
@@ -12204,10 +12219,13 @@ function menuFAddItem(afterKey, item) {
    button node is moved, never recreated, so all click handlers
    and ids survive. Group headers get plain student-facing names
    (the build-round labels were internal bookkeeping). Groups are
-   ordered most-used first; long groups start folded (header
-   click unfolds); the group holding the current location always
-   opens expanded; typing in the filter unfolds everything so
-   matches show.
+   ordered most-used first; ALL groups start folded — the menu
+   opens as parent rows only (name + count), and tapping a parent
+   expands its children accordion-style (opening one folds the
+   one that was open). The parent holding the current location
+   carries a "you are here" marker instead of opening expanded.
+   Typing in the filter unfolds everything so matches show;
+   clearing it returns to parents-only.
    ================================================================ */
 (function menuDeclutter() {
   const list = $F("menuList"); if (!list) return;
@@ -12264,36 +12282,68 @@ function menuFAddItem(afterKey, item) {
     b.header.setAttribute("role", "button");
     b.header.setAttribute("tabindex", "0");
     b.header.title = "Fold / unfold this group";
-    const toggle = () => setFold(b, b.header.dataset.folded !== "true");
+    /* accordion: opening one parent folds whichever group was open;
+       tapping the open parent folds it again */
+    const toggle = () => {
+      const opening = b.header.dataset.folded === "true";
+      fresh.forEach(o => setFold(o, true));
+      if (opening) setFold(b, false);
+    };
     b.header.addEventListener("click", toggle);
     b.header.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } });
-    /* default: every long group folded, except Circuits — the home area */
-    setFold(b, b.items.length > 8 && b.name !== "Circuits");
+    /* default: parents only — every group starts folded, so the menu
+       opens as a short list of group rows with counts, no children */
+    setFold(b, true);
   });
   function unfoldAll() { fresh.forEach(b => setFold(b, false)); }
-  function refoldLong() { fresh.forEach(b => setFold(b, b.items.length > 8 && b.name !== "Circuits")); }
+  function foldAll() { fresh.forEach(b => setFold(b, true)); }
   /* expand / fold row under the filter */
   const panel = $F("menuPanel");
   if (panel && !panel.querySelector(".menu-fold-row")) {
     const row = document.createElement("div");
     row.className = "menu-fold-row";
-    row.innerHTML = '<button type="button" id="menuExpandAll">Expand all groups</button><button type="button" id="menuFoldLong">Fold long groups</button>';
+    row.innerHTML = '<button type="button" id="menuExpandAll">Expand all groups</button><button type="button" id="menuFoldLong">Fold all groups</button>';
     const filterRow = panel.querySelector(".menu-filter-row");
     if (filterRow && filterRow.nextSibling) panel.insertBefore(row, filterRow.nextSibling); else panel.appendChild(row);
     row.querySelector("#menuExpandAll").addEventListener("click", unfoldAll);
-    row.querySelector("#menuFoldLong").addEventListener("click", refoldLong);
+    row.querySelector("#menuFoldLong").addEventListener("click", foldAll);
   }
-  /* filtering needs every match visible: unfold while a query is typed */
+  /* filtering needs every match visible: unfold while a query is typed;
+     clearing the filter returns to the parents-only state */
   const filter = $F("menuFilter");
-  if (filter) filter.addEventListener("input", () => { if (filter.value.trim()) unfoldAll(); else refoldLong(); });
-  /* on open, the group holding the current location is expanded and centred */
+  if (filter) filter.addEventListener("input", () => { if (filter.value.trim()) unfoldAll(); else foldAll(); });
+  /* ✕ close control in the panel's header row (the named exits are:
+     this ✕, tap outside the panel, tap a child, ☰ toggle, Escape) */
+  const closeBtn = $F("menuCloseBtn");
+  if (closeBtn) closeBtn.addEventListener("click", () => {
+    $F("menuPanel").hidden = true;
+    $F("menuBtn").setAttribute("aria-expanded", "false");
+    $F("menuBtn").focus();
+  });
+  /* the parent of the current location carries a "you are here" marker,
+     so the current-location highlight stays discoverable even though
+     every group starts folded */
+  function markCurrentParent() {
+    const cur = list.querySelector('[aria-current="true"]');
+    fresh.forEach(b => {
+      const mine = !!cur && b.items.indexOf(cur) >= 0;
+      b.header.classList.toggle("has-current", mine);
+      let tag = b.header.querySelector(".mi-here");
+      if (mine && !tag) { tag = document.createElement("span"); tag.className = "mi-here"; tag.textContent = "you are here"; b.header.appendChild(tag); }
+      if (!mine && tag) tag.remove();
+    });
+    return cur;
+  }
+  /* on open: parents only — fold everything, mark the current parent
+     and centre it; an active filter query keeps its unfolded matches */
   $F("menuBtn").addEventListener("click", () => {
     setTimeout(() => {
       if ($F("menuPanel").hidden) return;
-      const cur = list.querySelector('[aria-current="true"]');
-      if (!cur) return;
-      fresh.forEach(b => { if (b.items.indexOf(cur) >= 0) setFold(b, false); });
-      setTimeout(() => { if (cur.scrollIntoView) cur.scrollIntoView({ block: "nearest" }); }, 40);
+      markCurrentParent();
+      if (filter && filter.value.trim()) return;
+      foldAll();
+      const marked = list.querySelector(".menu-group.has-current");
+      if (marked) setTimeout(() => { if (marked.scrollIntoView) marked.scrollIntoView({ block: "nearest" }); }, 40);
     }, 70);
   });
   window.LAB_MENU_F = { blocks: fresh.map(b => ({ name: b.name, count: b.items.length, folded: b.header.dataset.folded === "true" })),
@@ -12301,38 +12351,63 @@ function menuFAddItem(afterKey, item) {
 })();
 </script>
 <style>
-/* ===== Phone top bar stays reachable (revised fix) =====
-   Root cause: the header sat in normal flow, so on a phone the
-   whole header — title, Level, Menu, Theme — scrolled away with
-   the page (the header is ~245px tall there because the controls
-   wrap). A first fix made the head row position:sticky through a
-   display:contents header; that held in desktop Chromium but not
-   on the phone this was reported from, where the bar still
-   scrolled off. The bar is therefore position:fixed at phone
-   widths — no sticky range or wrapper behaviour involved — and
-   the page gets a matching top offset measured from the bar
-   itself (the script after this block keeps --headbar-h equal to
-   the bar's real wrapped height). Desktop layout is untouched,
-   and no header control is removed: the small caps captions
-   beside the controls are hidden at this width only, to keep
-   the bar compact. The menu filter also gets a larger target so
-   it reads as the panel's primary control. */
+/* ===== Phone top bar stays reachable (third fix — in-flow sticky) =====
+   Root cause, final form: the header sat in normal flow, so on a
+   phone the whole header — title, Level, Menu, Theme — scrolled
+   away with the page. Making the bar position:fixed fixed that in
+   desktop Chromium, but on the phone this was reported from, the
+   JS-measured body offset that went with it let the first content
+   — the wire legend and the tops of the area cards — slide under
+   the fixed bar and stay hidden there (the owner's screenshots),
+   and in one screenshot the fixed bar was missing entirely. The
+   bar is therefore position:sticky at phone widths, which needs
+   no offset at all: it sits in the page flow, so nothing can
+   start underneath it, and then sticks to the top as the page
+   scrolls under it. Sticky only travels within its parent's box,
+   so in the markup the bar is now a direct child of .wrap — the
+   full-height page column — not of the short <header> that used
+   to contain it (that short parent is what defeated the first
+   sticky attempt). Desktop layout is untouched, and no header
+   control is removed: the small caps captions beside the controls
+   are hidden at this width only, to keep the bar compact. The
+   menu filter also gets a larger target so it reads as the
+   panel's primary control. */
 .menu-filter-row input{font-size:15px;padding:11px 12px}
+/* the bar moved out of <header>, so the styles that used to reach it
+   through header.site are restated for the bar itself */
+.site-head-row{padding-top:22px}
+header.site{padding-top:0}
+.site-head-row h1{margin:0;font-size:27px;font-weight:700;letter-spacing:-.02em}
+.site-head-row h1 .amp{color:var(--amber)}
+@media (max-width:520px){.site-head-row h1{font-size:21px}}
+/* menu exit: the filter row sits outside the scrolling list, so the
+   ✕ beside the filter is always visible without scrolling; it is a
+   full-size tap target. (Tap-outside-to-close already exists: the
+   document click handler shuts the panel on any click outside
+   .menu-control, alongside the ☰ toggle, child-tap and Escape.) */
+.menu-filter-row{display:flex;gap:8px;align-items:stretch}
+.menu-filter-row input{flex:1 1 auto;min-width:0;width:auto}
+.menu-close-btn{flex:none;width:44px;min-height:44px;border:1px solid var(--line2);background:var(--panel2);border-radius:9px;font-size:16px;font-weight:700;cursor:pointer;color:var(--ink);display:flex;align-items:center;justify-content:center}
+/* menu: the folded parent holding the current location is marked */
+.menu-group.has-current{background:var(--amber-soft);border-radius:8px}
+.menu-group .mi-here{font-weight:700;color:var(--amber);letter-spacing:.02em;text-transform:none;margin-left:8px;font-size:11px}
 @media (max-width:720px){
-  .site-head-row{position:fixed;top:0;left:0;right:0;z-index:55;background:var(--bg);
-    padding:calc(8px + env(safe-area-inset-top,0px)) 16px 8px;
+  .site-head-row{position:sticky;top:0;z-index:55;background:var(--bg);
+    margin:0 -16px;padding:calc(8px + env(safe-area-inset-top,0px)) 16px 8px;
     border-bottom:1px solid var(--line);box-shadow:var(--shadow)}
-  body{padding-top:var(--headbar-h,150px)}
   .site-head-row .lt-label{display:none}
   header.site .legend{margin-top:12px}
-  [id]{scroll-margin-top:calc(var(--headbar-h,150px) + 12px)}
+  [id]{scroll-margin-top:calc(var(--headbar-h,104px) + 12px)}
 }
 </style>
 <script>
 "use strict";
-/* Keep the phone top offset equal to the fixed bar's real height:
-   the bar wraps differently at 320px and at 430px, so a hard-coded
-   offset would either overlap content or leave a gap. */
+/* Keep --headbar-h equal to the sticky bar's real height: anchor
+   jumps use it as their scroll margin, so a jumped-to section lands
+   just below the stuck bar instead of underneath it. The bar wraps
+   differently at 320px and at 430px, so it is measured, not
+   hard-coded. It no longer offsets the page itself — the sticky bar
+   is in flow and pushes the content down by its own height. */
 (function phoneBarOffset() {
   var row = document.querySelector(".site-head-row"); if (!row) return;
   var mq = window.matchMedia("(max-width: 720px)");
