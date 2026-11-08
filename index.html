@@ -13116,10 +13116,28 @@ function drawBBProject(P, st) {
   const ledStart = Math.max(700, lastSw + 120);
   const ledStep = nOut > 1 ? Math.min(72, (884 - ledStart) / (nOut - 1)) : 0;
   const ledX = {}; P.outputs.forEach((n, i) => { ledX[n] = Math.round(ledStart + i * ledStep); colorOf(n); });
+  /* Spaced LED stage — ONLY the three single-gate Beginner builds
+     (NOT 7404, AND 7408, OR 7432): the resistor and the LED sit
+     several breadboard columns apart, every lead on the hole grid
+     (columns = 60 + i·27, the same colX grid the board is drawn on;
+     the lead row = 495, the next 25-step row below the j row), with
+     empty holes visible between them and a ring marker on the exact
+     hole each lead enters. All other projects keep the compact
+     stage below, byte for byte; the full adder has its own renderer
+     and is not routed through here at all. */
+  const BB_SPACED = (P.id === "not" || P.id === "and" || P.id === "or") && nOut === 1;
+  const SP = BB_SPACED ? {
+    resL: 60 + 17 * 27,   /* resistor left leg — column 18 */
+    resR: 60 + 21 * 27,   /* resistor right leg — column 22 */
+    anode: 60 + 26 * 27,  /* LED anode (+) — column 27 */
+    cathode: 60 + 28 * 27,/* LED cathode (−) — column 29 */
+    holeY: 495            /* lead row: 170 + 13·25, on the row grid */
+  } : null;
+  if (SP) ledX[P.outputs[0]] = (SP.anode + SP.cathode) / 2;
   /* LED stage: the output pin's wire lands on the 330 Ω resistor drawn
      beside each LED, not on the LED itself — pin → resistor → anode,
      cathode → GND rail */
-  P.outputs.forEach(n => { (sinks[n] = sinks[n] || []).push({ x: ledX[n] - 32, y: swY + 14, side: -1 }); });
+  P.outputs.forEach(n => { (sinks[n] = sinks[n] || []).push(SP ? { x: SP.resL, y: swY + 14, side: -1 } : { x: ledX[n] - 32, y: swY + 14, side: -1 }); });
 
   let s = "";
   s += '<rect class="bb-board" x="10" y="10" width="900" height="' + (H - 20) + '" rx="14"/>';
@@ -13207,6 +13225,49 @@ function drawBBProject(P, st) {
   const ledNames = ["red", "green", "blue", "yellow"];
   P.outputs.forEach((n, i) => {
     const x = ledX[n], cname = ledNames[i % 4], colr = ledColors[cname];
+    if (SP) {
+      /* --- spaced stage for NOT / AND / OR: resistor and LED several
+         columns apart, empty holes between, ring markers on the exact
+         hole each of the four leads enters --- */
+      const bodyL = SP.resL + 18, bodyR = SP.resR - 18, midX = (SP.resL + SP.resR) / 2;
+      /* empty holes along the lead row, from the resistor to past the
+         LED — the gap a student counts on a real board */
+      for (let c = 17; c <= 29; c++) s += '<circle class="bb-hole" cx="' + (60 + c * 27) + '" cy="' + SP.holeY + '" r="3.2"/>';
+      /* series lead at body height: into the resistor's left end, out
+         of its right end, then a long straight run across the empty
+         columns into the top of the anode leg (x − 6, under the LED
+         body, exactly as in the compact stage) */
+      s += '<line x1="' + SP.resL + '" y1="' + (swY + 14) + '" x2="' + bodyL + '" y2="' + (swY + 14) + '" stroke="#868e96" stroke-width="2.4"/>';
+      s += '<line x1="' + bodyR + '" y1="' + (swY + 14) + '" x2="' + (x - 6) + '" y2="' + (swY + 14) + '" stroke="#868e96" stroke-width="2.4"/>';
+      /* resistor body, centred between its two legs */
+      s += '<rect x="' + bodyL + '" y="' + (swY + 8) + '" width="' + (bodyR - bodyL) + '" height="12" rx="3" style="fill:#d9b380;stroke:#8a6d3b"/>';
+      /* the four leads, each reaching its hole: the resistor's two
+         legs drop straight down; the LED's two legs leave the body
+         together, then bend outward to their own grid holes — the
+         cathode continuing from its hole down to the GND rail */
+      s += '<line x1="' + SP.resL + '" y1="' + (swY + 14) + '" x2="' + SP.resL + '" y2="' + SP.holeY + '" stroke="#868e96" stroke-width="2.4"/>';
+      s += '<line x1="' + SP.resR + '" y1="' + (swY + 14) + '" x2="' + SP.resR + '" y2="' + SP.holeY + '" stroke="#868e96" stroke-width="2.4"/>';
+      s += '<path d="M ' + (x - 6) + ' ' + (swY + 14) + ' V ' + (swY + 30) + ' L ' + SP.anode + ' ' + SP.holeY + '" fill="none" stroke="#868e96" stroke-width="2.4"/>';
+      s += '<path d="M ' + (x + 6) + ' ' + (swY + 21) + ' V ' + (swY + 30) + ' L ' + SP.cathode + ' ' + SP.holeY + ' V ' + (H - 61) + '" fill="none" stroke="#868e96" stroke-width="2.4"/>';
+      s += '<text class="bb-txt" x="' + (SP.anode - 13) + '" y="' + (SP.holeY - 8) + '" text-anchor="middle" style="font-weight:700">+</text>';
+      s += '<text class="bb-txt" x="' + (SP.cathode + 13) + '" y="' + (SP.holeY - 8) + '" text-anchor="middle" style="font-weight:700">−</text>';
+      /* LED body centred over its two legs */
+      s += '<circle class="bb-led-off" data-bbled="' + n + '" cx="' + x + '" cy="' + (swY + 8) + '" r="13" data-color="' + colr + '"/>';
+      /* hole markers: a ring + centre dot on the exact hole each lead
+         enters — resistor left, resistor right, anode, cathode.
+         Amber ring with a panel-coloured halo so it reads in all
+         four themes without hiding the hole itself. */
+      [SP.resL, SP.resR, SP.anode, SP.cathode].forEach(hx => {
+        s += '<circle cx="' + hx + '" cy="' + SP.holeY + '" r="7.5" fill="none" stroke="var(--panel)" stroke-width="4"/>';
+        s += '<circle cx="' + hx + '" cy="' + SP.holeY + '" r="7.5" fill="none" stroke="var(--amber-wire)" stroke-width="2.2"/>';
+        s += '<circle cx="' + hx + '" cy="' + SP.holeY + '" r="2" style="fill:var(--amber-wire)"/>';
+      });
+      /* 330Ω label below the resistor body, centred on it, fully
+         clear of the body, both legs and the marker row beneath */
+      s += '<text class="bb-txt" x="' + midX + '" y="' + (SP.holeY - 5) + '" text-anchor="middle">330Ω</text>';
+      s += '<text class="bb-txt" x="' + x + '" y="' + (swY - 10) + '" text-anchor="middle" style="font-weight:700">' + n.toUpperCase() + " · " + cname + "</text>";
+      return;
+    }
     /* anode side: resistor body (fed by the output pin's wire) into the
        anode leg (left, +); cathode leg (right, −) straight to the GND rail */
     s += '<rect x="' + (x - 32) + '" y="' + (swY + 8) + '" width="24" height="12" rx="3" style="fill:#d9b380;stroke:#8a6d3b"/>';
@@ -15120,8 +15181,11 @@ renderStage = function () {
 .ux-result{display:flex;width:100%;gap:8px;align-items:baseline;text-align:left;border:0;background:transparent;border-radius:8px;padding:8px;font:inherit;font-size:13.5px;font-weight:600;color:var(--ink);cursor:pointer}
 .ux-result small{margin-left:auto;font-weight:500;color:var(--muted);font-size:11.5px;text-align:right;flex:none}
 .ux-result:hover,.ux-result:focus{background:var(--panel2)}
-/* F6: persistent filter-state chip */
-.ux-filterchip{display:none;margin-top:6px;align-items:center;gap:8px;font-size:12.5px;font-weight:600;color:var(--amber)}
+/* F6: persistent filter-state chip — raised above the live-search
+   dropdown (z-index 60, absolutely positioned over the sticky bar's
+   lower rows) so its Clear button is never covered by the dropdown
+   and every click on it lands on the button itself */
+.ux-filterchip{display:none;position:relative;z-index:75;background:var(--bg);margin-top:6px;padding:2px 0;align-items:center;gap:8px;font-size:12.5px;font-weight:600;color:var(--amber)}
 .ux-filterchip.on{display:flex}
 .ux-filterchip button{border:1px solid var(--line2);background:var(--panel);color:var(--ink);border-radius:999px;padding:2px 9px;font:inherit;font-size:12px;cursor:pointer}
 /* F7: rail edge fade + arrow while more modules sit off-screen */
@@ -15326,11 +15390,27 @@ renderStage = function () {
   document.addEventListener("pointerdown", tryEngage, false);
 
   /* ---------- F1: Start Here — a working path, ticked on interaction ---------- */
+  /* Step 3's target is Org Lab 1 (lab-org-1): its tick is the lab's
+     completion — every check passed — read from the same stored
+     progress record (lbl-progress → fgs.labs) the instructor code
+     uses, never from mere engagement with the lab. */
+  function labOrg1Done() {
+    try {
+      const p = JSON.parse(window.localStorage.getItem("lbl-progress") || "{}");
+      const rec = p && p.fgs && p.fgs.labs && p.fgs.labs["lab-org-1"];
+      if (!rec || !rec.c) return false;
+      let need = 2;
+      try { if (typeof RE_LAB_INDEX !== "undefined" && RE_LAB_INDEX["lab-org-1"] && RE_LAB_INDEX["lab-org-1"].checks) need = RE_LAB_INDEX["lab-org-1"].checks.length; } catch (e) {}
+      let n = 0;
+      Object.keys(rec.c).forEach(k => { if (rec.c[k] === true && +k < need) n++; });
+      return need > 0 && n >= need;
+    } catch (e) { return false; }
+  }
   function tickSteps() {
     const done = { uxStep1: false, uxStep2: false, uxStep3: false };
     try { done.uxStep1 = window.localStorage.getItem("lbl-demo") === "1"; } catch (e) {}
     done.uxStep2 = engaged.has("circ-gatelab");
-    done.uxStep3 = engaged.has("oslab1");
+    done.uxStep3 = labOrg1Done();
     Object.keys(done).forEach(id => {
       const b = $L(id); if (!b) return;
       let tick = b.querySelector(".ux-step-tick");
@@ -15349,7 +15429,15 @@ renderStage = function () {
     const st = $L("stageTitle"); if (st) setTimeout(() => st.scrollIntoView({ behavior: "smooth", block: "start" }), 120);
   }, 90));
   const s3 = $L("uxStep3");
-  if (s3) s3.addEventListener("click", () => setTimeout(() => { try { reGo("labs:oslab1"); } catch (e) {} navigateTo("oslab1"); }, 90));
+  if (s3) s3.addEventListener("click", () => setTimeout(() => { try { reGo("org:lab-org-1"); } catch (e) {} navigateTo("lab-org-1"); }, 90));
+  /* a lab Check click writes the stored result just after the click;
+     re-read the tick shortly after so passing the last check ticks
+     step 3 without a reload — and keep re-reading so the tick also
+     survives (and only ever reflects) the stored completion */
+  document.addEventListener("click", e => {
+    if (e.target.closest && e.target.closest("[data-check]")) { setTimeout(tickSteps, 80); setTimeout(tickSteps, 300); }
+  }, false);
+  setInterval(tickSteps, 1500);
   tickSteps();
 
   /* ---------- F3: Banker's algorithm — named on Lab L4, cross-linked ---------- */
@@ -15596,5 +15684,130 @@ renderStage = function () {
   })();
 
   window.__uxRoundL = { engaged, navigateTo, updateFilterChip };
+})();
+</script>
+<style>
+/* ROUND M — menu parents are full-height tap targets */
+#menuList .menu-group{min-height:44px;display:flex;align-items:center;box-sizing:border-box;padding-top:9px;padding-bottom:9px}
+</style>
+<script>
+"use strict";
+/* ================================================================
+   ROUND M — audit fixes, final pass (runs last, operates only on
+   the LIVE DOM so it covers every item however it was registered):
+   1) Menu = parents-only accordion. Items registered after the
+      earlier accordion passes were built never joined their fold
+      lists, so two groups leaked children on open. Here every
+      fold/unfold is recomputed from the live menu at the moment it
+      happens: on open all groups fold; a header tap folds all,
+      then unfolds only its own group; filtering unfolds to show
+      matches and clearing the filter folds back to parents-only.
+   2) Filtering chip Clear = full reset, guaranteed. The Round L
+      handler runs first; this one then re-applies the reset from
+      the live DOM (input, facets, Labs preset, gallery, chip,
+      dropdown), holds the scroll position, and returns focus to
+      the search box, so a cleared filter behaves exactly like a
+      fresh page.
+   ================================================================ */
+(function roundM() {
+  const $M = id => document.getElementById(id);
+
+  /* ---------- 1) menu: parents-only accordion on the live DOM ---------- */
+  const list = $M("menuList");
+  function liveBlocks() {
+    const blocks = []; let cur = null;
+    if (!list) return blocks;
+    Array.prototype.slice.call(list.children).forEach(el => {
+      if (el.classList.contains("menu-group")) { cur = { header: el, items: [] }; blocks.push(cur); }
+      else if (el.classList.contains("menu-item") && cur) cur.items.push(el);
+    });
+    return blocks;
+  }
+  function setFoldLive(block, folded) {
+    block.header.dataset.folded = folded ? "true" : "false";
+    block.header.setAttribute("aria-expanded", folded ? "false" : "true");
+    block.items.forEach(it => it.classList.toggle("menu-folded", folded));
+  }
+  function foldAllLive() { liveBlocks().forEach(b => setFoldLive(b, true)); }
+  function unfoldAllLive() { liveBlocks().forEach(b => setFoldLive(b, false)); }
+  if (list) {
+    foldAllLive();
+    /* header taps: capture the intended state BEFORE the earlier
+       header handlers run, then impose the live accordion state
+       just after they finish */
+    let pendingHeader = null;
+    document.addEventListener("click", e => {
+      const h = e.target.closest && e.target.closest("#menuList .menu-group");
+      if (!h) return;
+      const opening = h.dataset.folded === "true";
+      /* apply the live accordion state immediately (capture phase,
+         ahead of the header's own handlers, which then re-apply the
+         same intent to their subsets) … */
+      const applyNow = () => {
+        const blocks = liveBlocks();
+        blocks.forEach(b => setFoldLive(b, true));
+        if (opening) { const mine = blocks.find(b => b.header === h); if (mine) setFoldLive(mine, false); }
+      };
+      applyNow();
+      /* … and once more just after those handlers finish */
+      setTimeout(applyNow, 50);
+    }, true);
+    document.addEventListener("keydown", e => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      const h = e.target.closest && e.target.closest("#menuList .menu-group");
+      if (!h) return;
+      const opening = h.dataset.folded === "true";
+      setTimeout(() => {
+        const blocks = liveBlocks();
+        blocks.forEach(b => setFoldLive(b, true));
+        if (opening) { const mine = blocks.find(b => b.header === h); if (mine) setFoldLive(mine, false); }
+      }, 50);
+    }, true);
+    /* on open: parents only, unless a filter query is active.
+       The fold is applied synchronously in the capture phase —
+       before the panel is even shown — so the menu never renders
+       with children visible, not even for a frame; two timed
+       backstops re-apply it after the earlier open handlers run. */
+    document.addEventListener("click", e => {
+      if (!e.target.closest || !e.target.closest("#menuBtn")) return;
+      const panel = $M("menuPanel");
+      if (!panel || !panel.hidden) return; /* only when opening */
+      const f = $M("menuFilter");
+      if (f && f.value.trim()) unfoldAllLive(); else foldAllLive();
+    }, true);
+    const mb = $M("menuBtn");
+    if (mb) mb.addEventListener("click", () => {
+      [120, 350].forEach(t => setTimeout(() => {
+        if ($M("menuPanel") && $M("menuPanel").hidden) return;
+        const f = $M("menuFilter");
+        if (f && f.value.trim()) unfoldAllLive(); else foldAllLive();
+      }, t));
+    });
+    /* filter: matches reachable while typing, parents-only on clear */
+    const mf = $M("menuFilter");
+    if (mf) mf.addEventListener("input", () => { if (mf.value.trim()) unfoldAllLive(); else foldAllLive(); });
+    /* the Expand/Fold row acts on the live menu too */
+    const ex = $M("menuExpandAll"); if (ex) ex.addEventListener("click", unfoldAllLive);
+    const fo = $M("menuFoldLong"); if (fo) fo.addEventListener("click", foldAllLive);
+    window.__uxMenuLive = { liveBlocks, foldAllLive, unfoldAllLive };
+  }
+
+  /* ---------- 2) filtering chip: Clear performs the full reset ---------- */
+  document.addEventListener("click", e => {
+    const btn = e.target.closest && e.target.closest("#uxFilterChip button");
+    if (!btn) return;
+    const y = window.scrollY;
+    const inp = $M("uxSearch");
+    if (inp) { inp.value = ""; try { inp.dispatchEvent(new Event("input", { bubbles: true })); } catch (err) {} }
+    ["uxLevelFacet", "uxTypeFacet"].forEach(id => { const s = $M(id); if (s) s.value = ""; });
+    const lb = $M("uxLabsBtn");
+    if (lb && lb.getAttribute("aria-pressed") === "true") lb.click();
+    const rb = document.querySelector(".ux-results"); if (rb) rb.hidden = true;
+    try { if (window.__uxRoundJ && window.__uxRoundJ.buildGallery) window.__uxRoundJ.buildGallery(); } catch (err) {}
+    try { if (window.__uxRoundL && window.__uxRoundL.updateFilterChip) window.__uxRoundL.updateFilterChip(); } catch (err) {}
+    const chip = $M("uxFilterChip"); if (chip) chip.classList.remove("on");
+    [0, 60, 180, 420].forEach(t => setTimeout(() => { try { window.scrollTo(0, y); } catch (err) {} }, t));
+    setTimeout(() => { const i2 = $M("uxSearch"); if (i2) { try { i2.focus({ preventScroll: true }); } catch (err) { try { i2.focus(); } catch (err2) {} } } }, 30);
+  }, false);
 })();
 </script>
