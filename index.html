@@ -753,15 +753,6 @@ body.lvl-advanced #startHere{display:none}
     </div>
   </header>
 
-  <nav class="area-rail" aria-label="Areas">
-    <button type="button" class="area-card" data-area-card="circuits" aria-pressed="true"><b>Circuits</b><span>Gates, adders, subtractors, muxes, comparator, ALU, K-map and divider.</span></button>
-    <button type="button" class="area-card" data-area-card="breadboard" aria-pressed="false"><b>Breadboard</b><span>The full adder wired from real 7486 · 7408 · 7432 chips.</span></button>
-    <button type="button" class="area-card" data-area-card="advanced" aria-pressed="false"><b>Advanced</b><span>Hardware explorers, components, projects, modulation and bench tools.</span></button>
-    <button type="button" class="area-card" data-area-card="systems" aria-pressed="false"><b>Systems</b><span>Assembly, architecture and operating-system simulators.</span></button>
-    <button type="button" class="area-card" data-area-card="concepts" aria-pressed="false"><b>Concepts</b><span>Definitions you can touch — every term is a working visual.</span></button>
-  </nav>
-  <p class="level-note">New to circuits? Stay on Beginner. Ready for registers, timing, and specs? Switch to Advanced — same site, same circuits, more depth. Nothing is locked; the toggle only changes how much detail is on the page.</p>
-
   <div class="topnav" role="tablist" aria-label="Main areas">
     <button type="button" id="tabCircuits" class="topnav-btn" aria-pressed="true">Circuits &amp; Breadboard</button>
     <button type="button" id="tabAdvanced" class="topnav-btn" aria-pressed="false">Advanced — Hardware, Components &amp; Projects</button>
@@ -2593,9 +2584,10 @@ function drawBreadboard(st) {
   s += bbJumper("s1", "#e67700", 1, "M 204 348 V 390 H 501 V 348");
   s += bbJumper("c1", "#1098ad", 1, "M 474 348 V 406 H 690 V 348");
   s += bbJumper("c2", "#a61e4d", 2, "M 555 348 V 424 H 717 V 348");
-  /* outputs to LEDs */
-  s += bbJumper("Sum", "#e03131", 2, "M 231 348 V 438 H 782 V 452");
-  s += bbJumper("Cout", "#2f9e44", 3, "M 744 348 V 440 H 846 V 452");
+  /* outputs to LEDs — each output pin runs to the 330 Ω resistor drawn
+     beside its LED, then into the anode; the cathode goes to GND */
+  s += bbJumper("Sum", "#e03131", 2, "M 231 348 V 438 H 750 V 470");
+  s += bbJumper("Cout", "#2f9e44", 3, "M 744 348 V 440 H 814 V 470");
   /* chips */
   BB_CHIPS.forEach(c => {
     const bx = c.xs[0] - 14, bw = c.xs[6] - c.xs[0] + 28;
@@ -2624,16 +2616,21 @@ function drawBreadboard(st) {
     s += '<text class="in-name" x="' + x + '" y="492">' + name + " = " + val + "</text></g>";
   });
   s += '<text class="bb-txt" x="76" y="450">switches — click to flip</text>';
-  /* LEDs */
+  /* LEDs — anode (long leg, left) is fed from the output pin through the
+     330 Ω resistor drawn beside the LED; cathode (short leg, right) goes
+     straight down to the GND rail */
   [["Sum", 782, "#ef4444", "SUM · red"], ["Cout", 846, "#22c55e", "COUT · green"]].forEach(L => {
-    s += '<line x1="' + (L[1] - 6) + '" y1="478" x2="' + (L[1] - 6) + '" y2="539" stroke="#868e96" stroke-width="2.4"/>';
-    s += '<line x1="' + (L[1] + 6) + '" y1="478" x2="' + (L[1] + 6) + '" y2="500" stroke="#868e96" stroke-width="2.4"/>';
-    s += '<path d="M ' + (L[1] + 6) + ' 500 h 14 v 39" fill="none" stroke="#495057" stroke-width="2.2"/>';
-    s += '<text class="bb-txt" x="' + (L[1] + 22) + '" y="492">220Ω</text>';
+    s += '<line x1="' + (L[1] - 8) + '" y1="470" x2="' + (L[1] - 6) + '" y2="477" stroke="#495057" stroke-width="2.2"/>';
+    s += '<rect x="' + (L[1] - 32) + '" y="464" width="24" height="12" rx="3" style="fill:#d9b380;stroke:#8a6d3b"/>';
+    s += '<text class="bb-txt" x="' + (L[1] - 20) + '" y="458" text-anchor="middle">330Ω</text>';
+    s += '<line x1="' + (L[1] - 6) + '" y1="477" x2="' + (L[1] - 6) + '" y2="500" stroke="#868e96" stroke-width="2.4"/>';
+    s += '<line x1="' + (L[1] + 6) + '" y1="477" x2="' + (L[1] + 6) + '" y2="539" stroke="#868e96" stroke-width="2.4"/>';
+    s += '<text class="bb-txt" x="' + (L[1] - 13) + '" y="505" text-anchor="middle" style="font-weight:700">+</text>';
+    s += '<text class="bb-txt" x="' + (L[1] + 13) + '" y="505" text-anchor="middle" style="font-weight:700">−</text>';
     s += '<circle class="bb-led-off" data-bbled="' + L[0] + '" cx="' + L[1] + '" cy="464" r="13" data-color="' + L[2] + '"/>';
     s += '<text class="bb-txt" x="' + L[1] + '" y="446" text-anchor="middle" style="font-weight:700">' + L[3] + "</text>";
   });
-  s += '<text class="bb-txt" x="640" y="580">LED cathodes return to the GND rail through a 220 Ω resistor — never wire an LED straight across 5 V.</text>';
+  s += '<text class="bb-txt" x="460" y="580" text-anchor="middle">Output pin → 330 Ω resistor → LED anode (+); cathode (−) → GND rail — never wire an LED straight across 5 V.</text>';
   return { viewBox: "0 0 920 600", svg: s };
 }
 </script>
@@ -2846,8 +2843,8 @@ function updateExtraPanel() {
       '<li><b>7486</b> — quad XOR<span class="contrib">Gates 1 and 2 make s1 = A ⊕ B and Sum = s1 ⊕ Cin (pins (1,2)→3 and (5,6)→4).</span></li>' +
       '<li><b>7408</b> — quad AND<span class="contrib">Makes the two carries c1 = A·B and c2 = s1·Cin (pins (1,2)→3 and (4,5)→6).</span></li>' +
       '<li><b>7432</b> — quad OR<span class="contrib">One gate merges the carries: Cout = c1 + c2 (pins (1,2)→3).</span></li>' +
-      '<li><b>Switches ×3, LEDs ×2, 220 Ω ×2</b><span class="contrib">Switches drive A, B, Cin. Red LED = Sum, green LED = Cout, each with its own resistor to ground.</span></li></ul>' +
-      '<p class="bench-note">This is how the same full adder is wired on a real bench: pin 14 of every chip to +5 V, pin 7 to ground, inputs on switches, outputs on LEDs. The badges on the pins show the live 0/1 at each used pin.</p>' +
+      '<li><b>Switches ×3, LEDs ×2, 330 Ω ×2</b><span class="contrib">Switches drive A, B, Cin. Red LED = Sum, green LED = Cout: each output pin runs through its own 330 Ω resistor to the LED anode (+), and the LED cathode (−) goes to ground.</span></li></ul>' +
+      '<p class="bench-note">This is how the same full adder is wired on a real bench: pin 14 of every chip to +5 V, pin 7 to ground, inputs on switches, outputs through a 330 Ω resistor to each LED\'s anode (+), cathodes (−) to ground. The badges on the pins show the live 0/1 at each used pin.</p>' +
       '<div class="adv-only" style="margin-top:10px"><div class="ctrl-label">Datasheet notes (74-series TTL)</div>' +
       '<p style="font-size:12.5px;margin:4px 0">Supply Vcc = 5 V ± 0.25 V (4.75–5.25 V) on pin 14, GND pin 7. A HIGH output delivers ≥ 2.4 V; a LOW ≤ 0.4 V; inputs read HIGH from 2.0 V, LOW up to 0.8 V — the same thresholds as the modulation logic-levels panel. Typical gate delay ≈ 10 ns (74LS: ~9–15 ns).</p>' +
       '<p style="font-size:12.5px;margin:4px 0" class="mono">7486 fn: Y = A ⊕ B · 7408 fn: Y = A·B · 7432 fn: Y = A + B (per gate, all four gates in each package identical)</p></div>';
@@ -3251,7 +3248,7 @@ function setTopArea(a) {
   $("systemsView").hidden = a !== "systems";
   $("conceptsView").hidden = a !== "concepts";
   const bar = $("conceptChips");
-  const ids = AREA_CHIPS[a] || [];
+  const ids = []; /* Round J: concept chip row removed — it duplicated the Concepts module / Menu navigation */
   if (ids.length) {
     bar.hidden = false;
     /* Round D declutter: the chip row starts folded at Beginner (one toggle,
@@ -13020,7 +13017,51 @@ const BBP_PROJECTS = [
              { type: "OR", ins: ["m1a", "m1b"], out: "m1", chip: 3, gate: 3 },
              { type: "AND", ins: ["Sum", "nOP1"], out: "m2a", chip: 2, gate: 2 },
              { type: "AND", ins: ["m1", "OP1"], out: "m2b", chip: 2, gate: 3 },
-             { type: "OR", ins: ["m2a", "m2b"], out: "F", chip: 3, gate: 4 } ] }
+             { type: "OR", ins: ["m2a", "m2b"], out: "F", chip: 3, gate: 4 } ] },
+  { id: "majority", level: "beginner", name: "Majority voter", chipsLabel: "7408 + 7432 · three ANDs, two ORs",
+    what: "Three switches vote: Y is 1 when at least two of them agree on 1. Each AND spots one winning pair; the ORs take any pair's word for it.",
+    expr: "Y = A·B + A·C + B·C", words: "This is the fault-tolerant trick used in triple-redundant flight computers: one switch (or sensor) can be wrong and the majority still rules.",
+    inputs: ["A", "B", "C"], outputs: ["Y"], defaults: { A: 1, B: 0, C: 1 }, build: ["7408", "7432"],
+    gates: [ { type: "AND", ins: ["A", "B"], out: "w1", chip: 0, gate: 1 },
+             { type: "AND", ins: ["A", "C"], out: "w2", chip: 0, gate: 2 },
+             { type: "AND", ins: ["B", "C"], out: "w3", chip: 0, gate: 3 },
+             { type: "OR", ins: ["w1", "w2"], out: "w", chip: 1, gate: 1 },
+             { type: "OR", ins: ["w", "w3"], out: "Y", chip: 1, gate: 2 } ] },
+  { id: "combolock", level: "intermediate", name: "Combination lock", chipsLabel: "7404 + 7408 · code 1011",
+    what: "The lock is wired for the code 1-0-1-1: S3 and S1 and S0 must be ON and S2 must be OFF. Set the four switches to the code and the UNLOCK lamp lights — any other setting keeps it dark.",
+    expr: "UNLOCK = S3 · ¬S2 · S1 · S0", words: "A combination lock is just an AND with some inputs inverted: the wired code is the one input pattern the AND is built to recognise.",
+    inputs: ["S3", "S2", "S1", "S0"], outputs: ["UNLOCK"], defaults: { S3: 1, S2: 0, S1: 0, S0: 1 }, build: ["7404", "7408"],
+    gates: [ { type: "NOT", ins: ["S2"], out: "nS2", chip: 0, gate: 1 },
+             { type: "AND", ins: ["S3", "nS2"], out: "w1", chip: 1, gate: 1 },
+             { type: "AND", ins: ["w1", "S1"], out: "w2", chip: 1, gate: 2 },
+             { type: "AND", ins: ["w2", "S0"], out: "UNLOCK", chip: 1, gate: 3 } ] },
+  { id: "mux4", level: "advanced", name: "Multiplexer 4-to-1", chipsLabel: "7404 + 7408 ×2 + 7432 · two select lines",
+    what: "Four data inputs, one output, two select lines: S1 S0 chooses which of D0–D3 reaches Y (00 → D0, 01 → D1, 10 → D2, 11 → D3). Each input is armed by its own AND pair — the grown-up version of the 2-to-1 mux.",
+    expr: "Y = D0·¬S1·¬S0 + D1·¬S1·S0 + D2·S1·¬S0 + D3·S1·S0", words: "Exactly one AND chain is fully armed at a time, so exactly one data input can reach the OR tree — the select lines are an address, and the mux is a tiny memory read.",
+    inputs: ["D0", "D1", "D2", "D3", "S1", "S0"], outputs: ["Y"], defaults: { D0: 0, D1: 1, D2: 0, D3: 1, S1: 0, S0: 1 }, build: ["7404", "7408", "7408", "7432"],
+    gates: [ { type: "NOT", ins: ["S1"], out: "nS1", chip: 0, gate: 1 },
+             { type: "NOT", ins: ["S0"], out: "nS0", chip: 0, gate: 2 },
+             { type: "AND", ins: ["D0", "nS1"], out: "a0", chip: 1, gate: 1 },
+             { type: "AND", ins: ["a0", "nS0"], out: "w0", chip: 1, gate: 2 },
+             { type: "AND", ins: ["D1", "nS1"], out: "a1", chip: 1, gate: 3 },
+             { type: "AND", ins: ["a1", "S0"], out: "w1", chip: 1, gate: 4 },
+             { type: "AND", ins: ["D2", "S1"], out: "a2", chip: 2, gate: 1 },
+             { type: "AND", ins: ["a2", "nS0"], out: "w2", chip: 2, gate: 2 },
+             { type: "AND", ins: ["D3", "S1"], out: "a3", chip: 2, gate: 3 },
+             { type: "AND", ins: ["a3", "S0"], out: "w3", chip: 2, gate: 4 },
+             { type: "OR", ins: ["w0", "w1"], out: "o1", chip: 3, gate: 1 },
+             { type: "OR", ins: ["w2", "w3"], out: "o2", chip: 3, gate: 2 },
+             { type: "OR", ins: ["o1", "o2"], out: "Y", chip: 3, gate: 3 } ] },
+  { id: "priority", level: "advanced", name: "Priority encoder 4-to-2", chipsLabel: "7404 + 7408 + 7432 · highest input wins",
+    what: "Four request lines in, a 2-bit address out: Y1 Y0 names the highest-numbered active input (D3 beats D2 beats D1 beats D0), and V lights whenever any input is active. This is how interrupt controllers pick who goes first.",
+    expr: "Y1 = D3 + D2 · Y0 = D3 + D1·¬D2 · V = D3 + D2 + D1 + D0", words: "Priority is subtraction of the higher claims: D1 only counts toward Y0 when D2 has not already claimed the answer.",
+    inputs: ["D3", "D2", "D1", "D0"], outputs: ["Y1", "Y0", "V"], defaults: { D3: 0, D2: 1, D1: 1, D0: 0 }, build: ["7404", "7408", "7432"],
+    gates: [ { type: "NOT", ins: ["D2"], out: "nD2", chip: 0, gate: 1 },
+             { type: "AND", ins: ["D1", "nD2"], out: "w", chip: 1, gate: 1 },
+             { type: "OR", ins: ["D3", "D2"], out: "Y1", chip: 2, gate: 1 },
+             { type: "OR", ins: ["D3", "w"], out: "Y0", chip: 2, gate: 2 },
+             { type: "OR", ins: ["Y1", "D1"], out: "v1", chip: 2, gate: 3 },
+             { type: "OR", ins: ["v1", "D0"], out: "V", chip: 2, gate: 4 } ] }
 ];
 /*BBP-DATA-END*/
 const BBP_LEVELS = [
@@ -13070,7 +13111,10 @@ function drawBBProject(P, st) {
   const ledStart = Math.max(700, lastSw + 120);
   const ledStep = nOut > 1 ? Math.min(72, (884 - ledStart) / (nOut - 1)) : 0;
   const ledX = {}; P.outputs.forEach((n, i) => { ledX[n] = Math.round(ledStart + i * ledStep); colorOf(n); });
-  P.outputs.forEach(n => { (sinks[n] = sinks[n] || []).push({ x: ledX[n], y: swY - 4, side: -1 }); });
+  /* LED stage: the output pin's wire lands on the 330 Ω resistor drawn
+     beside each LED, not on the LED itself — pin → resistor → anode,
+     cathode → GND rail */
+  P.outputs.forEach(n => { (sinks[n] = sinks[n] || []).push({ x: ledX[n] - 32, y: swY + 14, side: -1 }); });
 
   let s = "";
   s += '<rect class="bb-board" x="10" y="10" width="900" height="' + (H - 20) + '" rx="14"/>';
@@ -13158,14 +13202,19 @@ function drawBBProject(P, st) {
   const ledNames = ["red", "green", "blue", "yellow"];
   P.outputs.forEach((n, i) => {
     const x = ledX[n], cname = ledNames[i % 4], colr = ledColors[cname];
-    s += '<line x1="' + (x - 6) + '" y1="' + (swY + 22) + '" x2="' + (x - 6) + '" y2="' + (H - 61) + '" stroke="#868e96" stroke-width="2.4"/>';
-    s += '<line x1="' + (x + 6) + '" y1="' + (swY + 22) + '" x2="' + (x + 6) + '" y2="' + (swY + 44) + '" stroke="#868e96" stroke-width="2.4"/>';
-    s += '<path d="M ' + (x + 6) + " " + (swY + 44) + " h 14 v " + (H - 61 - (swY + 44)) + '" fill="none" stroke="#495057" stroke-width="2.2"/>';
-    if (x + 44 < 912) s += '<text class="bb-txt" x="' + (x + 22) + '" y="' + (swY + 36) + '">220Ω</text>';
+    /* anode side: resistor body (fed by the output pin's wire) into the
+       anode leg (left, +); cathode leg (right, −) straight to the GND rail */
+    s += '<line x1="' + (x - 8) + '" y1="' + (swY + 14) + '" x2="' + (x - 6) + '" y2="' + (swY + 21) + '" stroke="#495057" stroke-width="2.2"/>';
+    s += '<rect x="' + (x - 32) + '" y="' + (swY + 8) + '" width="24" height="12" rx="3" style="fill:#d9b380;stroke:#8a6d3b"/>';
+    s += '<text class="bb-txt" x="' + (x - 20) + '" y="' + (swY + 2) + '" text-anchor="middle">330Ω</text>';
+    s += '<line x1="' + (x - 6) + '" y1="' + (swY + 21) + '" x2="' + (x - 6) + '" y2="' + (swY + 44) + '" stroke="#868e96" stroke-width="2.4"/>';
+    s += '<line x1="' + (x + 6) + '" y1="' + (swY + 21) + '" x2="' + (x + 6) + '" y2="' + (H - 61) + '" stroke="#868e96" stroke-width="2.4"/>';
+    s += '<text class="bb-txt" x="' + (x - 13) + '" y="' + (swY + 38) + '" text-anchor="middle" style="font-weight:700">+</text>';
+    s += '<text class="bb-txt" x="' + (x + 13) + '" y="' + (swY + 38) + '" text-anchor="middle" style="font-weight:700">−</text>';
     s += '<circle class="bb-led-off" data-bbled="' + n + '" cx="' + x + '" cy="' + (swY + 8) + '" r="13" data-color="' + colr + '"/>';
     s += '<text class="bb-txt" x="' + x + '" y="' + (swY - 10) + '" text-anchor="middle" style="font-weight:700">' + n.toUpperCase() + " · " + cname + "</text>";
   });
-  s += '<text class="bb-txt" x="640" y="' + (H - 20) + '">LED cathodes return to the GND rail through a 220 Ω resistor — never wire an LED straight across 5 V.</text>';
+  s += '<text class="bb-txt" x="460" y="' + (H - 20) + '" text-anchor="middle">Output pin → 330 Ω resistor → LED anode (+); cathode (−) → GND rail — never wire an LED straight across 5 V.</text>';
   return { viewBox: "0 0 920 " + H, svg: s };
 }
 function paintBBP(pulsedLevel) {
@@ -13324,8 +13373,8 @@ function bbPartsHTML(P) {
     }).join(" · ");
     html += "<li><b>" + part + "</b> — " + BBP_FN_LABEL[part].toLowerCase() + '<span class="contrib">' + contrib + ".</span></li>";
   });
-  html += "<li><b>Switches ×" + P.inputs.length + ", LEDs ×" + P.outputs.length + ", 220 Ω ×" + P.outputs.length + '</b><span class="contrib">Switches drive ' + P.inputs.join(", ") + ". One LED per output (" + P.outputs.join(", ") + "), each with its own resistor to ground.</span></li></ul>" +
-    '<p class="bench-note">Wired as on a real bench: pin 14 of every chip to +5 V, pin 7 to ground, inputs on switches, outputs on LEDs. The badges on the pins show the live 0/1 at each used pin, and the truth table beside the stage is the check — set the switches, compare lamps.</p>';
+  html += "<li><b>Switches ×" + P.inputs.length + ", LEDs ×" + P.outputs.length + ", 330 Ω ×" + P.outputs.length + '</b><span class="contrib">Switches drive ' + P.inputs.join(", ") + ". One LED per output (" + P.outputs.join(", ") + "): each output pin runs through its own 330 Ω resistor to the LED anode (+), and the LED cathode (−) goes to ground.</span></li></ul>" +
+    '<p class="bench-note">Wired as on a real bench: pin 14 of every chip to +5 V, pin 7 to ground, inputs on switches, outputs through a 330 Ω resistor to each LED\'s anode (+), cathodes (−) to ground. The badges on the pins show the live 0/1 at each used pin, and the truth table beside the stage is the check — set the switches, compare lamps.</p>';
   return html;
 }
 const _renderStageH = renderStage;
@@ -13406,5 +13455,1198 @@ renderStage = function () {
   });
   const boardsHead = document.querySelector("#module-boards .mh-count");
   if (boardsHead) { const g = groups.find(x => x.name === "Boards, Modulation & Projects"); if (g) boardsHead.textContent = g.items.length + " items"; }
+})();
+</script>
+<style>
+/* ===== Round J — UX overhaul: one bar, one path =====
+   Research brief (NN/g duplicate-links / progressive disclosure):
+   delete duplicate navigation, keep ONE system — a slim sticky bar
+   (title, search + facets, Labs preset, lens, theme, Menu) with a
+   numbered module chip rail under it — and make the page itself the
+   path: hero demo → Start Here → uniform activity gallery → views. */
+.ux-sticky{position:sticky;top:0;z-index:80;background:var(--bg);margin:0 -16px;padding:0 16px 8px;border-bottom:1px solid var(--line);box-shadow:var(--shadow)}
+.ux-sticky .site-head-row{position:static !important;padding-top:10px}
+[id]{scroll-margin-top:calc(var(--headbar-h,132px) + 10px)}
+.ux-search{display:flex;flex-wrap:wrap;gap:6px;align-items:center;flex:1 1 300px;min-width:0}
+.ux-search input[type="text"]{flex:1 1 150px;min-width:120px;min-height:44px;border:1px solid var(--line2);border-radius:9px;padding:9px 11px;font:inherit;font-size:14px;background:var(--panel);color:var(--ink)}
+.ux-search select{min-height:44px;border:1px solid var(--line2);border-radius:9px;padding:8px 6px;font:inherit;font-size:13px;background:var(--panel);color:var(--ink)}
+.ux-labs-btn{min-height:44px;border:1.5px solid var(--line2);background:var(--panel);border-radius:9px;padding:9px 13px;font-weight:700;font-size:13.5px;cursor:pointer;color:var(--ink);white-space:nowrap}
+.ux-labs-btn[aria-pressed="true"]{background:var(--amber);border-color:var(--amber);color:#fff}
+.ux-rail{display:flex;gap:8px;overflow-x:auto;padding:8px 2px 2px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.ux-rail::-webkit-scrollbar{display:none}
+.ux-chip{flex:none;display:inline-flex;align-items:center;gap:8px;min-height:48px;border:1.5px solid var(--line2);background:var(--panel);border-radius:999px;padding:8px 15px;font-weight:700;font-size:13.5px;cursor:pointer;color:var(--ink)}
+.ux-chip .ux-num{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:var(--panel2);border:1px solid var(--line2);font-size:12px;flex:none}
+.ux-chip .ux-cnt{font-weight:600;color:var(--muted);font-size:12px}
+.ux-chip[aria-current="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.ux-chip[aria-current="true"] .ux-cnt{color:inherit;opacity:.7}
+.ux-chip[aria-current="true"] .ux-num{background:var(--amber);border-color:var(--amber);color:#fff}
+.ux-progress{height:3px;background:var(--line);border-radius:2px;margin-top:6px;overflow:hidden}
+.ux-progress i{display:block;height:100%;width:0;background:var(--amber);transition:width .15s}
+/* hero */
+.ux-hero{margin-top:16px;padding:18px}
+.ux-hero h2{margin:0 0 4px;font-size:21px;letter-spacing:-.01em}
+.ux-hero .ux-promise{margin:0 0 14px;color:var(--muted);font-size:14.5px;max-width:68ch}
+.ux-hero-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px}
+@media (max-width:820px){.ux-hero-grid{grid-template-columns:minmax(0,1fr)}}
+.ux-demo{border:1px solid var(--line);border-radius:11px;padding:13px 14px;background:var(--panel2)}
+.ux-demo .ux-try{font-weight:700;font-size:13px;color:var(--amber);margin:0 0 8px}
+.ux-demo-row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.ux-lamp{width:26px;height:26px;border-radius:50%;border:2px solid var(--line2);background:var(--panel);flex:none}
+.ux-lamp.on{background:var(--amber);border-color:var(--amber);box-shadow:0 0 12px var(--amber)}
+.ux-start{border:1px solid var(--line);border-radius:11px;padding:13px 14px}
+.ux-start h3,.ux-demo h3{margin:0 0 8px;font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.ux-step{display:flex;gap:10px;align-items:flex-start;width:100%;text-align:left;border:1px solid var(--line);background:var(--panel);border-radius:10px;padding:11px 12px;margin:0 0 8px;cursor:pointer;color:var(--ink);min-height:48px}
+.ux-step b.ux-n{flex:none;width:24px;height:24px;border-radius:50%;background:var(--amber);color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:13px}
+.ux-step span{font-size:14px;line-height:1.45}
+.ux-continue{font-size:13.5px;color:var(--muted);margin:6px 0 0}
+/* module list (first screen contents) */
+.ux-modlist{margin-top:16px;padding:8px 18px 14px}
+.ux-modrow{display:flex;gap:12px;align-items:center;width:100%;text-align:left;background:transparent;border:0;border-top:1px solid var(--line);padding:12px 4px;cursor:pointer;font:inherit;color:var(--ink);min-height:48px}
+.ux-modrow:first-of-type{border-top:0}
+.ux-modrow .ux-num{flex:none;width:26px;height:26px;border-radius:50%;background:var(--amber);color:#fff;display:inline-flex;align-items:center;justify-content:center;font-weight:700;font-size:13px}
+.ux-modrow .mr-name{font-weight:700;flex:none}
+.ux-modrow .mr-blurb{color:var(--muted);font-size:13px;flex:1}
+.ux-modrow .mr-count{font-weight:700;color:var(--amber);font-size:12.5px;white-space:nowrap}
+@media (max-width:640px){.ux-modrow{flex-wrap:wrap}.ux-modrow .mr-blurb{flex-basis:100%;order:3;padding-left:38px}}
+/* gallery */
+.ux-gallery{margin-top:16px}
+.ux-ghead{display:flex;flex-wrap:wrap;gap:8px;align-items:baseline;padding:14px 16px 4px}
+.ux-ghead h2{margin:0;font-size:18px}
+.ux-ghead .ux-gcount{color:var(--muted);font-size:13px}
+.ux-group{padding:6px 16px 16px}
+.ux-group + .ux-group{border-top:1px solid var(--line)}
+.ux-group h3{margin:10px 0 4px;font-size:16px}
+.ux-group .ux-gblurb{margin:0 0 10px;color:var(--muted);font-size:13px}
+.ux-cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+@media (max-width:900px){.ux-cards{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:560px){.ux-cards{grid-template-columns:minmax(0,1fr)}}
+.ux-act{display:flex;gap:11px;align-items:flex-start;text-align:left;border:1px solid var(--line);background:var(--panel);border-radius:11px;padding:12px;cursor:pointer;color:var(--ink);min-height:48px;width:100%}
+.ux-act:hover{border-color:var(--amber)}
+.ux-act .ux-thumb{flex:none;width:44px;height:44px;border-radius:9px;background:var(--panel2);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;color:var(--amber)}
+.ux-act .ux-thumb svg{width:26px;height:26px}
+.ux-act .ux-main{flex:1;min-width:0}
+.ux-act .ux-title{display:block;font-weight:700;font-size:14px;line-height:1.35}
+.ux-act .ux-out{display:block;color:var(--muted);font-size:12.5px;line-height:1.4;margin-top:1px}
+.ux-act .ux-meta{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px}
+.ux-badge{font-size:11px;font-weight:700;border-radius:999px;padding:2px 8px;border:1px solid var(--line2);background:var(--panel2);color:var(--ink)}
+.ux-badge.lvl-beginner{background:#dcfce7;border-color:#86efac;color:#14532d}
+.ux-badge.lvl-intermediate{background:#fef3c7;border-color:#fcd34d;color:#78350f}
+.ux-badge.lvl-advanced{background:#fee2e2;border-color:#fca5a5;color:#7f1d1d}
+.ux-badge.done{background:var(--amber);border-color:var(--amber);color:#fff}
+.ux-showall{margin-top:10px;min-height:44px;border:1px solid var(--line2);background:var(--panel2);border-radius:9px;padding:9px 14px;font-weight:700;cursor:pointer;color:var(--ink)}
+.ux-gfoot{display:flex;justify-content:space-between;gap:8px;margin-top:12px}
+.ux-gfoot button{min-height:44px;border:1px solid var(--line2);background:var(--panel);border-radius:9px;padding:9px 13px;font-weight:700;cursor:pointer;color:var(--ink)}
+.ux-noresults{padding:0 16px 16px;color:var(--muted);font-size:14px}
+/* static module titles (were folding buttons) */
+.module-head.ux-static{cursor:default}
+.module-head.ux-static .mh-chev{display:none}
+/* next-module bar at the end of each view */
+.ux-nextbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;margin-top:16px;padding:13px 16px}
+.ux-nextbar button{min-height:44px;border:0;background:var(--amber);color:#fff;border-radius:9px;padding:10px 16px;font-weight:700;cursor:pointer}
+/* touch pass: every interactive target >=44px, >=8px gaps */
+.picker button,.jump-chips button,.chip{min-height:44px}
+.menu-item{min-height:44px}
+.bb-picker .bp-row button{min-height:44px}
+.seg button{min-height:44px;padding:8px 13px}
+.btn{min-height:44px}
+/* new project cards */
+.ux-proj-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:12px}
+@media (max-width:860px){.ux-proj-grid{grid-template-columns:minmax(0,1fr)}}
+.ux-proj{border:1px solid var(--line);border-radius:11px;padding:14px;background:var(--panel)}
+.ux-proj h3{margin:0 0 4px;font-size:16px}
+.ux-proj .what{margin:0 0 10px}
+.ux-proj pre.sketch{max-height:230px;overflow:auto}
+.ux-bigbtn{min-height:48px;border:1.5px solid var(--line2);background:var(--panel2);border-radius:10px;padding:10px 14px;font-weight:700;cursor:pointer;color:var(--ink)}
+.ux-bigbtn[aria-pressed="true"]{background:var(--amber);border-color:var(--amber);color:#fff}
+.ux-ledrow{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:8px 0}
+.ux-led{display:inline-flex;flex-direction:column;align-items:center;gap:3px;font-size:11px;font-weight:700;color:var(--muted)}
+.ux-led i{width:24px;height:24px;border-radius:50%;border:2px solid var(--line2);background:var(--panel);display:block}
+.ux-led.on i{background:var(--amber);border-color:var(--amber);box-shadow:0 0 10px var(--amber)}
+.ux-led.red.on i{background:var(--red);border-color:var(--red);box-shadow:0 0 10px var(--red)}
+.ux-led.green.on i{background:var(--green);border-color:var(--green);box-shadow:0 0 10px var(--green)}
+.ux-seg7{display:flex;gap:4px;justify-content:center;margin:10px 0}
+.ux-seg7 svg{width:90px;height:160px}
+.ux-note{font-size:13px;color:var(--muted);line-height:1.55}
+.ux-verdict{font-weight:700;font-size:14px;margin-top:8px}
+.ux-tt{border-collapse:collapse;font-family:var(--mono);font-size:12.5px;margin-top:8px}
+.ux-tt td,.ux-tt th{border:1px solid var(--line);padding:3px 8px;text-align:center}
+.ux-keyrow{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}
+.ux-note-btn{width:52px;height:52px;border-radius:10px;border:1.5px solid var(--line2);background:var(--panel2);font-weight:700;cursor:pointer;color:var(--ink)}
+.ux-note-btn:active{background:var(--amber);color:#fff}
+@media (prefers-color-scheme: dark){.ux-badge.lvl-beginner{background:#14532d;color:#bbf7d0}.ux-badge.lvl-intermediate{background:#78350f;color:#fde68a}.ux-badge.lvl-advanced{background:#7f1d1d;color:#fecaca}}
+</style>
+<script>
+"use strict";
+/* ================================================================
+   ROUND J — UX overhaul ("one bar, one path") + new projects.
+   Navigation systems BEFORE: (1) area cards, (2) topnav tabs,
+   (3) module index block, (4) module folding heads + banners,
+   (5) hamburger Menu, (6) per-view picker toggles / jump chips /
+   concept chips. AFTER: one sticky bar (search + facets + Labs
+   preset + lens + theme + Menu-as-index) and one numbered module
+   chip rail with scroll-spy; the page is the path. Nothing is
+   deleted except duplicate NAVIGATION — every activity stays.
+   ================================================================ */
+(function roundJ() {
+  const $J = id => document.getElementById(id);
+  const escJ = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+  const MODULES_J = [
+    { id: "logic", name: "Logic & Circuits", blurb: "Gates, adders, the build-your-own sandbox, sequential logic and the breadboard." },
+    { id: "boards", name: "Boards, Modulation & Projects", blurb: "Real boards and parts, working projects, digital modulation and bench tools." },
+    { id: "org", name: "Computer Organization", blurb: "The MIPS assembly lab — trap vs wrap-around included — and the organization labs." },
+    { id: "arch", name: "Computer Architecture", blurb: "Datapath, cache and pipeline simulators, plus the architecture labs." },
+    { id: "os", name: "Operating Systems", blurb: "Scheduling, paging, disk and deadlock simulators, the OS labs and OS in C." },
+    { id: "concepts", name: "Concepts", blurb: "Definitions you can touch — every term is a working visual." }
+  ];
+  let curModule = "logic";
+
+  /* ---------- visited set (Done state) ---------- */
+  const VKEY = "lbl-visited";
+  const visited = new Set();
+  try { (JSON.parse(window.localStorage.getItem(VKEY) || "[]")).forEach(k => visited.add(k)); } catch (e) {}
+  function markVisited(key) {
+    if (!key || visited.has(key)) return;
+    visited.add(key);
+    try { window.localStorage.setItem(VKEY, JSON.stringify(Array.from(visited))); } catch (e) {}
+    document.querySelectorAll('.ux-act[data-key="' + CSS.escape(key) + '"]').forEach(c => {
+      if (!c.querySelector(".ux-badge.done")) { const b = document.createElement("span"); b.className = "ux-badge done"; b.textContent = "Done ✓"; c.querySelector(".ux-meta").appendChild(b); }
+    });
+    updateLabsChip();
+  }
+  document.addEventListener("click", e => {
+    const mi = e.target.closest && e.target.closest(".menu-item");
+    if (mi && mi.dataset.key) markVisited(mi.dataset.key);
+  }, true);
+  const clearBtn = $J("clearDataBtn");
+  if (clearBtn) clearBtn.addEventListener("click", () => { try { window.localStorage.removeItem(VKEY); } catch (e) {} });
+
+  /* ---------- 1) remove duplicate navigation layers ---------- */
+  ["moduleIndex", "startHere"].forEach(id => { const el = $J(id); if (el) el.remove(); });
+  document.querySelectorAll(".module-banner, .jump-chips").forEach(el => el.remove());
+  const pkT = $J("pickerToggle");
+  if (pkT) { const head = pkT.closest(".picker-head"); if (head) head.remove(); const pk = $J("picker"); if (pk) pk.style.display = ""; }
+  /* module heads become plain section titles; bodies always open */
+  document.querySelectorAll(".module-head").forEach(h => {
+    const d = document.createElement("div");
+    d.className = "module-head ux-static"; d.innerHTML = h.innerHTML;
+    h.replaceWith(d);
+  });
+  document.querySelectorAll(".module-body").forEach(b => { b.hidden = false; });
+
+  /* ---------- 2) sticky bar: wrap bar + rail, add search ---------- */
+  const wrap = document.querySelector(".wrap");
+  const headRow = document.querySelector(".site-head-row");
+  const sticky = document.createElement("div"); sticky.className = "ux-sticky"; sticky.id = "uxSticky";
+  wrap.insertBefore(sticky, headRow); sticky.appendChild(headRow);
+  const controls = headRow.querySelector(".head-controls");
+  const searchBox = document.createElement("div"); searchBox.className = "ux-search";
+  searchBox.innerHTML =
+    '<input type="text" id="uxSearch" placeholder="Search all activities — try cache, latch, piano…" aria-label="Search all activities" />' +
+    '<select id="uxLevelFacet" aria-label="Filter by level"><option value="">All levels</option><option value="beginner">Beginner</option><option value="intermediate">Intermediate</option><option value="advanced">Advanced</option></select>' +
+    '<select id="uxTypeFacet" aria-label="Filter by type"><option value="">All types</option><option>Lab</option><option>Breadboard</option><option>Arduino</option><option>Project</option><option>Challenge</option><option>Sandbox</option><option>Concept</option><option>Simulator</option><option>Tool</option></select>' +
+    '<button type="button" class="ux-labs-btn" id="uxLabsBtn" aria-pressed="false">Labs</button>';
+  /* search lives on its own full-width row inside the sticky bar,
+     under the title row — the title row stays one compact line */
+  const rail = document.createElement("nav"); rail.className = "ux-rail"; rail.id = "uxRail"; rail.setAttribute("aria-label", "Modules");
+  sticky.appendChild(searchBox);
+  sticky.appendChild(rail);
+  const prog = document.createElement("div"); prog.className = "ux-progress"; prog.innerHTML = "<i id='uxProgBar'></i>";
+  sticky.appendChild(prog);
+  function measureBar() {
+    const h = sticky.getBoundingClientRect().height;
+    if (h > 0) document.documentElement.style.setProperty("--headbar-h", Math.ceil(h) + "px");
+  }
+  window.addEventListener("resize", measureBar); window.addEventListener("load", measureBar);
+  window.addEventListener("scroll", () => {
+    const doc = document.documentElement;
+    const max = doc.scrollHeight - window.innerHeight;
+    const bar = $J("uxProgBar"); if (bar) bar.style.width = (max > 0 ? Math.round(100 * window.scrollY / max) : 0) + "%";
+  }, { passive: true });
+
+  /* ---------- module routing (the one path) ---------- */
+  function goModule(id, scroll) {
+    curModule = id;
+    try {
+      if (id === "logic") { setTopArea("circuits"); syncRail("circuits"); }
+      else if (id === "boards") { setTopArea("advanced"); syncRail("advanced"); }
+      else if (id === "concepts") { setTopArea("concepts"); syncRail("concepts"); }
+      else {
+        setTopArea("systems"); syncRail("systems");
+        const v = id === "org" ? "assembly" : id === "arch" ? "arch" : "os";
+        const b = document.querySelector('#sysPicker [data-sys="' + v + '"]'); if (b) b.click();
+      }
+    } catch (e) {}
+    syncSpy();
+    if (scroll !== false) {
+      const view = id === "logic" ? $J("circuitsView") : id === "boards" ? $J("advancedView") : id === "concepts" ? $J("conceptsView") : $J("systemsView");
+      if (view) setTimeout(() => view.scrollIntoView({ behavior: "smooth", block: "start" }), 60);
+    }
+  }
+  function syncSpy() {
+    rail.querySelectorAll(".ux-chip").forEach(c => {
+      const on = c.dataset.module === curModule;
+      c.setAttribute("aria-current", on ? "true" : "false");
+      if (on && c.scrollIntoView) c.scrollIntoView({ block: "nearest", inline: "nearest" });
+    });
+    document.querySelectorAll(".ux-modrow").forEach(r => r.setAttribute("aria-current", r.dataset.module === curModule ? "true" : "false"));
+  }
+  /* keep the spy honest when the user navigates by Menu / pickers */
+  document.addEventListener("click", e => {
+    const t = e.target;
+    if (!t.closest) return;
+    const sys = t.closest('#sysPicker [data-sys]');
+    if (sys) { curModule = { assembly: "org", arch: "arch", os: "os" }[sys.dataset.sys] || curModule; syncSpy(); return; }
+    if (t.closest("#advPicker")) { curModule = "boards"; syncSpy(); return; }
+    const mi = t.closest(".menu-item");
+    if (mi) {
+      let n = mi.parentNode, g = null;
+      while (n && n.id !== "menuList") { if (n.classList && n.classList.contains("menu-group")) { g = n.dataset.group; break; } n = n.previousElementSibling || n.parentNode; }
+      /* walk backwards through siblings to find owning group header */
+      let sib = mi.previousElementSibling; g = null;
+      while (sib) { if (sib.classList.contains("menu-group")) { g = sib.dataset.group; break; } sib = sib.previousElementSibling; }
+      const m = MODULES_J.find(x => x.name === g); if (m) { curModule = m.id; syncSpy(); }
+    }
+  }, true);
+
+  /* ---------- 3) hero: promise + running gate demo + Start Here ---------- */
+  const hero = document.createElement("section"); hero.className = "card ux-hero"; hero.id = "uxHero";
+  hero.innerHTML =
+    '<h2>Learn how computers work — by flipping switches.</h2>' +
+    '<p class="ux-promise">One site, six modules, every idea hands-on: gates and breadboards first, then assembly, architecture and operating systems. Start with the demo — it is already running.</p>' +
+    '<div class="ux-hero-grid">' +
+      '<div class="ux-demo" id="uxDemo"><h3>Live demo — a logic gate</h3>' +
+        '<p class="ux-try">Try it: flip A or B and watch Y answer.</p>' +
+        '<div class="ux-demo-row"><label class="fld">Gate <select id="uxDemoGate"><option>AND</option><option>OR</option><option>XOR</option><option>NAND</option><option>NOR</option><option>NOT</option></select></label>' +
+        '<button type="button" class="ux-bigbtn" id="uxDemoA" aria-pressed="true">A = 1</button>' +
+        '<button type="button" class="ux-bigbtn" id="uxDemoB" aria-pressed="false">B = 0</button>' +
+        '<span class="ux-lamp" id="uxDemoLamp" aria-hidden="true"></span><b id="uxDemoOut">Y = 0</b></div>' +
+        '<p class="ux-note" id="uxDemoLine" style="margin:8px 0 0"></p></div>' +
+      '<div class="ux-start"><h3>Start here — your first three steps</h3>' +
+        '<button type="button" class="ux-step" id="uxStep1"><b class="ux-n">1</b><span><b>Try the demo</b> — one gate deciding, about 2 minutes.</span></button>' +
+        '<button type="button" class="ux-step" id="uxStep2"><b class="ux-n">2</b><span><b>Gate Lab</b> — Module 1, Activity 1: every gate, live.</span></button>' +
+        '<button type="button" class="ux-step" id="uxStep3"><b class="ux-n">3</b><span><b>Lab 1</b> — your first auto-checked course lab.</span></button>' +
+        '<p class="ux-continue" id="uxContinue" hidden></p></div>' +
+    '</div>';
+  sticky.after(hero);
+  const demo = { gate: "AND", A: 1, B: 0 };
+  function demoRender() {
+    const f = { AND: (a, b) => a & b, OR: (a, b) => a | b, XOR: (a, b) => a ^ b, NAND: (a, b) => (a & b) ^ 1, NOR: (a, b) => (a | b) ^ 1, NOT: a => a ^ 1 };
+    const y = demo.gate === "NOT" ? f.NOT(demo.A) : f[demo.gate](demo.A, demo.B);
+    $J("uxDemoLamp").classList.toggle("on", !!y);
+    $J("uxDemoOut").textContent = "Y = " + y;
+    $J("uxDemoA").textContent = "A = " + demo.A; $J("uxDemoA").setAttribute("aria-pressed", demo.A ? "true" : "false");
+    $J("uxDemoB").textContent = "B = " + demo.B; $J("uxDemoB").setAttribute("aria-pressed", demo.B ? "true" : "false");
+    $J("uxDemoB").style.display = demo.gate === "NOT" ? "none" : "";
+    $J("uxDemoLine").textContent = demo.gate === "NOT" ? "NOT flips its one input: A " + demo.A + " → Y " + y + "." : demo.gate + " of A " + demo.A + " and B " + demo.B + " gives Y " + y + ". Every circuit on this site is gates wired together like this — nothing is faked, the outputs are computed.";
+  }
+  $J("uxDemoGate").addEventListener("change", e => { demo.gate = e.target.value; demoRender(); });
+  $J("uxDemoA").addEventListener("click", () => { demo.A ^= 1; demoRender(); });
+  $J("uxDemoB").addEventListener("click", () => { demo.B ^= 1; demoRender(); });
+  demoRender();
+  function clickMenuItem(pred) {
+    const items = Array.prototype.slice.call(document.querySelectorAll("#menuList .menu-item"));
+    const it = items.find(pred);
+    if (it) { it.click(); return true; } return false;
+  }
+  $J("uxStep1").addEventListener("click", () => $J("uxDemo").scrollIntoView({ behavior: "smooth", block: "center" }));
+  $J("uxStep2").addEventListener("click", () => clickMenuItem(b => /gate lab/i.test(b.textContent)));
+  $J("uxStep3").addEventListener("click", () => clickMenuItem(b => /^Lab 1\b/i.test(b.querySelector(".mi-label") ? b.querySelector(".mi-label").textContent.trim() : "")) || clickMenuItem(b => /lab/i.test(b.dataset.key || "")));
+  (function continueLine() {
+    let n = visited.size;
+    try { const p = JSON.parse(window.localStorage.getItem("lbl-progress") || "{}"); if (p.circuits) n = Math.max(n, Object.keys(p.circuits).length); } catch (e) {}
+    if (n > 0) {
+      const c = $J("uxContinue"); c.hidden = false;
+      c.innerHTML = "Welcome back — you have opened <b>" + n + "</b> activit" + (n === 1 ? "y" : "ies") + " on this device. ";
+      const b = document.createElement("button"); b.type = "button"; b.className = "ux-labs-btn"; b.textContent = "Browse the activities ↓";
+      b.addEventListener("click", () => $J("uxGallery").scrollIntoView({ behavior: "smooth" }));
+      c.appendChild(b);
+    }
+  })();
+
+  /* ---------- 4) module list (first-screen contents) + rail ---------- */
+  function menuGroups() {
+    const list = $J("menuList"); const groups = []; let cur = null;
+    if (!list) return groups;
+    Array.prototype.slice.call(list.children).forEach(el => {
+      if (el.classList.contains("menu-group")) { cur = { name: (el.dataset.group || "").trim(), header: el, items: [] }; groups.push(cur); }
+      else if (el.classList.contains("menu-item") && cur) cur.items.push(el);
+    });
+    return groups;
+  }
+  const modlist = document.createElement("section"); modlist.className = "card ux-modlist"; modlist.id = "uxModList";
+  modlist.innerHTML = '<div class="ctrl-label" style="margin:8px 0 2px">The six modules — in order</div>';
+  hero.after(modlist);
+  function buildRailAndList(counts) {
+    rail.innerHTML = ""; modlist.querySelectorAll(".ux-modrow").forEach(r => r.remove());
+    MODULES_J.forEach((m, i) => {
+      const chip = document.createElement("button"); chip.type = "button"; chip.className = "ux-chip"; chip.dataset.module = m.id;
+      chip.innerHTML = '<span class="ux-num">' + (i + 1) + '</span><span>' + escJ(m.name) + '</span><span class="ux-cnt">' + (counts[m.name] || 0) + "</span>";
+      chip.addEventListener("click", () => goModule(m.id));
+      rail.appendChild(chip);
+      const row = document.createElement("button"); row.type = "button"; row.className = "ux-modrow"; row.dataset.module = m.id;
+      row.innerHTML = '<span class="ux-num">' + (i + 1) + '</span><span class="mr-name">' + escJ(m.name) + '</span><span class="mr-blurb">' + escJ(m.blurb) + '</span><span class="mr-count">' + (counts[m.name] || 0) + " activities</span>";
+      row.addEventListener("click", () => goModule(m.id));
+      modlist.appendChild(row);
+    });
+    syncSpy(); measureBar();
+  }
+
+  /* ---------- 5) uniform activity gallery ---------- */
+  const THUMBS = {
+    gate: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 5v14M4 5h6a7 7 0 0 1 0 14H4M14 9h6M14 15h6" stroke-linecap="round"/></svg>',
+    chip: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 6V3M15 6V3M9 21v-3M15 21v-3M6 9H3M6 15H3M21 9h-3M21 15h-3"/></svg>',
+    board: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8" cy="9" r="1" fill="currentColor"/><circle cx="12" cy="9" r="1" fill="currentColor"/><circle cx="16" cy="9" r="1" fill="currentColor"/><circle cx="8" cy="15" r="1" fill="currentColor"/><circle cx="16" cy="15" r="1" fill="currentColor"/></svg>',
+    lab: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 12l4 4L19 6" stroke-linecap="round" stroke-linejoin="round"/><rect x="3" y="3" width="18" height="18" rx="3"/></svg>',
+    bulb: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.7.5 1 1.2 1 2.1h5c0-.9.3-1.6 1-2.1A6 6 0 0 0 12 3z"/></svg>',
+    target: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/></svg>',
+    wave: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 12h4l2-7 4 14 2-7h6" stroke-linejoin="round"/></svg>'
+  };
+  function inferType(item) {
+    const key = item.dataset.key || "", s = (item.dataset.search || "") + " " + key;
+    const lbl = item.querySelector(".mi-label") ? item.querySelector(".mi-label").textContent : item.textContent;
+    if (/\bLab\s+L?\d+\b/.test(lbl) || /^OS in C\b/.test(lbl) || /^lab[-_]/i.test(key)) return "Lab";
+    if (key.indexOf("concept-") === 0 || key === "concepts") return "Concept";
+    if (key === "sbx-sandbox" || key === "sbx-chips") return "Sandbox";
+    if (key.indexOf("tool-") === 0 || key === "comp-resistor") return "Tool";
+    if (key.indexOf("bb-") === 0 || key === "breadboard" || key === "fault-trainer" || /breadboard/.test(s)) return "Breadboard";
+    if (/arduino/.test(s)) return "Arduino";
+    if (key.indexOf("ch-") === 0 || key === "sbx-challenges" || /challenge/.test(s)) return "Challenge";
+    if (key.indexOf("sbx-") === 0 || key.indexOf("sb-") === 0 || /sandbox/.test(s)) return "Sandbox";
+    if (/simulator|explorer|studio|stepper|datapath|cache|pipeline|scheduling|paging|translation|allocation|deadlock|oscilloscope/.test(s)) return "Simulator";
+    if (/project/.test(s)) return "Project";
+    if (/trainer|calculator|visualiser|designer|decoder/.test(s)) return "Tool";
+    return "Activity";
+  }
+  function inferLevel(item, groupName) {
+    if (item.dataset.uxlevel) return item.dataset.uxlevel;
+    const key = item.dataset.key || "";
+    if (typeof BBP_PROJECTS !== "undefined") {
+      const lbl = item.querySelector(".mi-label") ? item.querySelector(".mi-label").textContent.trim() : "";
+      const p = BBP_PROJECTS.find(x => (lbl === x.name || (lbl.indexOf(x.name) === 0 && !/[A-Za-z]/.test(lbl.charAt(x.name.length)))) && /bb-|breadboard/i.test(key + " " + (item.dataset.search || "")));
+      if (p) return p.level;
+    }
+    /* project cards in the page carry their own level badge — reuse it */
+    const host = document.getElementById(key);
+    if (host) { const b = host.querySelector(".badge"); if (b) { const bt = b.textContent.toLowerCase(); if (bt.indexOf("advanced") >= 0) return "advanced"; if (bt.indexOf("intermediate") >= 0) return "intermediate"; if (bt.indexOf("beginner") >= 0) return "beginner"; } }
+    const type = inferType(item);
+    if (type === "Concept") return "beginner";
+    if (type === "Lab") return "intermediate";
+    if (type === "Challenge" || type === "Sandbox") return "intermediate";
+    if (type === "Tool") return "beginner";
+    if (groupName === "Computer Organization" || groupName === "Computer Architecture" || groupName === "Operating Systems") return "intermediate";
+    if (/alu|divider|pipeline|cache|kmap|karnaugh|sequential|analyser|multimeter|modulation/.test((item.dataset.search || "") + " " + key)) return "intermediate";
+    return "beginner";
+  }
+  const TIME_BY_TYPE = { Lab: "≈30 min", Breadboard: "≈15 min", Arduino: "≈20 min", Project: "≈20 min", Challenge: "≈15 min", Sandbox: "≈20 min", Concept: "≈5 min", Simulator: "≈10 min", Tool: "≈10 min", Activity: "≈10 min" };
+  const THUMB_BY_TYPE = { Lab: "lab", Breadboard: "board", Arduino: "chip", Project: "chip", Challenge: "target", Sandbox: "gate", Concept: "bulb", Simulator: "wave", Tool: "wave", Activity: "gate" };
+  const gallery = document.createElement("section"); gallery.className = "card ux-gallery"; gallery.id = "uxGallery";
+  modlist.after(gallery);
+  let labsOnly = false;
+  function labTotalCount() {
+    return Array.prototype.slice.call(document.querySelectorAll("#menuList .menu-item")).filter(it => inferType(it) === "Lab").length;
+  }
+  function labDoneCount() {
+    return Array.prototype.slice.call(document.querySelectorAll("#menuList .menu-item")).filter(it => inferType(it) === "Lab" && visited.has(it.dataset.key)).length;
+  }
+  function updateLabsChip() {
+    const b = $J("uxLabsBtn"); if (!b) return;
+    b.textContent = "Labs · " + labDoneCount() + "/" + labTotalCount() + " opened";
+  }
+  function buildGallery() {
+    const groups = menuGroups();
+    const q = ($J("uxSearch").value || "").trim().toLowerCase();
+    const lf = $J("uxLevelFacet").value, tf = $J("uxTypeFacet").value;
+    const filtering = !!(q || lf || tf || labsOnly);
+    gallery.innerHTML = '<div class="ux-ghead"><h2>All activities</h2><span class="ux-gcount" id="uxGCount"></span></div>';
+    let shown = 0, total = 0;
+    groups.forEach((g, gi) => {
+      const mod = MODULES_J.find(m => m.name === g.name) || MODULES_J[gi];
+      const sec = document.createElement("div"); sec.className = "ux-group"; sec.dataset.module = mod ? mod.id : "";
+      const cards = [];
+      g.items.forEach((it, idx) => {
+        total++;
+        const type = inferType(it), level = inferLevel(it, g.name);
+        const label = it.querySelector(".mi-label") ? it.querySelector(".mi-label").textContent : it.textContent;
+        const hint = it.querySelector("small") ? it.querySelector("small").textContent : "";
+        const hay = ((label + " " + hint + " " + (it.dataset.search || "")).toLowerCase());
+        if (labsOnly && type !== "Lab") return;
+        if (tf && type !== tf) return;
+        if (lf && level !== lf) return;
+        if (q && hay.indexOf(q) < 0) return;
+        shown++;
+        const card = document.createElement("button"); card.type = "button"; card.className = "ux-act";
+        card.dataset.key = it.dataset.key || "";
+        if (!filtering && idx >= 9) card.classList.add("ux-extra"); card.hidden = !filtering && idx >= 9;
+        card.innerHTML = '<span class="ux-thumb" aria-hidden="true">' + (THUMBS[THUMB_BY_TYPE[type]] || THUMBS.gate) + '</span>' +
+          '<span class="ux-main"><span class="ux-title">' + (idx + 1) + ". " + escJ(label) + '</span>' +
+          (hint ? '<span class="ux-out">' + escJ(hint) + "</span>" : "") +
+          '<span class="ux-meta"><span class="ux-badge">' + type + "</span>" +
+          (level ? '<span class="ux-badge lvl-' + level + '">' + level[0].toUpperCase() + level.slice(1) + "</span>" : "") +
+          '<span class="ux-badge">' + (TIME_BY_TYPE[type] || "≈10 min") + "</span>" +
+          (visited.has(it.dataset.key) ? '<span class="ux-badge done">Done ✓</span>' : "") + "</span></span>";
+        card.addEventListener("click", () => { markVisited(it.dataset.key); it.click(); });
+        cards.push(card);
+      });
+      if (!cards.length) return;
+      const h = document.createElement("h3"); h.textContent = (gi + 1) + " · " + g.name; sec.appendChild(h);
+      const bl = document.createElement("p"); bl.className = "ux-gblurb"; bl.textContent = mod ? mod.blurb : ""; sec.appendChild(bl);
+      const grid = document.createElement("div"); grid.className = "ux-cards";
+      cards.forEach(c => grid.appendChild(c)); sec.appendChild(grid);
+      if (!filtering && g.items.length > 9) {
+        const sb = document.createElement("button"); sb.type = "button"; sb.className = "ux-showall";
+        sb.textContent = "Show all " + g.items.length + " in this module";
+        sb.addEventListener("click", () => {
+          const open = sb.dataset.open === "1";
+          sec.querySelectorAll(".ux-extra").forEach(c => { c.hidden = open; });
+          sb.dataset.open = open ? "" : "1";
+          sb.textContent = open ? "Show all " + g.items.length + " in this module" : "Show fewer";
+        });
+        sec.appendChild(sb);
+      }
+      const foot = document.createElement("div"); foot.className = "ux-gfoot";
+      const prev = MODULES_J[gi - 1], next = MODULES_J[gi + 1];
+      const pb = document.createElement("button"); pb.type = "button"; pb.textContent = prev ? "← " + prev.name : "← Top";
+      pb.addEventListener("click", () => prev ? goModule(prev.id) : window.scrollTo({ top: 0, behavior: "smooth" }));
+      const nb = document.createElement("button"); nb.type = "button"; nb.textContent = next ? "Next: " + next.name + " →" : "Back to top ↑";
+      nb.addEventListener("click", () => next ? goModule(next.id) : window.scrollTo({ top: 0, behavior: "smooth" }));
+      foot.appendChild(pb); foot.appendChild(nb); sec.appendChild(foot);
+      gallery.appendChild(sec);
+    });
+    if (!shown) { const p = document.createElement("p"); p.className = "ux-noresults"; p.textContent = "No activity matches — try a shorter word, or clear the filters."; gallery.appendChild(p); }
+    const gc = $J("uxGCount"); if (gc) gc.textContent = filtering ? shown + " of " + total + " shown" : total + " activities · numbered in the order to do them";
+    updateLabsChip();
+  }
+  let searchTimer = null;
+  function onFilterInput(scroll) {
+    buildGallery();
+    if (scroll) $J("uxGallery").scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+  $J("uxSearch").addEventListener("input", () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => onFilterInput(false), 160); });
+  $J("uxSearch").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); onFilterInput(true); } });
+  $J("uxLevelFacet").addEventListener("change", () => onFilterInput(true));
+  $J("uxTypeFacet").addEventListener("change", () => onFilterInput(true));
+  $J("uxLabsBtn").addEventListener("click", () => {
+    labsOnly = !labsOnly;
+    $J("uxLabsBtn").setAttribute("aria-pressed", labsOnly ? "true" : "false");
+    onFilterInput(true);
+  });
+
+  /* ---------- next-module bars at the end of each view ---------- */
+  [["circuitsView", "boards"], ["advancedView", "org"], ["systemsView", "concepts"], ["conceptsView", "logic"]].forEach(([vid, nid]) => {
+    const v = $J(vid); if (!v) return;
+    const m = MODULES_J.find(x => x.id === nid);
+    const bar = document.createElement("div"); bar.className = "card ux-nextbar";
+    bar.innerHTML = "<span><b>Finished here?</b> Keep going in path order.</span>";
+    const b = document.createElement("button"); b.type = "button";
+    b.textContent = nid === "logic" ? "Back to Module 1 · Logic & Circuits ↑" : "Next module: " + m.name + " →";
+    b.addEventListener("click", () => goModule(nid));
+    bar.appendChild(b); v.appendChild(bar);
+  });
+
+  window.__uxRoundJ = { buildGallery, buildRailAndList, menuGroups, goModule, markVisited, MODULES_J };
+})();
+</script>
+<script>
+"use strict";
+/* ================================================================
+   ROUND J (2) — new projects, original implementations.
+   Breadboard builds: SR latch (NOR), 555 astable blinker,
+   DIP-switch BCD → 7-segment (7447), traffic-light sequencer —
+   plus 4 combinational builds added to BBP_PROJECTS data above
+   (majority voter, combination lock, 4-to-1 mux, priority
+   encoder), which the breadboard engine renders and checks.
+   Arduino-style: Simon Says, mini piano, pedestrian crossing,
+   ultrasonic parking sensor — all paused by default.
+   Sandbox challenges: NAND-only XOR, black-box gate, broken-
+   circuit debug, mod-N counter. Every logic claim below is
+   verified by an exhaustive self-test at the end of this script.
+   ================================================================ */
+(function roundJ2() {
+  const $J = id => document.getElementById(id);
+  const escJ = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+  const led = (label, cls) => '<span class="ux-led ' + (cls || "") + '" data-led="' + label + '"><i></i>' + label + "</span>";
+  function setLed(root, label, on) { const el = root.querySelector('[data-led="' + label + '"]'); if (el) el.classList.toggle("on", !!on); }
+  function projCard(id, badge, title, what, inner, teaches) {
+    return '<article class="ux-proj" id="' + id + '"><div class="proj-head"><h3>' + escJ(title) + '</h3><span class="badge">' + badge + '</span></div>' +
+      '<p class="what">' + what + '</p>' + inner +
+      (teaches ? '<p class="proj-teaches"><b>Teaches:</b> ' + teaches + "</p>" : "") + "</article>";
+  }
+
+  /* ================= breadboard builds (circuits view) ================= */
+  const bbSec = document.createElement("section");
+  bbSec.className = "card stage-card"; bbSec.id = "uxBbSection"; bbSec.style.marginTop = "16px";
+  bbSec.innerHTML = "<h2>More breadboard builds — sequential, timing & display</h2>" +
+    "<p class='what'>Four more bench builds that the gate engine cannot draw as one flat netlist, each simulated honestly on its own: a latch that remembers, a 555 that clocks, a decoder that displays, and a sequencer that runs traffic lights. The flat-netlist builds (majority voter, combination lock, 4-to-1 mux, priority encoder) live in the Breadboard project picker above, checked by the engine's truth tables.</p>" +
+    '<div class="ux-proj-grid">' +
+    projCard("ux-latch", "Intermediate · breadboard", "SR latch from NOR gates",
+      "Two cross-coupled NOR gates (each built as OR + NOT, the kit's way) remember a button press. Press SET and Q lights and stays lit after you let go; press RESET to clear it. Pressing both is the forbidden state — both outputs drop to 0, exactly as on a real bench.",
+      '<div class="ux-keyrow"><button type="button" class="ux-bigbtn" id="uxLatchS">Press SET (S)</button><button type="button" class="ux-bigbtn" id="uxLatchR">Press RESET (R)</button><button type="button" class="ux-bigbtn" id="uxLatchBoth">Press both</button></div>' +
+      '<div class="ux-ledrow">' + led("Q", "green") + led("Q̄", "red") + '</div><div class="ux-verdict" id="uxLatchOut"></div>' +
+      '<p class="ux-note">State table: S=1,R=0 → Q=1 · S=0,R=1 → Q=0 · S=0,R=0 → Q holds · S=1,R=1 → Q=Q̄=0 (invalid). Memory from two gates and feedback — no clock anywhere.</p>',
+      "feedback, bistables, why computers can remember one bit.") +
+    projCard("ux-555", "Beginner · breadboard", "555 astable blinker",
+      "The 555 as a free-running clock: two resistors and one capacitor set how fast the LED blinks. f = 1.44 / ((R1 + 2·R2) · C) and the duty cycle is (R1 + R2) / (R1 + 2·R2) — it can never quite reach 50%. Press Play to run it; it starts paused.",
+      '<label class="fld">R1 <span id="ux555R1V"></span><input type="range" id="ux555R1" min="1" max="100" value="10" step="1" style="width:100%" /></label>' +
+      '<label class="fld">R2 <span id="ux555R2V"></span><input type="range" id="ux555R2" min="1" max="100" value="10" step="1" style="width:100%" /></label>' +
+      '<label class="fld">C <span id="ux555CV"></span><input type="range" id="ux555C" min="1" max="100" value="10" step="1" style="width:100%" /></label>' +
+      '<div class="ux-keyrow"><button type="button" class="btn primary" id="ux555Play">Play</button></div>' +
+      '<div class="ux-ledrow">' + led("OUT", "") + '</div><div class="decimal-line" id="ux555Out"></div>',
+      "astable timing, RC charging, frequency vs duty cycle.") +
+    projCard("ux-bcd", "Intermediate · breadboard", "DIP-switch BCD to 7-segment (7447)",
+      "Dial a digit in binary on four switches; a 7447-style decoder lights the segments of the display. Values 10–15 are not BCD digits — a real 7447 blanks the display for them, and so does this one.",
+      '<div class="ux-keyrow" id="uxBcdSw"></div><div class="ux-seg7" id="uxBcdDisp"></div><div class="decimal-line" id="uxBcdOut"></div>',
+      "BCD encoding, decoder chips, segment maps.") +
+    projCard("ux-traffic2", "Advanced · breadboard", "Traffic-light sequencer",
+      "A 2-bit counter plus decode logic walks the lamps through Red → Red+Amber → Green → Amber and back — the sequence real UK-style lights use. Step it by hand, or press Play (it starts paused).",
+      '<div class="ux-keyrow"><button type="button" class="btn" id="uxTrafStep">Step ▸</button><button type="button" class="btn primary" id="uxTrafPlay">Play</button><button type="button" class="btn" id="uxTrafReset">Reset</button></div>' +
+      '<div class="ux-ledrow">' + led("RED", "red") + led("AMBER", "") + led("GREEN", "green") + '</div><div class="decimal-line" id="uxTrafOut"></div>',
+      "counters as sequencers, decode logic, state machines in hardware.") +
+    "</div>";
+  const cv = $J("circuitsView"); if (cv) cv.appendChild(bbSec);
+
+  /* SR latch */
+  const latch = { Q: 0 };
+  function latchRender(msg) {
+    setLed(bbSec, "Q", latch.Q); setLed(bbSec, "Q̄", latch.Q ^ 1);
+    $J("uxLatchOut").textContent = msg;
+  }
+  $J("uxLatchS").addEventListener("click", () => { latch.Q = 1; latchRender("SET pressed: Q = 1 — and it stays 1 when you let go. That staying is the memory."); });
+  $J("uxLatchR").addEventListener("click", () => { latch.Q = 0; latchRender("RESET pressed: Q = 0, held by the same feedback."); });
+  $J("uxLatchBoth").addEventListener("click", () => {
+    setLed(bbSec, "Q", 0); setLed(bbSec, "Q̄", 0);
+    $J("uxLatchOut").textContent = "Both pressed: Q = Q̄ = 0 — the invalid state. Release SET first and the latch lands wherever RESET leaves it; on a real bench this is how glitches are born. Press SET or RESET to recover.";
+  });
+  latchRender("Q starts at 0. Press SET.");
+
+  /* 555 astable */
+  const t555 = { timer: null, on: false };
+  function calc555() {
+    const R1 = +$J("ux555R1").value * 1000, R2 = +$J("ux555R2").value * 1000, C = +$J("ux555C").value * 1e-6;
+    const f = 1.44 / ((R1 + 2 * R2) * C), duty = (R1 + R2) / (R1 + 2 * R2);
+    $J("ux555R1V").textContent = "= " + (R1 / 1000) + " kΩ"; $J("ux555R2V").textContent = "= " + (R2 / 1000) + " kΩ"; $J("ux555CV").textContent = "= " + (C * 1e6) + " µF";
+    $J("ux555Out").textContent = "f = 1.44 / ((" + (R1 / 1000) + "k + 2×" + (R2 / 1000) + "k) × " + (C * 1e6) + "µ) = " + (f >= 10 ? f.toFixed(1) : f.toFixed(2)) + " Hz · duty " + Math.round(duty * 100) + "% high. The on-screen blink is slowed to a watchable rate; the numbers are the real ones.";
+    return f;
+  }
+  function stop555() { if (t555.timer) clearInterval(t555.timer); t555.timer = null; $J("ux555Play").textContent = "Play"; }
+  $J("ux555Play").addEventListener("click", () => {
+    if (t555.timer) { stop555(); return; }
+    $J("ux555Play").textContent = "Pause";
+    t555.timer = setInterval(() => { t555.on = !t555.on; setLed(bbSec, "OUT", t555.on); }, 420);
+  });
+  ["ux555R1", "ux555R2", "ux555C"].forEach(id => $J(id).addEventListener("input", calc555));
+  calc555();
+
+  /* BCD → 7-segment. Segment order a,b,c,d,e,f,g — the 7447 truth table. */
+  const SEG7 = { 0: [1,1,1,1,1,1,0], 1: [0,1,1,0,0,0,0], 2: [1,1,0,1,1,0,1], 3: [1,1,1,1,0,0,1], 4: [0,1,1,0,0,1,1], 5: [1,0,1,1,0,1,1], 6: [1,0,1,1,1,1,1], 7: [1,1,1,0,0,0,0], 8: [1,1,1,1,1,1,1], 9: [1,1,1,1,0,1,1] };
+  const bcd = { v: 5 };
+  (function bcdInit() {
+    const sw = $J("uxBcdSw");
+    [8, 4, 2, 1].forEach(bit => {
+      const b = document.createElement("button"); b.type = "button"; b.className = "ux-bigbtn"; b.dataset.bit = bit;
+      b.addEventListener("click", () => { bcd.v ^= bit; bcdRender(); });
+      sw.appendChild(b);
+    });
+    const segRects = [[30,4,30,8],[62,14,8,26],[62,52,8,26],[30,88,30,8],[20,52,8,26],[20,14,8,26],[30,46,30,8]];
+    $J("uxBcdDisp").innerHTML = '<svg viewBox="0 0 90 100" role="img" aria-label="Seven-segment display">' + segRects.map((r, i) => '<rect data-seg="' + i + '" x="' + r[0] + '" y="' + r[1] + '" width="' + r[2] + '" height="' + r[3] + '" rx="3"/>').join("") + "</svg>";
+  })();
+  function bcdRender() {
+    $J("uxBcdSw").querySelectorAll("button").forEach(b => {
+      const bit = +b.dataset.bit, on = (bcd.v & bit) !== 0;
+      b.textContent = bit + " = " + (on ? 1 : 0); b.setAttribute("aria-pressed", on ? "true" : "false");
+    });
+    const segs = SEG7[bcd.v] || [0,0,0,0,0,0,0];
+    $J("uxBcdDisp").querySelectorAll("[data-seg]").forEach(r => {
+      const on = segs[+r.dataset.seg];
+      r.setAttribute("style", "fill:" + (on ? "var(--red)" : "var(--line)") + (on ? ";filter:drop-shadow(0 0 4px var(--red))" : ""));
+    });
+    $J("uxBcdOut").textContent = bcd.v <= 9 ? "Switches read " + ((bcd.v & 8) ? 1 : 0) + ((bcd.v & 4) ? 1 : 0) + ((bcd.v & 2) ? 1 : 0) + ((bcd.v & 1) ? 1 : 0) + " binary = " + bcd.v + " — the decoder lights the segments for " + bcd.v + "." : "Switches read " + bcd.v + " — not a BCD digit (10–15), so the 7447 blanks the display.";
+  }
+  bcdRender();
+
+  /* traffic sequencer: phases decoded from a 2-bit count */
+  const PHASES = [ { n: "Red", r: 1, a: 0, g: 0 }, { n: "Red + Amber — get ready", r: 1, a: 1, g: 0 }, { n: "Green — go", r: 0, a: 0, g: 1 }, { n: "Amber — stop unless you cannot", r: 0, a: 1, g: 0 } ];
+  const traf = { i: 0, timer: null };
+  function trafRender() {
+    const p = PHASES[traf.i];
+    setLed(bbSec, "RED", p.r); setLed(bbSec, "AMBER", p.a); setLed(bbSec, "GREEN", p.g);
+    $J("uxTrafOut").textContent = "Counter = " + traf.i.toString(2).padStart(2, "0") + " → phase: " + p.n + ".";
+  }
+  function trafStop() { if (traf.timer) clearInterval(traf.timer); traf.timer = null; $J("uxTrafPlay").textContent = "Play"; }
+  $J("uxTrafStep").addEventListener("click", () => { trafStop(); traf.i = (traf.i + 1) % 4; trafRender(); });
+  $J("uxTrafReset").addEventListener("click", () => { trafStop(); traf.i = 0; trafRender(); });
+  $J("uxTrafPlay").addEventListener("click", () => {
+    if (traf.timer) { trafStop(); return; }
+    $J("uxTrafPlay").textContent = "Pause";
+    traf.timer = setInterval(() => { traf.i = (traf.i + 1) % 4; trafRender(); }, 1100);
+  });
+  trafRender();
+
+  /* ================= Arduino-style projects (advanced view) ================= */
+  const ardHost = document.createElement("div"); ardHost.id = "uxArduino";
+  ardHost.innerHTML = '<h2 class="adv-subhead">More Arduino-style projects — simulated</h2>' +
+    '<p class="what" style="margin-bottom:14px">Four more simulated projects in the same spirit as the Arduino C set: the sketch logic runs the board, and every one loads <b>paused</b> — nothing moves until you press Play.</p>' +
+    '<div class="ux-proj-grid">' +
+    projCard("ux-simon", "Beginner · Arduino", "Simon Says game",
+      "The board plays a growing sequence of lights; repeat it back on the buttons. One wrong press ends the game. Press Play to start — the board is paused until then.",
+      '<pre class="sketch">void loop() {\n  playSequence();        // flash seq[0..len)\n  if (!readPlayer()) { gameOver(); len = 0; }\n  seq[len++] = random(4); delay(600);\n}</pre>' +
+      '<div class="ux-keyrow"><button type="button" class="btn primary" id="uxSimonPlay">Play</button></div>' +
+      '<div class="ux-ledrow">' + led("R", "red") + led("G", "green") + led("Y", "") + led("B", "") + '</div>' +
+      '<div class="ux-keyrow" id="uxSimonBtns"></div><div class="ux-verdict" id="uxSimonOut">Paused. Press Play and watch the sequence.</div>',
+      "arrays as memory, random sequences, input timing.") +
+    projCard("ux-piano", "Beginner · Arduino", "Mini piano",
+      "Eight buttons, eight notes — one octave of C major. Tap a note to hear it (sound comes from your device, started by your tap). The octave switch doubles every frequency, exactly like the sketch's multiplier.",
+      '<pre class="sketch">int notes[] = {262,294,330,349,392,440,494,523};\n// button i pressed → tone(BUZZER, notes[i] * oct);</pre>' +
+      '<div class="ux-keyrow" id="uxPianoKeys"></div>' +
+      '<div class="ux-keyrow"><button type="button" class="ux-bigbtn" id="uxPianoOct" aria-pressed="false">Octave ×1</button></div>' +
+      '<div class="ux-verdict" id="uxPianoOut">Tap a note.</div>',
+      "frequency and pitch, arrays of constants, tone().") +
+    projCard("ux-pedxing", "Intermediate · Arduino", "Pedestrian crossing",
+      "Cars get a green light until a pedestrian presses the request button. The controller finishes the car phase safely — green, amber, red — then WALK shows with a countdown. Press Play to run the junction; it starts paused.",
+      '<pre class="sketch">if (digitalRead(WALK_BTN)) request = true;\n// FSM: CAR_GREEN → CAR_AMBER → WALK(5..0) → CAR_GREEN</pre>' +
+      '<div class="ux-keyrow"><button type="button" class="btn primary" id="uxPedPlay">Play</button><button type="button" class="btn" id="uxPedStep">Step ▸</button><button type="button" class="ux-bigbtn" id="uxPedBtn">🚶 Request crossing</button></div>' +
+      '<div class="ux-ledrow">' + led("CAR R", "red") + led("CAR A", "") + led("CAR G", "green") + led("WALK", "green") + led("WAIT", "") + '</div><div class="decimal-line" id="uxPedOut"></div>',
+      "finite-state machines, safe sequencing, latched requests.") +
+    projCard("ux-sonar", "Intermediate · Arduino", "Ultrasonic parking sensor",
+      "An HC-SR04 measures the gap; the closer the wall, the faster the beeping and the fuller the LED bar. Echo time is distance × 58 µs/cm — the number the sketch actually times. Move the wall, then press Play; it starts paused.",
+      '<pre class="sketch">long us = pulseIn(ECHO, HIGH);\nint cm = us / 58;              // datasheet conversion\nbeepRate = map(cm, 5, 200, 80, 1200);</pre>' +
+      '<label class="fld">Distance to wall <span id="uxSonarV"></span><input type="range" id="uxSonarD" min="2" max="200" value="120" step="1" style="width:100%" /></label>' +
+      '<div class="ux-keyrow"><button type="button" class="btn primary" id="uxSonarPlay">Play</button></div>' +
+      '<div class="ux-ledrow" id="uxSonarBar"></div><div class="decimal-line" id="uxSonarOut"></div>',
+      "pulse timing, sensor conversion, mapping ranges.") +
+    "</div>";
+  const advProj = $J("advProjects"); if (advProj) advProj.appendChild(ardHost);
+
+  /* Simon */
+  const simon = { seq: [], pos: 0, accepting: false, timer: null, score: 0 };
+  const SIMON_LEDS = ["R", "G", "Y", "B"];
+  const sBtns = $J("uxSimonBtns");
+  SIMON_LEDS.forEach((L, i) => {
+    const b = document.createElement("button"); b.type = "button"; b.className = "ux-note-btn"; b.textContent = L;
+    b.addEventListener("click", () => simonPress(i));
+    sBtns.appendChild(b);
+  });
+  function simonFlash(i, ms) {
+    setLed(ardHost, SIMON_LEDS[i], 1);
+    setTimeout(() => setLed(ardHost, SIMON_LEDS[i], 0), ms || 320);
+  }
+  function simonPlaySeq(done) {
+    simon.accepting = false; let i = 0;
+    $J("uxSimonOut").textContent = "Watch…";
+    const iv = setInterval(() => {
+      if (i >= simon.seq.length) { clearInterval(iv); simon.accepting = true; simon.pos = 0; $J("uxSimonOut").textContent = "Your turn — repeat " + simon.seq.length + " light" + (simon.seq.length > 1 ? "s" : "") + "."; if (done) done(); return; }
+      simonFlash(simon.seq[i], 330); i++;
+    }, 480);
+  }
+  function simonPress(i) {
+    if (!simon.accepting) return;
+    simonFlash(i, 200);
+    if (i !== simon.seq[simon.pos]) {
+      simon.accepting = false;
+      $J("uxSimonOut").textContent = "Wrong light — game over. Score: " + simon.score + " round" + (simon.score === 1 ? "" : "s") + ". Press Play to try again.";
+      simon.seq = []; simon.score = 0; return;
+    }
+    simon.pos++;
+    if (simon.pos >= simon.seq.length) {
+      simon.score++;
+      simon.seq.push(Math.floor(Math.random() * 4));
+      $J("uxSimonOut").textContent = "Correct — round " + simon.score + " cleared. One more light joins…";
+      simon.accepting = false;
+      setTimeout(() => simonPlaySeq(), 800);
+    }
+  }
+  $J("uxSimonPlay").addEventListener("click", () => {
+    simon.seq = [Math.floor(Math.random() * 4)]; simon.score = 0;
+    simonPlaySeq();
+  });
+
+  /* Piano */
+  const NOTES = [["C", 262], ["D", 294], ["E", 330], ["F", 349], ["G", 392], ["A", 440], ["B", 494], ["C′", 523]];
+  let actx = null, oct = 1;
+  const pk = $J("uxPianoKeys");
+  NOTES.forEach(([n, f]) => {
+    const b = document.createElement("button"); b.type = "button"; b.className = "ux-note-btn"; b.textContent = n;
+    b.addEventListener("click", () => {
+      try {
+        actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+        if (actx.state === "suspended") actx.resume();
+        const o = actx.createOscillator(), g = actx.createGain();
+        o.type = "square"; o.frequency.value = f * oct;
+        g.gain.setValueAtTime(0.08, actx.currentTime); g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + 0.45);
+        o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime + 0.45);
+      } catch (e) {}
+      $J("uxPianoOut").textContent = n + " — " + (f * oct) + " Hz" + (oct === 2 ? " (octave up: frequency doubled)" : "") + ".";
+    });
+    pk.appendChild(b);
+  });
+  $J("uxPianoOct").addEventListener("click", () => {
+    oct = oct === 1 ? 2 : 1;
+    $J("uxPianoOct").textContent = "Octave ×" + oct;
+    $J("uxPianoOct").setAttribute("aria-pressed", oct === 2 ? "true" : "false");
+  });
+
+  /* Pedestrian crossing FSM: ticks — car green (walk latched ends it), amber, walk countdown, back */
+  const ped = { phase: "green", ticks: 0, walkReq: false, count: 0, timer: null };
+  function pedRender() {
+    setLed(ardHost, "CAR R", ped.phase === "walk" || ped.phase === "redclear");
+    setLed(ardHost, "CAR A", ped.phase === "amber");
+    setLed(ardHost, "CAR G", ped.phase === "green");
+    setLed(ardHost, "WALK", ped.phase === "walk");
+    setLed(ardHost, "WAIT", ped.walkReq && ped.phase !== "walk");
+    $J("uxPedOut").textContent =
+      ped.phase === "green" ? "Cars: GREEN. " + (ped.walkReq ? "A crossing is requested — the controller will finish this phase safely." : "No request yet — press the crossing button.") :
+      ped.phase === "amber" ? "Cars: AMBER — clearing the junction." :
+      ped.phase === "walk" ? "WALK — " + ped.count + " s left to cross. Cars held at RED." :
+      "Cars: RED — junction clear, about to release traffic.";
+  }
+  function pedStep() {
+    ped.ticks++;
+    if (ped.phase === "green" && ped.walkReq && ped.ticks >= 3) { ped.phase = "amber"; ped.ticks = 0; }
+    else if (ped.phase === "amber" && ped.ticks >= 2) { ped.phase = "walk"; ped.count = 5; ped.ticks = 0; ped.walkReq = false; }
+    else if (ped.phase === "walk") { ped.count--; if (ped.count <= 0) { ped.phase = "redclear"; ped.ticks = 0; } }
+    else if (ped.phase === "redclear" && ped.ticks >= 1) { ped.phase = "green"; ped.ticks = 0; }
+    pedRender();
+  }
+  function pedStop() { if (ped.timer) clearInterval(ped.timer); ped.timer = null; $J("uxPedPlay").textContent = "Play"; }
+  $J("uxPedPlay").addEventListener("click", () => {
+    if (ped.timer) { pedStop(); return; }
+    $J("uxPedPlay").textContent = "Pause";
+    ped.timer = setInterval(pedStep, 800);
+  });
+  $J("uxPedStep").addEventListener("click", () => { pedStop(); pedStep(); });
+  $J("uxPedBtn").addEventListener("click", () => { ped.walkReq = true; pedRender(); });
+  pedRender();
+
+  /* Ultrasonic parking */
+  const sonar = { timer: null, lit: false };
+  const bar = $J("uxSonarBar");
+  for (let i = 0; i < 5; i++) bar.innerHTML += led("▮", i < 2 ? "red" : i < 4 ? "" : "green");
+  function sonarRender() {
+    const cm = +$J("uxSonarD").value;
+    $J("uxSonarV").textContent = "= " + cm + " cm";
+    const filled = cm <= 15 ? 5 : cm <= 40 ? 4 : cm <= 80 ? 3 : cm <= 130 ? 2 : cm <= 170 ? 1 : 0;
+    bar.querySelectorAll(".ux-led").forEach((el, i) => el.classList.toggle("on", sonar.lit && i < filled));
+    $J("uxSonarOut").textContent = "Echo pulse = " + cm + " × 58 = " + (cm * 58) + " µs → " + cm + " cm. " +
+      (cm <= 15 ? "STOP — continuous urgency zone." : cm <= 80 ? "Beeping " + (cm <= 40 ? "fast" : "steadily") + " — keep backing slowly." : "Occasional beep — plenty of room.");
+    return cm;
+  }
+  function sonarStop() { if (sonar.timer) clearInterval(sonar.timer); sonar.timer = null; sonar.lit = false; $J("uxSonarPlay").textContent = "Play"; sonarRender(); }
+  $J("uxSonarPlay").addEventListener("click", () => {
+    if (sonar.timer) { sonarStop(); return; }
+    $J("uxSonarPlay").textContent = "Pause";
+    const tick = () => {
+      sonar.lit = !sonar.lit; sonarRender();
+      const cm = +$J("uxSonarD").value;
+      const gap = cm <= 15 ? 160 : cm <= 40 ? 300 : cm <= 80 ? 550 : cm <= 130 ? 850 : 1200;
+      sonar.timer = setTimeout(tick, sonar.lit ? 90 : gap);
+    };
+    tick();
+  });
+  $J("uxSonarD").addEventListener("input", sonarRender);
+  sonarRender();
+
+  /* ================= sandbox challenges (circuits view) ================= */
+  const chSec = document.createElement("section");
+  chSec.className = "card stage-card"; chSec.id = "uxChallenges"; chSec.style.marginTop = "16px";
+  chSec.innerHTML = "<h2>More sandbox challenges — build, probe, debug</h2>" +
+    "<p class='what'>Four more engine-checked challenges in the sandbox spirit. Every answer below is computed from the gates in front of you — the checks run the full truth table, not a stored key.</p>" +
+    '<div class="ux-proj-grid">' +
+    projCard("ux-ch-nand", "Challenge · sandbox", "NAND-only XOR",
+      "XOR from nothing but NAND gates — the classic proof that NAND is universal. Choose what feeds each gate; gate 4's output is Y. Four NANDs are enough. The checker runs all four input rows live.",
+      '<div id="uxNandRows"></div><table class="ux-tt" id="uxNandTable"></table><div class="ux-verdict" id="uxNandOut"></div>' +
+      '<div class="ux-keyrow"><button type="button" class="btn" id="uxNandHint">Show the classic solution</button></div>',
+      "functional completeness — one gate type builds everything.") +
+    projCard("ux-ch-blackbox", "Challenge · sandbox", "Mystery black-box gate",
+      "One gate is hidden in the box. Probe it with A and B, watch Y, then name the gate. A new mystery is loaded for every round.",
+      '<div class="ux-keyrow"><button type="button" class="ux-bigbtn" id="uxBbA" aria-pressed="false">A = 0</button><button type="button" class="ux-bigbtn" id="uxBbB" aria-pressed="false">B = 0</button></div>' +
+      '<div class="ux-ledrow">' + led("Y", "") + '</div><div class="ux-keyrow" id="uxBbGuess"></div>' +
+      '<div class="ux-verdict" id="uxBbOut">Probe the box: flip A and B through all four rows before you guess.</div>',
+      "truth-table inference — identifying a system from its behaviour.") +
+    projCard("ux-ch-debug", "Challenge · sandbox", "Broken-circuit debug",
+      "This full adder left the bench with exactly one gate swapped for a different type. Its live truth table is below — compare it with a true adder (Sum = A⊕B⊕Cin, Cout = majority) and find the faulty gate.",
+      '<table class="ux-tt" id="uxDbgTable"></table><div class="ux-keyrow" id="uxDbgPick"></div>' +
+      '<div class="ux-keyrow"><button type="button" class="btn primary" id="uxDbgCheck">Check my diagnosis</button><button type="button" class="btn" id="uxDbgNew">New fault</button></div>' +
+      '<div class="ux-verdict" id="uxDbgOut"></div>',
+      "fault localisation from observed behaviour — the real debugging skill.") +
+    projCard("ux-ch-modn", "Challenge · sandbox", "Mod-N counter",
+      "A 4-bit binary counter with one twist: it resets to 0 when it reaches N, so it counts 0, 1, …, N−1 and repeats — a mod-N counter. Pick N, then step or play it (it starts paused).",
+      '<label class="fld">Reset at N <select id="uxModN"><option>3</option><option>5</option><option>6</option><option selected>10</option><option>12</option><option>16</option></select></label>' +
+      '<div class="ux-keyrow"><button type="button" class="btn" id="uxModStep">Step ▸</button><button type="button" class="btn primary" id="uxModPlay">Play</button><button type="button" class="btn" id="uxModReset">Reset</button></div>' +
+      '<div class="ux-ledrow">' + led("8") + led("4") + led("2") + led("1") + '</div><div class="decimal-line" id="uxModOut"></div>',
+      "modular counting — how counters become clocks, calendars and dividers.") +
+    "</div>";
+  if (cv) cv.appendChild(chSec);
+
+  /* NAND-only XOR */
+  const NAND_SRC = ["A", "B", "g1", "g2", "g3"];
+  const nandState = { g1: ["A", "B"], g2: ["A", "B"], g3: ["A", "B"], g4: ["A", "B"] };
+  const nandRows = $J("uxNandRows");
+  ["g1", "g2", "g3", "g4"].forEach(g => {
+    const row = document.createElement("div"); row.className = "ux-keyrow";
+    row.innerHTML = "<b style='align-self:center'>" + g + " = NAND(</b>";
+    [0, 1].forEach(k => {
+      const sel = document.createElement("select"); sel.setAttribute("aria-label", g + " input " + (k + 1));
+      NAND_SRC.forEach(s => { const o = document.createElement("option"); o.value = s; o.textContent = s; sel.appendChild(o); });
+      sel.value = nandState[g][k];
+      sel.addEventListener("change", () => { nandState[g][k] = sel.value; nandRender(); });
+      row.appendChild(sel);
+    });
+    const tail = document.createElement("b"); tail.style.alignSelf = "center"; tail.textContent = ")"; row.appendChild(tail);
+    if (g === "g4") { const y = document.createElement("span"); y.className = "ux-note"; y.textContent = " ← Y"; row.appendChild(y); }
+    nandRows.appendChild(row);
+  });
+  function evalNand(A, B) {
+    const v = { A, B };
+    ["g1", "g2", "g3", "g4"].forEach(g => {
+      const [x, y] = nandState[g].map(s => v[s] !== undefined ? v[s] : 0);
+      v[g] = (x & y) ^ 1;
+    });
+    return v.g4;
+  }
+  function nandRender() {
+    let html = "<tr><th>A</th><th>B</th><th>Y</th><th>XOR?</th></tr>", ok = true;
+    for (let A = 0; A <= 1; A++) for (let B = 0; B <= 1; B++) {
+      const y = evalNand(A, B), want = A ^ B;
+      if (y !== want) ok = false;
+      html += "<tr><td>" + A + "</td><td>" + B + "</td><td>" + y + "</td><td>" + (y === want ? "✓" : "✗ wants " + want) + "</td></tr>";
+    }
+    $J("uxNandTable").innerHTML = html;
+    $J("uxNandOut").textContent = ok ? "✓ Solved — four NANDs, one XOR. This network is exactly how XOR is built inside real chips when only NAND is cheap." : "Not XOR yet — check the rows marked ✗ and rewire.";
+    $J("uxNandOut").style.color = ok ? "var(--green)" : "var(--ink)";
+    return ok;
+  }
+  $J("uxNandHint").addEventListener("click", () => {
+    nandState.g1 = ["A", "B"]; nandState.g2 = ["A", "g1"]; nandState.g3 = ["B", "g1"]; nandState.g4 = ["g2", "g3"];
+    nandRows.querySelectorAll("select").forEach((sel, i) => { const g = ["g1", "g2", "g3", "g4"][Math.floor(i / 2)]; sel.value = nandState[g][i % 2]; });
+    nandRender();
+  });
+  nandRender();
+
+  /* Black-box gate */
+  const BB_GATES = { AND: (a, b) => a & b, OR: (a, b) => a | b, XOR: (a, b) => a ^ b, NAND: (a, b) => (a & b) ^ 1, NOR: (a, b) => (a | b) ^ 1, XNOR: (a, b) => (a ^ b) ^ 1 };
+  const bb = { gate: "XOR", A: 0, B: 0, score: 0, rounds: 0 };
+  const guessHost = $J("uxBbGuess");
+  Object.keys(BB_GATES).forEach(name => {
+    const b = document.createElement("button"); b.type = "button"; b.className = "ux-bigbtn"; b.textContent = name;
+    b.addEventListener("click", () => {
+      bb.rounds++;
+      if (name === bb.gate) { bb.score++; $J("uxBbOut").textContent = "✓ It was " + name + ". Score: " + bb.score + "/" + bb.rounds + ". A new box is loaded — probe it."; }
+      else $J("uxBbOut").textContent = "✗ Not " + name + " — it was " + bb.gate + ". Score: " + bb.score + "/" + bb.rounds + ". New box loaded.";
+      bb.gate = Object.keys(BB_GATES)[Math.floor(Math.random() * 6)];
+      bbRender();
+    });
+    guessHost.appendChild(b);
+  });
+  function bbRender() {
+    $J("uxBbA").textContent = "A = " + bb.A; $J("uxBbA").setAttribute("aria-pressed", bb.A ? "true" : "false");
+    $J("uxBbB").textContent = "B = " + bb.B; $J("uxBbB").setAttribute("aria-pressed", bb.B ? "true" : "false");
+    setLed(chSec, "Y", BB_GATES[bb.gate](bb.A, bb.B));
+  }
+  $J("uxBbA").addEventListener("click", () => { bb.A ^= 1; bbRender(); });
+  $J("uxBbB").addEventListener("click", () => { bb.B ^= 1; bbRender(); });
+  bbRender();
+
+  /* Broken-circuit debug: full adder with one gate type swapped */
+  const GATE_FN = { AND: (a, b) => a & b, OR: (a, b) => a | b, XOR: (a, b) => a ^ b };
+  const DBG_GATES = ["x1", "c1", "s", "c2", "cout"];
+  const DBG_TRUE = { x1: "XOR", c1: "AND", s: "XOR", c2: "AND", cout: "OR" };
+  const DBG_LABEL = { x1: "x1 — first XOR (A⊕B)", c1: "c1 — first AND (A·B)", s: "Sum XOR (x1⊕Cin)", c2: "c2 — second AND (x1·Cin)", cout: "Cout OR (c1+c2)" };
+  const dbg = { faulty: "x1", pick: "x1" };
+  const pickHost = $J("uxDbgPick");
+  DBG_GATES.forEach(g => {
+    const b = document.createElement("button"); b.type = "button"; b.className = "ux-bigbtn"; b.dataset.g = g; b.textContent = DBG_LABEL[g];
+    b.setAttribute("aria-pressed", g === "x1" ? "true" : "false");
+    b.addEventListener("click", () => { dbg.pick = g; pickHost.querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x.dataset.g === g ? "true" : "false")); });
+    pickHost.appendChild(b);
+  });
+  function dbgTypes() {
+    const t = Object.assign({}, DBG_TRUE);
+    const alts = { XOR: "OR", OR: "AND", AND: "XOR" };
+    t[dbg.faulty] = alts[DBG_TRUE[dbg.faulty]];
+    return t;
+  }
+  function dbgRun(A, B, Cin) {
+    const t = dbgTypes();
+    const x1 = GATE_FN[t.x1](A, B), c1 = GATE_FN[t.c1](A, B);
+    const s = GATE_FN[t.s](x1, Cin), c2 = GATE_FN[t.c2](x1, Cin);
+    return { s, cout: GATE_FN[t.cout](c1, c2) };
+  }
+  function dbgRender() {
+    let html = "<tr><th>A</th><th>B</th><th>Cin</th><th>Sum</th><th>Cout</th><th>true adder</th></tr>";
+    for (let n = 0; n < 8; n++) {
+      const A = (n >> 2) & 1, B = (n >> 1) & 1, C = n & 1, r = dbgRun(A, B, C);
+      const ts = A ^ B ^ C, tc = (A + B + C) >= 2 ? 1 : 0;
+      const bad = r.s !== ts || r.cout !== tc;
+      html += "<tr" + (bad ? ' style="background:rgba(220,38,38,.12)"' : "") + "><td>" + A + "</td><td>" + B + "</td><td>" + C + "</td><td>" + r.s + "</td><td>" + r.cout + "</td><td>" + ts + " / " + tc + "</td></tr>";
+    }
+    $J("uxDbgTable").innerHTML = html;
+    $J("uxDbgOut").textContent = "Rows shaded red disagree with a true adder. Which single gate swap explains exactly those rows?";
+  }
+  $J("uxDbgCheck").addEventListener("click", () => {
+    const t = dbgTypes();
+    $J("uxDbgOut").textContent = dbg.pick === dbg.faulty
+      ? "✓ Found it — " + DBG_LABEL[dbg.faulty] + " was swapped from " + DBG_TRUE[dbg.faulty] + " to " + t[dbg.faulty] + ". One wrong gate, and only the rows through it go red."
+      : "✗ Not that one — " + DBG_LABEL[dbg.pick] + " is innocent (" + DBG_TRUE[dbg.pick] + ", as drawn). Follow the red rows back to the gate they share.";
+    $J("uxDbgOut").style.color = dbg.pick === dbg.faulty ? "var(--green)" : "var(--red)";
+  });
+  $J("uxDbgNew").addEventListener("click", () => {
+    let next = dbg.faulty;
+    while (next === dbg.faulty) next = DBG_GATES[Math.floor(Math.random() * DBG_GATES.length)];
+    dbg.faulty = next; dbgRender();
+  });
+  dbgRender();
+
+  /* Mod-N counter */
+  const mod = { v: 0, timer: null };
+  function modRender() {
+    [8, 4, 2, 1].forEach(bit => setLed(chSec, String(bit), (mod.v & bit) !== 0));
+    const N = +$J("uxModN").value;
+    $J("uxModOut").textContent = "Count = " + mod.v + " (binary " + mod.v.toString(2).padStart(4, "0") + ") · counting mod " + N + ": the next step after " + (N - 1) + " returns to 0.";
+  }
+  function modStep() { const N = +$J("uxModN").value; mod.v = (mod.v + 1) % N; modRender(); }
+  function modStop() { if (mod.timer) clearInterval(mod.timer); mod.timer = null; $J("uxModPlay").textContent = "Play"; }
+  $J("uxModStep").addEventListener("click", () => { modStop(); modStep(); });
+  $J("uxModReset").addEventListener("click", () => { modStop(); mod.v = 0; modRender(); });
+  $J("uxModN").addEventListener("change", () => { mod.v = 0; modRender(); });
+  $J("uxModPlay").addEventListener("click", () => {
+    if (mod.timer) { modStop(); return; }
+    $J("uxModPlay").textContent = "Pause";
+    mod.timer = setInterval(modStep, 700);
+  });
+  modRender();
+
+  /* ================= menu registration + rebuild ================= */
+  const RJ = window.__uxRoundJ;
+  function regItem(groupName, key, label, hint, level, targetId, view) {
+    const list = $J("menuList"); if (!list) return;
+    const item = document.createElement("button");
+    item.type = "button"; item.className = "menu-item"; item.dataset.key = key;
+    item.dataset.search = (label + " " + hint + " " + groupName).toLowerCase();
+    if (level) item.dataset.uxlevel = level;
+    item.innerHTML = '<span class="mi-dot" aria-hidden="true"></span><span class="mi-label"></span><small></small>';
+    item.querySelector(".mi-label").textContent = label;
+    item.querySelector("small").textContent = hint;
+    item.addEventListener("click", () => {
+      const panel = $J("menuPanel"); if (panel) panel.hidden = true;
+      const mb = $J("menuBtn"); if (mb) mb.setAttribute("aria-expanded", "false");
+      try {
+        if (view === "boards") { setTopArea("advanced"); syncRail("advanced"); const pb = document.querySelector('#advPicker [data-adv="projects"]'); if (pb) pb.click(); }
+        else { setTopArea("circuits"); syncRail("circuits"); }
+      } catch (e) {}
+      const el = $J(targetId);
+      if (el) setTimeout(() => el.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
+    });
+    /* insert as the last item of the named group */
+    let sib = null; const children = Array.prototype.slice.call(list.children);
+    let inGroup = false;
+    children.forEach(el => {
+      if (el.classList.contains("menu-group")) inGroup = (el.dataset.group || "").trim() === groupName;
+      else if (inGroup && el.classList.contains("menu-item")) sib = el;
+    });
+    if (sib) sib.after(item); else list.appendChild(item);
+  }
+  regItem("Logic & Circuits", "ux-latch", "SR latch from NOR gates", "Breadboard · Intermediate", "intermediate", "ux-latch", "circuits");
+  regItem("Logic & Circuits", "ux-555", "555 astable blinker", "Breadboard · Beginner", "beginner", "ux-555", "circuits");
+  regItem("Logic & Circuits", "ux-bcd", "DIP-switch BCD to 7-segment (7447)", "Breadboard · Intermediate", "intermediate", "ux-bcd", "circuits");
+  regItem("Logic & Circuits", "ux-traffic2", "Traffic-light sequencer", "Breadboard · Advanced", "advanced", "ux-traffic2", "circuits");
+  regItem("Logic & Circuits", "ux-ch-nand", "Challenge — NAND-only XOR", "Sandbox challenge", "", "ux-ch-nand", "circuits");
+  regItem("Logic & Circuits", "ux-ch-blackbox", "Challenge — mystery black-box gate", "Sandbox challenge", "", "ux-ch-blackbox", "circuits");
+  regItem("Logic & Circuits", "ux-ch-debug", "Challenge — broken-circuit debug", "Sandbox challenge", "", "ux-ch-debug", "circuits");
+  regItem("Logic & Circuits", "ux-ch-modn", "Challenge — mod-N counter", "Sandbox challenge", "", "ux-ch-modn", "circuits");
+  regItem("Boards, Modulation & Projects", "ux-simon", "Simon Says game", "Arduino · Beginner", "beginner", "ux-simon", "boards");
+  regItem("Boards, Modulation & Projects", "ux-piano", "Mini piano", "Arduino · Beginner", "beginner", "ux-piano", "boards");
+  regItem("Boards, Modulation & Projects", "ux-pedxing", "Pedestrian crossing", "Arduino · Intermediate", "intermediate", "ux-pedxing", "boards");
+  regItem("Boards, Modulation & Projects", "ux-sonar", "Ultrasonic parking sensor", "Arduino · Intermediate", "intermediate", "ux-sonar", "boards");
+
+  /* rebuild counts everywhere from the live menu */
+  const groups = RJ.menuGroups();
+  const counts = {}; let total = 0;
+  groups.forEach(g => {
+    counts[g.name] = g.items.length; total += g.items.length;
+    const c = g.header.querySelector(".mi-count"); if (c) c.textContent = g.items.length;
+  });
+  window.LAB_MENU = { groups: groups.map(g => ({ name: g.name, items: g.items.map(b => { const l = b.querySelector(".mi-label"); return l ? l.textContent : ""; }) })), count: total };
+  window.LAB_MODULES = { modules: groups.map(g => ({ name: g.name, count: g.items.length })), total };
+  RJ.buildRailAndList(counts);
+  RJ.buildGallery();
+
+  /* ================= self-tests (exhaustive, run once) ================= */
+  const fails = [];
+  function expect(cond, name) { if (!cond) fails.push(name); }
+  /* new BBP combinational builds, evaluated from their own specs */
+  if (typeof BBP_PROJECTS !== "undefined") {
+    const GF = { AND: (a, b) => a & b, OR: (a, b) => a | b, XOR: (a, b) => a ^ b, NOT: a => a ^ 1 };
+    const evalSpec = (p, ins) => {
+      const v = Object.assign({}, ins);
+      p.gates.forEach(g => { v[g.out] = GF[g.type].apply(null, g.ins.map(n => v[n])); });
+      return v;
+    };
+    const byId = id => BBP_PROJECTS.find(p => p.id === id);
+    const combos = names => { const out = []; for (let n = 0; n < (1 << names.length); n++) { const o = {}; names.forEach((nm, i) => o[nm] = (n >> (names.length - 1 - i)) & 1); out.push(o); } return out; };
+    const maj = byId("majority"); combos(["A", "B", "C"]).forEach(c => expect(evalSpec(maj, c).Y === ((c.A + c.B + c.C) >= 2 ? 1 : 0), "majority"));
+    const lock = byId("combolock"); combos(["S3", "S2", "S1", "S0"]).forEach(c => expect(evalSpec(lock, c).UNLOCK === ((c.S3 === 1 && c.S2 === 0 && c.S1 === 1 && c.S0 === 1) ? 1 : 0), "combolock"));
+    const mx = byId("mux4"); combos(["D0", "D1", "D2", "D3", "S1", "S0"]).forEach(c => expect(evalSpec(mx, c).Y === [c.D0, c.D1, c.D2, c.D3][c.S1 * 2 + c.S0], "mux4"));
+    const pr = byId("priority"); combos(["D3", "D2", "D1", "D0"]).forEach(c => {
+      const r = evalSpec(pr, c);
+      const hi = c.D3 ? 3 : c.D2 ? 2 : c.D1 ? 1 : c.D0 ? 0 : -1;
+      expect(r.V === (hi >= 0 ? 1 : 0) && (hi < 0 || (r.Y1 * 2 + r.Y0) === hi), "priority");
+    });
+    /* every pre-existing BBP build: outputs defined for all rows */
+    BBP_PROJECTS.forEach(p => combos(p.inputs).forEach(c => { const r = evalSpec(p, c); p.outputs.forEach(o => expect(r[o] === 0 || r[o] === 1, "bbp-" + p.id)); }));
+  }
+  /* 7-segment map: lit-segment counts for digits 0-9 */
+  expect(JSON.stringify([0,1,2,3,4,5,6,7,8,9].map(d => SEG7[d].reduce((a, b) => a + b, 0))) === JSON.stringify([6, 2, 5, 5, 4, 5, 6, 3, 7, 6]), "seg7");
+  /* NAND classic solution really is XOR */
+  (function () { const keep = JSON.stringify(nandState); nandState.g1 = ["A", "B"]; nandState.g2 = ["A", "g1"]; nandState.g3 = ["B", "g1"]; nandState.g4 = ["g2", "g3"];
+    for (let A = 0; A <= 1; A++) for (let B = 0; B <= 1; B++) expect(evalNand(A, B) === (A ^ B), "nand-xor");
+    const back = JSON.parse(keep); ["g1", "g2", "g3", "g4"].forEach(g => nandState[g] = back[g]); })();
+  /* broken adder: with each single fault, exactly the faulty gate's rows differ somewhere */
+  DBG_GATES.forEach(g => { dbg.faulty = g; let diff = false;
+    for (let n = 0; n < 8; n++) { const A = (n >> 2) & 1, B = (n >> 1) & 1, C = n & 1, r = dbgRun(A, B, C); if (r.s !== (A ^ B ^ C) || r.cout !== ((A + B + C) >= 2 ? 1 : 0)) diff = true; }
+    expect(diff, "dbg-" + g); });
+  dbg.faulty = "x1"; dbgRender();
+  /* traffic phases: exactly the legal lamp combos */
+  expect(PHASES.every(p => (p.r + p.a + p.g) >= 1 && !(p.g && p.r)), "traffic");
+  document.body.dataset.uxSelftest = fails.length ? "FAIL:" + fails.slice(0, 6).join(",") : "pass";
+  if (fails.length && window.console) console.warn("[Round J self-test] failures:", fails);
+})();
+</script>
+<style>
+/* Round J fix — slim the bar: search is a single compact row; on
+   phones the two facet selects fold behind one Filters button so
+   the pinned chrome stays close to the brief's slim profile. */
+.ux-sticky .ux-search{margin-top:8px;flex-wrap:nowrap}
+.ux-sticky .ux-search input[type="text"]{min-height:44px}
+.ux-filters-btn{display:none;min-height:44px;border:1px solid var(--line2);background:var(--panel);border-radius:9px;padding:9px 12px;font-weight:700;font-size:13.5px;cursor:pointer;color:var(--ink);white-space:nowrap}
+@media (max-width:720px){
+  .ux-sticky .ux-search{flex-wrap:wrap}
+  .ux-sticky .ux-search select{display:none}
+  .ux-sticky .ux-search.filters-open select{display:block;flex:1 1 40%}
+  .ux-filters-btn{display:inline-block}
+  .ux-sticky .head-controls{gap:6px 8px}
+  .ux-chip{min-height:44px;padding:7px 13px}
+}
+</style>
+<script>
+"use strict";
+(function roundJFix() {
+  var sb = document.querySelector(".ux-search"); if (!sb) return;
+  var b = document.createElement("button");
+  b.type = "button"; b.className = "ux-filters-btn"; b.textContent = "Filters ▾";
+  b.setAttribute("aria-expanded", "false");
+  b.addEventListener("click", function () {
+    var open = sb.classList.toggle("filters-open");
+    b.setAttribute("aria-expanded", open ? "true" : "false");
+    b.textContent = open ? "Filters ▴" : "Filters ▾";
+    window.dispatchEvent(new Event("resize"));
+  });
+  var firstSel = sb.querySelector("select");
+  if (firstSel) sb.insertBefore(b, firstSel); else sb.appendChild(b);
+})();
+</script>
+<style>
+/* Round J fix 2 — phone bar compression: one compact title row,
+   one controls row (lens + Menu), one search row (search + Filters
+   + Labs + theme as an icon button), then the chip rail. */
+@media (max-width:720px){
+  .ux-sticky{padding-bottom:6px}
+  .ux-sticky .site-head-row{padding-top:8px;gap:4px 10px}
+  .ux-sticky .site-head-row h1{font-size:20px}
+  .ux-sticky .head-controls{flex-wrap:nowrap;justify-content:flex-start;gap:6px;width:100%}
+  .ux-sticky .head-controls .seg button{padding:7px 10px;font-size:13px}
+  .ux-sticky .menu-btn{padding:8px 11px;font-size:13px}
+  .ux-sticky .ux-search{flex-wrap:nowrap;gap:6px;margin-top:6px}
+  .ux-sticky .ux-search input[type="text"]{flex:1 1 60px;min-width:56px;font-size:13px;padding:8px 9px}
+  .ux-sticky .ux-labs-btn{padding:8px 9px;font-size:12.5px}
+  .ux-sticky .ux-filters-btn{padding:8px 9px;font-size:12.5px}
+  .ux-sticky .theme-btn{padding:8px 9px}
+  .ux-sticky .theme-btn .theme-dots,.ux-sticky .theme-btn #themeName{display:none}
+  .ux-sticky .ux-search.filters-open{flex-wrap:wrap}
+  .ux-rail{padding-top:6px}
+}
+</style>
+<script>
+"use strict";
+(function roundJFix2() {
+  var mq = window.matchMedia("(max-width: 720px)");
+  var theme = document.querySelector(".theme-control");
+  var search = document.querySelector(".ux-search");
+  var controls = document.querySelector(".head-controls");
+  if (!theme || !search || !controls) return;
+  var home = theme.parentNode, homeNext = theme.nextSibling;
+  function apply() {
+    if (mq.matches) { if (theme.parentNode !== search) search.appendChild(theme); }
+    else if (theme.parentNode !== home) { if (homeNext && homeNext.parentNode === home) home.insertBefore(theme, homeNext); else home.appendChild(theme); }
+    window.dispatchEvent(new Event("resize"));
+  }
+  apply();
+  if (mq.addEventListener) mq.addEventListener("change", apply);
+})();
+</script>
+<style>
+/* Round J fix 3 — phone: title + lens + Menu share ONE row. */
+@media (max-width:720px){
+  .ux-sticky .site-head-row{flex-wrap:nowrap;align-items:center;gap:6px}
+  .ux-sticky .site-head-row > div:first-child{flex:none}
+  .ux-sticky .site-head-row h1{font-size:15px;letter-spacing:-.03em;white-space:nowrap}
+  .ux-sticky .head-controls{flex:1 1 auto;width:auto;justify-content:flex-end;flex-wrap:nowrap;gap:5px}
+  .ux-sticky .head-controls .seg{display:flex;flex-wrap:nowrap}
+  .ux-sticky .head-controls .seg button{padding:6px 7px;font-size:11.5px;min-height:40px}
+  .ux-sticky .menu-btn{padding:7px 9px;font-size:12px;min-height:40px}
+}
+</style>
+<style>
+/* Round J fix 4 — phone: the pinned chrome is two rows (title row
+   with compact lens select + Search toggle + Menu; module rail).
+   Search expands as a sheet under the bar when tapped — the same
+   single system, collapsed, per the research brief's fallback. */
+.ux-lens-select{display:none}
+.ux-search-toggle{display:none;align-items:center;min-height:40px;border:1px solid var(--line2);background:var(--panel);border-radius:9px;padding:7px 10px;font-weight:700;font-size:12px;cursor:pointer;color:var(--ink);box-shadow:var(--shadow)}
+@media (max-width:720px){
+  .ux-lens-select{display:block;min-height:40px;border:1px solid var(--line2);border-radius:9px;background:var(--panel);color:var(--ink);font:inherit;font-size:12px;font-weight:600;padding:6px 4px;max-width:104px}
+  .ux-sticky .head-controls .level-toggle .seg{display:none}
+  .ux-search-toggle{display:inline-flex}
+  .ux-sticky .site-head-row > div:first-child{flex:0 1 auto;min-width:0}
+  .ux-sticky .site-head-row h1{font-size:15.5px;white-space:normal;line-height:1.15}
+  .ux-sticky .ux-search{display:none}
+  .ux-sticky.search-open .ux-search{display:flex}
+}
+</style>
+<script>
+"use strict";
+(function roundJFix4() {
+  var mq = window.matchMedia("(max-width: 720px)");
+  var sticky = document.getElementById("uxSticky");
+  var lt = document.querySelector(".level-toggle");
+  var controls = document.querySelector(".head-controls");
+  var searchInput = document.getElementById("uxSearch");
+  if (!sticky || !lt || !controls) return;
+  var sel = document.createElement("select");
+  sel.className = "ux-lens-select"; sel.setAttribute("aria-label", "Site level");
+  sel.innerHTML = '<option value="beginner">Beginner</option><option value="advanced">Advanced</option>';
+  lt.appendChild(sel);
+  function syncSel() {
+    var adv = document.getElementById("lvlAdvanced");
+    sel.value = adv && adv.getAttribute("aria-pressed") === "true" ? "advanced" : "beginner";
+  }
+  sel.addEventListener("change", function () {
+    var b = document.getElementById(sel.value === "advanced" ? "lvlAdvanced" : "lvlBeginner");
+    if (b) b.click(); syncSel();
+  });
+  ["lvlBeginner", "lvlAdvanced"].forEach(function (id) {
+    var b = document.getElementById(id); if (b) b.addEventListener("click", syncSel);
+  });
+  syncSel();
+  var tog = document.createElement("button");
+  tog.type = "button"; tog.className = "ux-search-toggle"; tog.textContent = "⌕ Search";
+  tog.setAttribute("aria-expanded", "false");
+  tog.addEventListener("click", function () {
+    var open = sticky.classList.toggle("search-open");
+    tog.setAttribute("aria-expanded", open ? "true" : "false");
+    window.dispatchEvent(new Event("resize"));
+    if (open && searchInput) setTimeout(function () { searchInput.focus(); }, 60);
+  });
+  var menuControl = controls.querySelector(".menu-control");
+  if (menuControl) controls.insertBefore(tog, menuControl); else controls.appendChild(tog);
+  if (searchInput) searchInput.addEventListener("keydown", function (e) { if (e.key === "Escape" && mq.matches) { sticky.classList.remove("search-open"); tog.setAttribute("aria-expanded", "false"); window.dispatchEvent(new Event("resize")); } });
 })();
 </script>
