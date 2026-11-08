@@ -1564,6 +1564,30 @@ GPIO.output(17, GPIO.LOW)</pre>
         </aside>
       </div>
 
+      <div class="card stage-card" id="ovfCard" style="margin-top:16px">
+        <h2>Overflow — when add traps and addu wraps</h2>
+        <p class="what">A 32-bit register holds a fixed range of values, and adding 1 to the largest signed value, 0x7FFFFFFF, leaves that range. Real MIPS answers the same addition two different ways, depending on one letter: <b>addu</b> wraps the result around modulo 2<sup>32</sup> and carries on without a word; <b>add</b> raises an overflow exception — a <b>trap</b> — and halts instead of writing a wrong answer. Same numbers below, both times: only the instruction changes. Each demo runs in the lab's own simulator above — press Run, watch the register file, then read the machine's own numbers underneath.</p>
+        <div class="ovf-grid">
+          <div class="ovf-panel">
+            <h3>Wrap-around — addu rolls over</h3>
+            <pre class="sketch" id="ovfWrapSrc" aria-label="Wrap-around demo program"></pre>
+            <button type="button" class="btn primary" id="ovfRunWrap">Run in the lab — addu wraps</button>
+            <div class="ovf-out" id="ovfWrapOut" aria-live="polite"></div>
+          </div>
+          <div class="ovf-panel">
+            <h3>Trap — add refuses</h3>
+            <pre class="sketch" id="ovfTrapSrc" aria-label="Trap demo program"></pre>
+            <button type="button" class="btn primary" id="ovfRunTrap">Run in the lab — add traps</button>
+            <div class="ovf-out" id="ovfTrapOut" aria-live="polite"></div>
+          </div>
+        </div>
+        <div class="ovf-why">
+          <h3>Why it matters</h3>
+          <p>Wrap-around is silent. Nothing announces that the answer is wrong, so the wrapped value flows onward as if it were true. A counter or timer rolls over while the system around it assumes it only grows. The Year 2038 problem is exactly this: the 32-bit signed counter of seconds since 1970 wraps, and dates jump back to 1901. And in security work the dangerous version is a size calculation that wraps small — code checks that length + header fits the buffer, the addition wraps past 2<sup>32</sup> back to a small number, the check passes, and the copy that follows writes far past the end of the buffer. A trap is the opposite failure style: the machine stops loudly, at the exact instruction that overflowed, before the bad value can be used anywhere. Neither behaviour is itself the bug — the bug is not knowing which one your instruction does.</p>
+          <p>C draws the same line, and it is the rule from your programming course: <b>unsigned</b> arithmetic wraps by definition — C's unsigned int behaves like addu — while <b>signed</b> overflow is undefined behaviour, so a C compiler may assume it never happens. That is why the u-variants exist for addresses and bit patterns, where wrap-around is the arithmetic you actually mean, and the trapping forms are the default for values, where an overflow means the program is wrong and you want to know immediately.</p>
+        </div>
+      </div>
+
       <div class="card stage-card" style="margin-top:16px">
         <h2>ISA comparison — same program, three machines</h2>
         <p class="what">Same algorithm, three dialects — the differences are conventions and what the hardware lets an instruction touch, not the idea. Pick a task, then step all three in lockstep: where one machine needs an extra instruction, its column takes an extra beat, honestly shown.</p>
@@ -4632,7 +4656,7 @@ function asmParse(text) {
     const parts = line.replace(/,/g, " ").split(/\s+/).filter(Boolean);
     prog.push({ op: parts[0].toLowerCase(), args: parts.slice(1), lineNo: ln + 1, text: raw.trim() });
   });
-  const need = { add: 3, sub: 3, and: 3, or: 3, slt: 3, sll: 3, addi: 3, andi: 3, ori: 3, lui: 2, lw: 2, sw: 2, beq: 3, bne: 3, j: 1, jal: 1, jr: 1, syscall: 0 };
+  const need = { add: 3, sub: 3, addu: 3, subu: 3, and: 3, or: 3, slt: 3, sll: 3, addi: 3, addiu: 3, andi: 3, ori: 3, lui: 2, lw: 2, sw: 2, beq: 3, bne: 3, j: 1, jal: 1, jr: 1, syscall: 0 };
   prog.forEach(ins => {
     if (need[ins.op] === undefined) errors.push("Line " + ins.lineNo + ": unknown instruction '" + ins.op + "'.");
     else if (ins.args.length !== need[ins.op]) errors.push("Line " + ins.lineNo + ": '" + ins.op + "' expects " + need[ins.op] + " operand(s), got " + ins.args.length + ".");
@@ -4662,14 +4686,29 @@ function asmStep() {
   const a = ins.args; let next = asm.pc + 1, msg = "";
   asm.changedReg = -1; asm.lastWrite = -1;
   const imm = x => { const v = parseInt(x, 10); return isNaN(v) ? 0 : v; };
+  /* Signed-overflow rule (real MIPS): add / sub / addi TRAP — the CPU raises
+     an overflow exception and the destination keeps its old value. The
+     u-variants (addu / subu / addiu) never trap: setR's |0 wraps the result
+     modulo 2^32, which is exactly the hardware's wrap-around. */
+  const sgnOv = v => v > 2147483647 || v < -2147483648;
+  const trapMsg = (opname, expr, v, dest) => "⚠ OVERFLOW EXCEPTION (trap): " + expr + " = " + v + " does not fit in a signed 32-bit register. '" + opname + "' raises an overflow exception instead of writing a wrong answer — the machine halts here and " + dest + " keeps its old value (" + R(dest) + "). Compare addu, which wraps silently.";
   switch (ins.op) {
-    case "add": { const v = R(a[1]) + R(a[2]); setR(a[0], v); msg = a[0] + " ← " + a[1] + " + " + a[2] + " = " + R(a[1]) + " + " + R(a[2]) + " = " + v; break; }
-    case "sub": { const v = R(a[1]) - R(a[2]); setR(a[0], v); msg = a[0] + " ← " + a[1] + " − " + a[2] + " = " + v; break; }
+    case "add": { const x = R(a[1]), y = R(a[2]), v = x + y;
+      if (sgnOv(v)) { asm.halted = true; next = asm.pc; msg = trapMsg("add", x + " + " + y, v, a[0]); }
+      else { setR(a[0], v); msg = a[0] + " ← " + a[1] + " + " + a[2] + " = " + x + " + " + y + " = " + v; } break; }
+    case "sub": { const x = R(a[1]), y = R(a[2]), v = x - y;
+      if (sgnOv(v)) { asm.halted = true; next = asm.pc; msg = trapMsg("sub", x + " − " + y, v, a[0]); }
+      else { setR(a[0], v); msg = a[0] + " ← " + a[1] + " − " + a[2] + " = " + v; } break; }
+    case "addu": { const x = R(a[1]), y = R(a[2]), v = x + y; setR(a[0], v); msg = a[0] + " ← " + a[1] + " + " + a[2] + " = " + x + " + " + y + " = " + v + (sgnOv(v) ? " → wrapped modulo 2^32 to " + R(a[0]) + " (addu never traps — the sum rolls over silently)" : ""); break; }
+    case "subu": { const x = R(a[1]), y = R(a[2]), v = x - y; setR(a[0], v); msg = a[0] + " ← " + a[1] + " − " + a[2] + " = " + x + " − " + y + " = " + v + (sgnOv(v) ? " → wrapped modulo 2^32 to " + R(a[0]) + " (subu never traps)" : ""); break; }
     case "and": { const v = R(a[1]) & R(a[2]); setR(a[0], v); msg = a[0] + " ← " + a[1] + " AND " + a[2] + " = " + v; break; }
     case "or": { const v = R(a[1]) | R(a[2]); setR(a[0], v); msg = a[0] + " ← " + a[1] + " OR " + a[2] + " = " + v; break; }
     case "slt": { const v = R(a[1]) < R(a[2]) ? 1 : 0; setR(a[0], v); msg = a[0] + " ← (" + a[1] + " < " + a[2] + ") = " + v + "  (" + R(a[1]) + " < " + R(a[2]) + ")"; break; }
     case "sll": { const v = R(a[1]) << imm(a[2]); setR(a[0], v); msg = a[0] + " ← " + a[1] + " << " + a[2] + " = " + v; break; }
-    case "addi": { const v = R(a[1]) + imm(a[2]); setR(a[0], v); msg = a[0] + " ← " + a[1] + " + " + a[2] + " = " + R(a[1]) + " + " + a[2] + " = " + v; break; }
+    case "addi": { const x = R(a[1]), v = x + imm(a[2]);
+      if (sgnOv(v)) { asm.halted = true; next = asm.pc; msg = trapMsg("addi", x + " + " + a[2], v, a[0]); }
+      else { setR(a[0], v); msg = a[0] + " ← " + a[1] + " + " + a[2] + " = " + x + " + " + a[2] + " = " + v; } break; }
+    case "addiu": { const x = R(a[1]), v = x + imm(a[2]); setR(a[0], v); msg = a[0] + " ← " + a[1] + " + " + a[2] + " = " + x + " + " + a[2] + " = " + v + (sgnOv(v) ? " → wrapped modulo 2^32 to " + R(a[0]) + " (addiu never traps)" : ""); break; }
     case "andi": { const v = R(a[1]) & imm(a[2]); setR(a[0], v); msg = a[0] + " ← " + a[1] + " AND " + a[2] + " = " + v; break; }
     case "ori": { const v = R(a[1]) | imm(a[2]); setR(a[0], v); msg = a[0] + " ← " + a[1] + " OR " + a[2] + " = " + v; break; }
     case "lui": { const v = imm(a[1]) << 16; setR(a[0], v); msg = a[0] + " ← " + a[1] + " << 16 = " + v; break; }
@@ -9692,7 +9731,7 @@ window.ROUNDA = {
     { key: "sys-disk", label: "Disk scheduling — FCFS vs SCAN", hint: "OS", go: () => sysGo("os", "sys-disk", "sys-disk") }
   ] });
   /* Concepts */
-  const conceptItems = [{ key: "concepts", label: "All concepts — index", hint: "19 interactive definitions", go: () => { setTopArea("concepts"); syncRail("concepts"); top(); } }];
+  const conceptItems = [{ key: "concepts", label: "All concepts — index", hint: Object.keys(CONCEPTS).length + " interactive definitions", go: () => { setTopArea("concepts"); syncRail("concepts"); top(); } }];
   Object.keys(CONCEPTS).forEach(id => conceptItems.push({
     key: "concept-" + id, label: CONCEPTS[id].term, hint: "Concept",
     go: () => { setTopArea("concepts"); syncRail("concepts"); lastConcept = "concept-" + id; openConcept(id); }
@@ -12421,5 +12460,951 @@ header.site{padding-top:0}
   window.addEventListener("orientationchange", measure);
   window.addEventListener("load", measure);
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(measure);
+})();
+</script>
+<style>
+/* ===== Round G — modules (declutter) + overflow demos =====
+   The site is grouped into six named modules. Module bodies fold
+   accordion-style; the Menu's groups carry the same names. */
+.module-block{border:1px solid var(--line2);border-radius:14px;background:var(--panel);box-shadow:var(--shadow);margin-top:16px;overflow:hidden}
+.module-head{display:flex;align-items:center;gap:10px;width:100%;text-align:left;border:0;border-bottom:1px solid var(--line);background:var(--panel2);padding:13px 16px;font:inherit;font-size:16px;font-weight:700;color:var(--ink);cursor:pointer}
+.module-head .mh-count{margin-left:auto;font-size:12.5px;font-weight:600;color:var(--muted);white-space:nowrap}
+.module-head .mh-chev{color:var(--amber);font-size:14px;flex:none}
+.module-body{padding:2px 14px 14px}
+.module-body > section{margin-top:12px}
+.module-banner{display:flex;align-items:baseline;gap:10px;border:1px solid var(--line2);border-radius:12px;background:var(--panel2);padding:11px 15px;margin-bottom:14px;font-size:15.5px}
+.module-banner span{margin-left:auto;font-size:12.5px;font-weight:600;color:var(--muted);white-space:nowrap}
+.module-index{margin-bottom:16px}
+.module-row{display:flex;gap:12px;align-items:baseline;width:100%;text-align:left;background:transparent;border:0;border-top:1px solid var(--line);padding:11px 4px;cursor:pointer;font:inherit;color:var(--ink)}
+.module-row:first-child{border-top:0}
+.module-row:hover{background:var(--panel2)}
+.module-row .mr-name{font-weight:700;flex:none;min-width:196px}
+.module-row .mr-blurb{color:var(--muted);font-size:13px;flex:1}
+.module-row .mr-count{font-weight:700;color:var(--amber);font-size:12.5px;white-space:nowrap}
+@media (max-width:640px){.module-row{flex-wrap:wrap}.module-row .mr-name{min-width:0}.module-row .mr-blurb{flex-basis:100%;order:3}}
+/* overflow demos */
+.ovf-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:12px}
+@media (max-width:860px){.ovf-grid{grid-template-columns:1fr}}
+.ovf-panel{border:1px solid var(--line);border-radius:11px;padding:13px 14px}
+.ovf-panel h3{margin:0 0 9px;font-size:15.5px}
+.ovf-panel .sketch{margin:0 0 11px}
+.ovf-out{margin-top:6px}
+.ovf-row{display:flex;flex-direction:column;gap:2px;padding:8px 0;border-top:1px dashed var(--line2)}
+.ovf-row b{font-size:11.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted)}
+.ovf-row span{font-family:var(--mono);font-size:12.8px;line-height:1.6;overflow-wrap:anywhere}
+.ovf-note{font-size:12.5px;color:var(--muted);margin:8px 0 0;line-height:1.55}
+.ovf-why{margin-top:16px;border-top:1px solid var(--line);padding-top:6px}
+.ovf-why p{font-size:14.5px;line-height:1.68;max-width:78ch}
+</style>
+<script>
+"use strict";
+/* ================================================================
+   ROUND G — two changes, presentation-first.
+   1) Trap & wrap-around in the Assembly lab: the engine now follows
+      real MIPS — add/sub/addi trap on signed overflow, addu/subu/
+      addiu wrap modulo 2^32 — and the demo card under the lab runs
+      both behaviours in that same simulator; every number in the
+      readouts is read back out of the machine's register file.
+   2) Modules: the whole site is grouped under six student-facing
+      module names. The Menu is rebuilt into those modules (item
+      nodes are moved, never recreated, so handlers survive), the
+      Systems wing becomes three folding module blocks — Computer
+      Organization (assembly lab + organization labs), Computer
+      Architecture (architecture simulators + labs), Operating
+      Systems (OS simulators + OS labs + OS in C) — and a compact
+      module index sits at the top of the page. Nothing is removed
+      and every entry still lands where it landed before.
+   ================================================================ */
+(function roundG() {
+  const $g = id => document.getElementById(id);
+  const jumpToG = id => { const el = id && $g(id); if (el) setTimeout(() => el.scrollIntoView({ behavior: "smooth", block: "start" }), 60); };
+
+  /* ================= 1) trap & wrap-around demos ================= */
+  const OVF_WRAP_SRC = [
+    "# Wrap-around: addu never traps — the sum rolls over",
+    "        lui   $t0, 32767        # 0x7FFF0000",
+    "        ori   $t0, $t0, 65535   # $t0 = 0x7FFFFFFF, largest signed value",
+    "        addi  $t1, $zero, 1",
+    "        addu  $t2, $t0, $t1     # 0x7FFFFFFF + 1 wraps to 0x80000000",
+    "        lui   $t3, 65535        # 0xFFFF0000",
+    "        ori   $t3, $t3, 65535   # $t3 = 0xFFFFFFFF, counter at its maximum",
+    "        addu  $t4, $t3, $t1     # 0xFFFFFFFF + 1 wraps to 0",
+    "        addi  $v0, $zero, 10    # exit",
+    "        syscall"
+  ].join("\n");
+  const OVF_TRAP_SRC = [
+    "# Trap: add checks for signed overflow — and refuses",
+    "        lui   $t0, 32767        # 0x7FFF0000",
+    "        ori   $t0, $t0, 65535   # $t0 = 0x7FFFFFFF, largest signed value",
+    "        addi  $t1, $zero, 1",
+    "        add   $t2, $t0, $t1     # OVERFLOW: the CPU traps, machine halts",
+    "        addi  $v0, $zero, 10    # never reached",
+    "        syscall"
+  ].join("\n");
+  if ($g("ovfWrapSrc")) $g("ovfWrapSrc").textContent = OVF_WRAP_SRC;
+  if ($g("ovfTrapSrc")) $g("ovfTrapSrc").textContent = OVF_TRAP_SRC;
+
+  function ovfRun(src) {
+    if (typeof stopAsmRun === "function") stopAsmRun();
+    $g("asmEditor").value = src;
+    asmLoad();
+    let guard = 0;
+    while (!asm.halted && guard++ < 400) asmStep();
+    return asm.regs.slice();
+  }
+  const ovfFmt = v => "0x" + (v >>> 0).toString(16).toUpperCase().padStart(8, "0") + " · unsigned " + (v >>> 0) + " · signed " + (v | 0);
+  const ovfRow = (k, v) => '<div class="ovf-row"><b>' + k + '</b><span>' + v + "</span></div>";
+  const esc = s => String(s).replace(/</g, "&lt;");
+  function ovfNarration() {
+    let t = $g("asmNarration").textContent.replace(/\s+/g, " ").trim();
+    return t.replace(/^Halted\s*/, "").replace(/\s*· cycles executed:.*$/, "").trim();
+  }
+  function ovfRenderWrap(regs) {
+    const g = n => regs[REG_IDX[n]];
+    $g("ovfWrapOut").innerHTML =
+      ovfRow("Before — $t0", ovfFmt(g("$t0"))) +
+      ovfRow("addu $t2 ← $t0 + 1", ovfFmt(g("$t2")) + " — the sum rolled past the top of the signed range and landed on the most negative value. The sign bit flipped and nothing complained.") +
+      ovfRow("Counter — addu $t4 ← $t3 + 1", "$t3 = " + ovfFmt(g("$t3")) + "  →  $t4 = " + ovfFmt(g("$t4")) + " — a counter at its maximum rolls back to zero.") +
+      '<p class="ovf-note">Run in the simulator above — these are the final values in its register file, and the demo program is sitting in the editor so you can step it yourself.</p>';
+  }
+  function ovfRenderTrap(regs, narr) {
+    const g = n => regs[REG_IDX[n]];
+    $g("ovfTrapOut").innerHTML =
+      ovfRow("Before — $t0", ovfFmt(g("$t0"))) +
+      ovfRow("add $t2 ← $t0 + 1", "TRAP. The machine halted at the add and $t2 was never written — it still holds " + ovfFmt(g("$t2")) + ". The exit lines under the add were never reached.") +
+      ovfRow("The simulator's own message", esc(narr)) +
+      '<p class="ovf-note">Same numbers as the wrap demo — the only difference is one letter in the instruction. The demo program is loaded in the lab above; step it and the trap fires on the add.</p>';
+  }
+  /* fill the readouts from a real run of the lab's simulator, then put
+     the lab back exactly as it was (starter program, freshly reset) */
+  try {
+    const savedEditor = $g("asmEditor").value;
+    ovfRenderWrap(ovfRun(OVF_WRAP_SRC));
+    const trapRegs = ovfRun(OVF_TRAP_SRC);
+    ovfRenderTrap(trapRegs, ovfNarration());
+    $g("asmEditor").value = savedEditor;
+    asmLoad();
+  } catch (e) { /* demos still run from their buttons */ }
+  if ($g("ovfRunWrap")) $g("ovfRunWrap").addEventListener("click", () => ovfRenderWrap(ovfRun(OVF_WRAP_SRC)));
+  if ($g("ovfRunTrap")) $g("ovfRunTrap").addEventListener("click", () => ovfRenderTrap(ovfRun(OVF_TRAP_SRC), ovfNarration()));
+
+  /* ================= modules: shared definitions ================= */
+  const MODULES = [
+    { id: "logic", name: "Logic & Circuits", blurb: "Gates, adders, the build-your-own sandbox, sequential logic and the breadboard." },
+    { id: "boards", name: "Boards, Modulation & Projects", blurb: "Real boards and parts, working projects, digital modulation and bench tools." },
+    { id: "org", name: "Computer Organization", blurb: "The MIPS assembly lab — trap vs wrap-around included — and the organization labs." },
+    { id: "arch", name: "Computer Architecture", blurb: "Datapath, cache and pipeline simulators, plus the architecture labs." },
+    { id: "os", name: "Operating Systems", blurb: "Scheduling, paging, disk and deadlock simulators, the OS labs and OS in C." },
+    { id: "concepts", name: "Concepts", blurb: "Definitions you can touch — every term is a working visual." }
+  ];
+
+  /* ================= 2) menu rebuilt into modules ================= */
+  const list = $g("menuList");
+  const KEY_MODULE = { "sys-asm": "org", "sys-isa": "org", "sys-debugger": "org",
+    "sys-datapath": "arch", "sys-cache": "arch", "sys-pipeline": "arch",
+    "sys-sched": "os", "sys-paging": "os", "sys-disk": "os", "sys-mlfq": "os",
+    "sys-banker": "os", "sys-memalloc": "os", "sys-translate": "os", "adv-scope": "boards" };
+  const BLOCK_MODULE = { "Circuits": "logic", "Breadboard": "logic",
+    "Build your own — sandbox, chips & challenges": "logic",
+    "Sequential logic, OS tools & instruments": "logic", "Systems": "org",
+    "Advanced — hardware, projects, tools": "boards", "More projects": "boards",
+    "Course labs — Operating Systems": "os", "Course labs — OS in C": "os",
+    "Course labs — Computer Architecture": "arch", "Course labs — Computer Organization": "org",
+    "Concepts": "concepts" };
+  const buckets = {}; MODULES.forEach(m => buckets[m.id] = []);
+  if (list) {
+    const blocks = []; let cur = null;
+    Array.prototype.slice.call(list.children).forEach(el => {
+      if (el.classList.contains("menu-group")) { cur = { name: (el.dataset.group || "").trim(), items: [] }; blocks.push(cur); }
+      else if (el.classList.contains("menu-item") && cur) cur.items.push(el);
+    });
+    blocks.forEach(b => b.items.forEach(it => {
+      const mod = KEY_MODULE[it.dataset.key] || BLOCK_MODULE[b.name] || "logic";
+      buckets[mod].push(it);
+    }));
+  }
+  function ovfGo(kind) {
+    setTopArea("systems"); syncRail("systems");
+    document.querySelector('#sysPicker [data-sys="assembly"]').click();
+    if (kind === "wrap") ovfRenderWrap(ovfRun(OVF_WRAP_SRC));
+    else ovfRenderTrap(ovfRun(OVF_TRAP_SRC), ovfNarration());
+    jumpToG("ovfCard");
+  }
+  function mkMenuItem(key, label, hint, go) {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "menu-item"; b.dataset.key = key;
+    b.dataset.search = (label + " " + hint + " computer organization assembly overflow").toLowerCase();
+    b.innerHTML = '<span class="mi-dot" aria-hidden="true"></span><span class="mi-label"></span><small></small>';
+    b.querySelector(".mi-label").textContent = label;
+    b.querySelector("small").textContent = hint;
+    b.addEventListener("click", () => { $g("menuPanel").hidden = true; $g("menuBtn").setAttribute("aria-expanded", "false"); go(); });
+    return b;
+  }
+  const orgBucket = buckets.org;
+  const isaIdx = orgBucket.findIndex(b => b.dataset.key === "sys-isa");
+  orgBucket.splice(isaIdx >= 0 ? isaIdx + 1 : 0, 0,
+    mkMenuItem("sys-ovf-wrap", "Wrap-around — addu rolls over", "Assembly · overflow", () => ovfGo("wrap")),
+    mkMenuItem("sys-ovf-trap", "Trap — add raises an overflow exception", "Assembly · overflow", () => ovfGo("trap")));
+  const counts = {}; MODULES.forEach(m => counts[m.id] = buckets[m.id].length);
+  let newBlocks = [];
+  if (list) {
+    list.innerHTML = "";
+    newBlocks = MODULES.map(m => {
+      const h = document.createElement("div");
+      h.className = "menu-group"; h.dataset.group = m.name; h.textContent = m.name;
+      const c = document.createElement("span"); c.className = "mi-count"; c.textContent = buckets[m.id].length;
+      h.appendChild(c);
+      h.setAttribute("role", "button"); h.setAttribute("tabindex", "0"); h.title = "Fold / unfold this module";
+      list.appendChild(h);
+      buckets[m.id].forEach(it => list.appendChild(it));
+      return { module: m, header: h, items: buckets[m.id] };
+    });
+    const setFoldNB = (b, folded) => {
+      b.header.dataset.folded = folded ? "true" : "false";
+      b.header.setAttribute("aria-expanded", folded ? "false" : "true");
+      b.items.forEach(it => it.classList.toggle("menu-folded", folded));
+    };
+    newBlocks.forEach(b => {
+      setFoldNB(b, true);
+      const toggle = () => { const opening = b.header.dataset.folded === "true"; newBlocks.forEach(o => setFoldNB(o, true)); if (opening) setFoldNB(b, false); };
+      b.header.addEventListener("click", toggle);
+      b.header.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } });
+    });
+    const markCurrentNB = () => {
+      const curItem = list.querySelector('[aria-current="true"]');
+      newBlocks.forEach(b => {
+        const mine = !!curItem && b.items.indexOf(curItem) >= 0;
+        b.header.classList.toggle("has-current", mine);
+        let tag = b.header.querySelector(".mi-here");
+        if (mine && !tag) { tag = document.createElement("span"); tag.className = "mi-here"; tag.textContent = "you are here"; b.header.appendChild(tag); }
+        if (!mine && tag) tag.remove();
+      });
+    };
+    $g("menuBtn").addEventListener("click", () => {
+      setTimeout(() => {
+        if ($g("menuPanel").hidden) return;
+        markCurrentNB();
+        const f = $g("menuFilter");
+        if (f && f.value.trim()) return;
+        newBlocks.forEach(b => setFoldNB(b, true));
+        const marked = list.querySelector(".menu-group.has-current");
+        if (marked) setTimeout(() => { if (marked.scrollIntoView) marked.scrollIntoView({ block: "nearest" }); }, 40);
+      }, 140);
+    });
+    const filterG = $g("menuFilter");
+    if (filterG) filterG.addEventListener("input", () => {
+      if (filterG.value.trim()) newBlocks.forEach(b => setFoldNB(b, false));
+      else newBlocks.forEach(b => setFoldNB(b, true));
+    });
+    window.LAB_MENU = { groups: MODULES.map(m => ({ name: m.name, items: buckets[m.id].map(b => { const l = b.querySelector(".mi-label"); return l ? l.textContent : ""; }) })),
+      count: newBlocks.reduce((s, b) => s + b.items.length, 0) };
+    window.LAB_MENU_F = { blocks: newBlocks.map(b => ({ name: b.module.name, count: b.items.length, folded: true })), total: window.LAB_MENU.count };
+  }
+
+  /* ================= 3) page modules ================= */
+  function moduleHead(name, count) {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "module-head"; b.setAttribute("aria-expanded", "true");
+    b.innerHTML = '<span class="mh-name"></span><span class="mh-count"></span><span class="mh-chev" aria-hidden="true">▾</span>';
+    b.querySelector(".mh-name").textContent = "Module · " + name;
+    b.querySelector(".mh-count").textContent = count + " items";
+    return b;
+  }
+  function setHeadFold(head, body, folded) {
+    body.hidden = folded;
+    head.setAttribute("aria-expanded", folded ? "false" : "true");
+    const c = head.querySelector(".mh-chev"); if (c) c.textContent = folded ? "▸" : "▾";
+  }
+
+  /* --- Advanced view: one module block around picker + sections
+         (the organization labs move to Computer Organization below) --- */
+  const advView = $g("advancedView");
+  const advBlock = document.createElement("div"); advBlock.className = "module-block"; advBlock.id = "module-boards";
+  const advHead = moduleHead("Boards, Modulation & Projects", counts.boards);
+  const advBody = document.createElement("div"); advBody.className = "module-body";
+  advBlock.appendChild(advHead); advBlock.appendChild(advBody);
+  advView.insertBefore(advBlock, advView.firstChild);
+  ["advPicker", "advExplorers", "advComponents", "advProjects", "advModulation", "advTools"].forEach(id => { const el = $g(id); if (el) advBody.appendChild(el); });
+  advHead.addEventListener("click", () => setHeadFold(advHead, advBody, !advBody.hidden));
+
+  /* --- Systems view: partition the course-labs section by track --- */
+  const labsEl = $g("sysLabs");
+  const trackIds = ["sysLabsOs", "sysLabsOsc", "sysLabsArch"];
+  const trackSecs = trackIds.map(id => { const s = document.createElement("section"); s.id = id; s.className = "track-sec"; s.hidden = true; return s; });
+  (function partitionLabs() {
+    const groups = [[], [], []]; let gi = -1;
+    Array.prototype.slice.call(labsEl.children).forEach(ch => {
+      if (ch.tagName === "H2") gi++;
+      if (gi >= 0 && groups[gi]) groups[gi].push(ch);
+    });
+    groups.forEach((g, i) => g.forEach(ch => trackSecs[i].appendChild(ch)));
+  })();
+
+  /* --- Systems view: three module blocks --- */
+  const sysView = $g("systemsView");
+  function sysModule(id, name, panels) {
+    const block = document.createElement("div"); block.className = "module-block"; block.id = "module-" + id;
+    const head = moduleHead(name, counts[id]);
+    const body = document.createElement("div"); body.className = "module-body";
+    panels.forEach(p => { if (p) body.appendChild(p); });
+    block.appendChild(head); block.appendChild(body);
+    sysView.appendChild(block);
+    return { head, body };
+  }
+  const SYS_MODS = {
+    org: sysModule("org", "Computer Organization", [$g("sysAssembly"), $g("advOrg")]),
+    arch: sysModule("arch", "Computer Architecture", [$g("sysArch"), trackSecs[2]]),
+    os: sysModule("os", "Operating Systems", [$g("sysOs"), trackSecs[0], trackSecs[1], labsEl])
+  };
+  const PANEL_MODULE = { sysAssembly: "org", advOrg: "org", sysArch: "arch", sysLabsArch: "arch", sysOs: "os", sysLabsOs: "os", sysLabsOsc: "os" };
+  const ALL_PANELS = Object.keys(PANEL_MODULE);
+  function setModuleFold(id, folded) { const m = SYS_MODS[id]; if (m) setHeadFold(m.head, m.body, folded); }
+  function activePanel() { for (const p of ALL_PANELS) { const el = $g(p); if (el && !el.hidden) return p; } return null; }
+  function showSysPanel(pid) {
+    ALL_PANELS.forEach(p => { const el = $g(p); if (el) el.hidden = p !== pid; });
+    const mid = PANEL_MODULE[pid];
+    Object.keys(SYS_MODS).forEach(k => setModuleFold(k, k !== mid));
+  }
+  setModuleFold("arch", true); setModuleFold("os", true);
+  Object.keys(SYS_MODS).forEach(id => {
+    SYS_MODS[id].head.addEventListener("click", () => {
+      const m = SYS_MODS[id];
+      if (m.body.hidden) {
+        const ap = activePanel();
+        if (ap && PANEL_MODULE[ap] === id) setModuleFold(id, false);
+        else showSysPanel(id === "org" ? "sysAssembly" : id === "arch" ? "sysArch" : "sysOs");
+      } else setModuleFold(id, true);
+    });
+  });
+  /* picker stays the panel switcher; these listeners run after the
+     originals and keep module folds + track sections in step */
+  let pendingTrack = "sysLabsOs";
+  document.querySelectorAll("#sysPicker [data-sys]").forEach(b => b.addEventListener("click", () => {
+    const v = b.dataset.sys;
+    if (v === "assembly") showSysPanel("sysAssembly");
+    else if (v === "arch") showSysPanel("sysArch");
+    else if (v === "os") showSysPanel("sysOs");
+    else if (v === "labs") showSysPanel(pendingTrack);
+  }));
+  /* organization labs now live in the Computer Organization module */
+  function goOrgLabs(target) {
+    setTopArea("systems"); syncRail("systems");
+    showSysPanel("advOrg");
+    document.querySelectorAll("#sysPicker [data-sys]").forEach(x => x.setAttribute("aria-pressed", "false"));
+    if (target) jumpToG(target);
+  }
+  const advPickerEl = $g("advPicker");
+  if (advPickerEl) advPickerEl.addEventListener("click", e => {
+    const b = e.target.closest('[data-adv="org"]'); if (!b) return;
+    e.preventDefault(); e.stopPropagation();
+    advPickerEl.querySelectorAll("[data-adv]").forEach(x => x.setAttribute("aria-pressed", x === b ? "true" : "false"));
+    goOrgLabs(null);
+  }, true);
+  if (typeof window.reGo === "function") {
+    const _reGoG = window.reGo;
+    window.reGo = function (spec) {
+      const parts = String(spec).split(":");
+      if (parts[0] === "org") { goOrgLabs(parts[1] || null); return; }
+      if (parts[0] === "labs" && parts[1]) {
+        const el = $g(parts[1]); const sec = el && el.closest("section");
+        if (sec && trackIds.indexOf(sec.id) >= 0) pendingTrack = sec.id;
+      }
+      _reGoG(spec);
+    };
+  }
+  /* any navigation (menu, tabs, rail) unfolds the module that owns
+     the panel it landed on, and folds the other two */
+  document.addEventListener("click", e => {
+    if (!e.target.closest || !e.target.closest(".menu-item, .topnav-btn, .area-card, .module-row")) return;
+    setTimeout(() => {
+      if (!$g("systemsView").hidden) {
+        const ap = activePanel();
+        if (ap) { const mid = PANEL_MODULE[ap]; Object.keys(SYS_MODS).forEach(k => setModuleFold(k, k !== mid)); }
+      }
+      if (!$g("advancedView").hidden && advBody.hidden) setHeadFold(advHead, advBody, false);
+    }, 180);
+  });
+
+  /* --- banners for the single-module areas --- */
+  function banner(parent, name, count) {
+    if (!parent) return;
+    const d = document.createElement("div"); d.className = "module-banner";
+    d.innerHTML = "<b></b><span></span>";
+    d.querySelector("b").textContent = "Module · " + name;
+    d.querySelector("span").textContent = count + " items in the Menu";
+    parent.insertBefore(d, parent.firstChild);
+  }
+  banner($g("circuitsView"), "Logic & Circuits", counts.logic);
+  banner($g("conceptsView"), "Concepts", counts.concepts);
+
+  /* --- compact module index at the top of the page --- */
+  function goModule(id) {
+    if (id === "logic") { setTopArea("circuits"); syncRail("circuits"); }
+    else if (id === "boards") { setTopArea("advanced"); syncRail("advanced"); setHeadFold(advHead, advBody, false); }
+    else if (id === "concepts") { setTopArea("concepts"); syncRail("concepts"); }
+    else { setTopArea("systems"); syncRail("systems"); showSysPanel(id === "org" ? "sysAssembly" : id === "arch" ? "sysArch" : "sysOs"); }
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+  const idx = document.createElement("section");
+  idx.className = "card module-index"; idx.id = "moduleIndex";
+  idx.innerHTML = '<div class="ctrl-label" style="margin-bottom:6px">Modules — the whole site in six paths</div>' +
+    '<p class="what" style="margin:0 0 6px">Everything here belongs to one module, so the site reads as six short paths instead of one long page. Pick a path — the Menu at the top right is the full index inside each one.</p>';
+  const idxList = document.createElement("div");
+  MODULES.forEach(m => {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "module-row";
+    b.innerHTML = '<span class="mr-name"></span><span class="mr-blurb"></span><span class="mr-count"></span>';
+    b.querySelector(".mr-name").textContent = m.name;
+    b.querySelector(".mr-blurb").textContent = m.blurb;
+    b.querySelector(".mr-count").textContent = counts[m.id] + " items";
+    b.addEventListener("click", () => goModule(m.id));
+    idxList.appendChild(b);
+  });
+  idx.appendChild(idxList);
+  const cv = $g("circuitsView");
+  if (cv && cv.parentNode) cv.parentNode.insertBefore(idx, cv);
+  window.LAB_MODULES = { modules: MODULES.map(m => ({ id: m.id, name: m.name, count: counts[m.id] })), total: MODULES.reduce((s, m) => s + counts[m.id], 0) };
+})();
+</script>
+<style>
+/* ===== Round I — explorer highlight fix =====
+   Every ALL PARTS entry always had a drawn region, but selecting one
+   highlighted nothing: the amber stroke rule lost to the shapes'
+   inline stroke styles, and for group-wrapped parts it landed on a
+   <g> with no geometry of its own. Force the stroke on the shapes
+   themselves and add a glow on the part group, so a selection is
+   visible for every part on both diagrams. */
+.hz-part.selected .hz-shape, .hz-part.selected .hz-shape rect, .hz-part.selected .hz-shape circle,
+.hz-part.selected .hz-shape ellipse, .hz-part.selected .hz-shape line, .hz-part.selected .hz-shape path{stroke:var(--amber) !important;stroke-width:3}
+.hz-part.selected{filter:drop-shadow(0 0 7px rgba(245,166,35,.95))}
+.hz-part.selected .hz-label{fill:var(--amber)}
+.hz-part.correct .hz-shape, .hz-part.correct .hz-shape rect, .hz-part.correct .hz-shape circle,
+.hz-part.correct .hz-shape ellipse, .hz-part.correct .hz-shape line, .hz-part.correct .hz-shape path{stroke:var(--green) !important;stroke-width:3}
+.hz-part.wrong .hz-shape, .hz-part.wrong .hz-shape rect, .hz-part.wrong .hz-shape circle,
+.hz-part.wrong .hz-shape ellipse, .hz-part.wrong .hz-shape line, .hz-part.wrong .hz-shape path{stroke:var(--red) !important;stroke-width:3}
+/* ===== Round H — breadboard project picker ===== */
+.bb-picker{margin:0 0 12px;border:1px solid var(--line);border-radius:11px;padding:10px 12px;background:var(--panel2)}
+.bb-picker .bp-head{display:flex;align-items:center;gap:8px;width:100%;text-align:left;border:0;background:transparent;padding:5px 2px;font:inherit;font-size:11.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);cursor:pointer}
+.bb-picker .bp-head .bp-chev{margin-left:auto;color:var(--amber);letter-spacing:0}
+.bb-picker .bp-row{display:flex;flex-wrap:wrap;gap:6px;padding:3px 0 7px}
+.bb-picker .bp-row button{border:1px solid var(--line2);background:var(--panel);border-radius:8px;padding:7px 11px;font-size:12.5px;font-weight:600;cursor:pointer;color:var(--ink);min-height:40px}
+.bb-picker .bp-row button small{display:block;font-weight:500;color:var(--muted);font-size:11px}
+.bb-picker .bp-row button[aria-pressed="true"]{background:var(--amber-soft);border-color:var(--amber)}
+</style>
+<script>
+"use strict";
+/* ================================================================
+   ROUND H — breadboard projects, in three levels.
+   The full adder board is untouched (the fault trainer depends on
+   it byte for byte). Every other project is a data spec: a gate
+   netlist (evaluated by the site's own netlist engine — truth
+   tables, propagation, meter and lamps all read the same def) plus
+   a chip placement that follows the site's own 74xx pin data
+   (CHIPS74). Selecting a project swaps the stage's def/inputs
+   under the full+breadboard identity the stage machinery keys on,
+   and restores the real full adder on any exit path.
+   ================================================================ */
+/*BBP-DATA-BEGIN*/
+const BBP_PROJECTS = [
+  { id: "not", level: "beginner", name: "NOT gate", chipsLabel: "7404 · one inverter",
+    what: "One inverter of the 7404 hex NOT: whatever goes in on pin 1 comes out flipped on pin 2.",
+    expr: "Y = ¬A", words: "The simplest bench build there is: one chip, one gate, and the output is always the opposite of the input.",
+    inputs: ["A"], outputs: ["Y"], defaults: { A: 1 }, build: ["7404"],
+    gates: [ { type: "NOT", ins: ["A"], out: "Y", chip: 0, gate: 1 } ] },
+  { id: "and", level: "beginner", name: "AND gate", chipsLabel: "7408 · one AND",
+    what: "One AND gate of the 7408: the LED lights only when both switches are on.",
+    expr: "Y = A · B", words: "One gate of a quad AND chip does all the work — the other three gates sit spare, as they do on a real bench.",
+    inputs: ["A", "B"], outputs: ["Y"], defaults: { A: 1, B: 0 }, build: ["7408"],
+    gates: [ { type: "AND", ins: ["A", "B"], out: "Y", chip: 0, gate: 1 } ] },
+  { id: "or", level: "beginner", name: "OR gate", chipsLabel: "7432 · one OR",
+    what: "One OR gate of the 7432: the LED lights when either switch (or both) is on.",
+    expr: "Y = A + B", words: "One OR gate, wired exactly like the AND build — only the chip changes.",
+    inputs: ["A", "B"], outputs: ["Y"], defaults: { A: 1, B: 0 }, build: ["7432"],
+    gates: [ { type: "OR", ins: ["A", "B"], out: "Y", chip: 0, gate: 1 } ] },
+  { id: "xor", level: "beginner", name: "XOR gate", chipsLabel: "7486 · one XOR",
+    what: "One XOR gate of the 7486: the LED lights when the switches disagree.",
+    expr: "Y = A ⊕ B", words: "XOR is the 'different' detector — and the gate every adder on this board is built from.",
+    inputs: ["A", "B"], outputs: ["Y"], defaults: { A: 1, B: 0 }, build: ["7486"],
+    gates: [ { type: "XOR", ins: ["A", "B"], out: "Y", chip: 0, gate: 1 } ] },
+  { id: "nand", level: "beginner", name: "NAND gate", chipsLabel: "7408 + 7404 · AND, then NOT",
+    what: "An AND gate feeding a NOT: the output is 0 only when both inputs are 1. Two chips for one gate — this is how NAND is really built when no 7400 is on hand.",
+    expr: "Y = ¬(A · B)", words: "AND then NOT, in series: the signal passes through two chips, so the LED answers one gate delay later than the AND build.",
+    inputs: ["A", "B"], outputs: ["Y"], defaults: { A: 1, B: 1 }, build: ["7408", "7404"],
+    gates: [ { type: "AND", ins: ["A", "B"], out: "w", chip: 0, gate: 1 },
+             { type: "NOT", ins: ["w"], out: "Y", chip: 1, gate: 1 } ] },
+  { id: "nor", level: "beginner", name: "NOR gate", chipsLabel: "7432 + 7404 · OR, then NOT",
+    what: "An OR gate feeding a NOT: the output is 1 only when both inputs are 0.",
+    expr: "Y = ¬(A + B)", words: "OR then NOT — the mirror of the NAND build, and the other universal gate.",
+    inputs: ["A", "B"], outputs: ["Y"], defaults: { A: 0, B: 0 }, build: ["7432", "7404"],
+    gates: [ { type: "OR", ins: ["A", "B"], out: "w", chip: 0, gate: 1 },
+             { type: "NOT", ins: ["w"], out: "Y", chip: 1, gate: 1 } ] },
+  { id: "halfadd", level: "intermediate", name: "Half adder", chipsLabel: "7486 + 7408 · XOR sum, AND carry",
+    what: "The full adder's younger sibling: XOR makes the Sum, AND makes the Carry. With no carry-in it can only ever be the first column of an addition.",
+    expr: "Sum = A ⊕ B · Carry = A · B", words: "Two gates read the same switches at the same time, so Sum and Carry arrive together — one gate delay.",
+    inputs: ["A", "B"], outputs: ["Sum", "Carry"], defaults: { A: 1, B: 1 }, build: ["7486", "7408"],
+    gates: [ { type: "XOR", ins: ["A", "B"], out: "Sum", chip: 0, gate: 1 },
+             { type: "AND", ins: ["A", "B"], out: "Carry", chip: 1, gate: 1 } ] },
+  { id: "halfsub", level: "intermediate", name: "Half subtractor", chipsLabel: "7486 + 7404 + 7408 · difference & borrow",
+    what: "Subtraction's half adder: XOR gives the Difference, and a borrow is needed exactly when A is 0 and B is 1 — that is ¬A · B, so the 7404 inverts A before the AND.",
+    expr: "D = A ⊕ B · Bout = ¬A · B", words: "The difference bit is just 'the bits differ'. A borrow happens only for 0 − 1: you take 2 from the next column and the difference is 1.",
+    inputs: ["A", "B"], outputs: ["D", "Bout"], defaults: { A: 1, B: 1 }, build: ["7486", "7404", "7408"],
+    gates: [ { type: "XOR", ins: ["A", "B"], out: "D", chip: 0, gate: 1 },
+             { type: "NOT", ins: ["A"], out: "nA", chip: 1, gate: 1 },
+             { type: "AND", ins: ["nA", "B"], out: "Bout", chip: 2, gate: 1 } ] },
+  { id: "mux", level: "intermediate", name: "Multiplexer 2-to-1", chipsLabel: "7404 + 7408 + 7432 · select line chooses",
+    what: "A digitally controlled switch: S = 0 passes D0 to Y, S = 1 passes D1. The 7404 makes ¬S, the two ANDs arm one input each, the OR takes whichever is armed.",
+    expr: "Y = D0·¬S + D1·S", words: "Only one AND gate is armed at a time — the select bit decides which input is even allowed through to the OR.",
+    inputs: ["D0", "D1", "S"], outputs: ["Y"], defaults: { D0: 1, D1: 0, S: 0 }, build: ["7404", "7408", "7432"],
+    gates: [ { type: "NOT", ins: ["S"], out: "nS", chip: 0, gate: 1 },
+             { type: "AND", ins: ["D0", "nS"], out: "w0", chip: 1, gate: 1 },
+             { type: "AND", ins: ["D1", "S"], out: "w1", chip: 1, gate: 2 },
+             { type: "OR", ins: ["w0", "w1"], out: "Y", chip: 2, gate: 1 } ] },
+  { id: "parity", level: "intermediate", name: "Odd-parity generator", chipsLabel: "7486 · two XORs",
+    what: "Two XORs of one 7486 chained: P is 1 exactly when an odd number of the three inputs are 1. This is the bit a transmitter appends to a byte so a receiver can spot a single flipped bit.",
+    expr: "P = A ⊕ B ⊕ C", words: "XOR chained is a parity counter: every 1 that arrives flips the running answer, so P ends up as 'odd or even?' for the whole set.",
+    inputs: ["A", "B", "C"], outputs: ["P"], defaults: { A: 1, B: 0, C: 0 }, build: ["7486"],
+    gates: [ { type: "XOR", ins: ["A", "B"], out: "w", chip: 0, gate: 1 },
+             { type: "XOR", ins: ["w", "C"], out: "P", chip: 0, gate: 2 } ] },
+  { id: "comp", level: "intermediate", name: "Comparator 1-bit", chipsLabel: "7486 + 7404 + 7408 · EQ · GT · LT",
+    what: "Three lamps, exactly one lit: EQ when the bits match (XOR, then NOT — an XNOR built from the kit), GT when A·¬B, LT when ¬A·B. Every bigger comparison is this question asked bit by bit.",
+    expr: "EQ = ¬(A ⊕ B) · GT = A·¬B · LT = ¬A·B", words: "A > B needs A on and B off; A < B is the mirror; anything else is equality. One lamp is always lit — check all four rows.",
+    inputs: ["A", "B"], outputs: ["EQ", "GT", "LT"], defaults: { A: 1, B: 0 }, build: ["7486", "7404", "7408"],
+    gates: [ { type: "XOR", ins: ["A", "B"], out: "x", chip: 0, gate: 1 },
+             { type: "NOT", ins: ["x"], out: "EQ", chip: 1, gate: 1 },
+             { type: "NOT", ins: ["A"], out: "nA", chip: 1, gate: 2 },
+             { type: "NOT", ins: ["B"], out: "nB", chip: 1, gate: 3 },
+             { type: "AND", ins: ["A", "nB"], out: "GT", chip: 2, gate: 1 },
+             { type: "AND", ins: ["nA", "B"], out: "LT", chip: 2, gate: 2 } ] },
+  { id: "fullsub", level: "advanced", name: "Full subtractor", chipsLabel: "7486 + 7404 + 7408 + 7432 · two half subtractors",
+    what: "Two half-subtractor stages across four chips: the first takes B from A, the second takes the borrow-in from that result. Either stage can demand a borrow out, so the two borrow terms meet in the OR.",
+    expr: "D = A ⊕ B ⊕ Bin · Bout = ¬A·B + ¬(A ⊕ B)·Bin", words: "The full adder's shape, mirrored: the second stage subtracts the borrow the first stage could not cover.",
+    inputs: ["A", "B", "Bin"], outputs: ["D", "Bout"], defaults: { A: 1, B: 0, Bin: 1 }, build: ["7486", "7404", "7408", "7432"],
+    gates: [ { type: "XOR", ins: ["A", "B"], out: "s1", chip: 0, gate: 1 },
+             { type: "XOR", ins: ["s1", "Bin"], out: "D", chip: 0, gate: 2 },
+             { type: "NOT", ins: ["A"], out: "nA", chip: 1, gate: 1 },
+             { type: "NOT", ins: ["s1"], out: "ns1", chip: 1, gate: 2 },
+             { type: "AND", ins: ["nA", "B"], out: "b1", chip: 2, gate: 1 },
+             { type: "AND", ins: ["ns1", "Bin"], out: "b2", chip: 2, gate: 2 },
+             { type: "OR", ins: ["b1", "b2"], out: "Bout", chip: 3, gate: 1 } ] },
+  { id: "ripple2", level: "advanced", name: "2-bit ripple adder", chipsLabel: "7486 + 7408 + 7432 · two full adders chained",
+    what: "Two full adders on three chips — all four XORs of the 7486 and all four ANDs of the 7408 are working. Bit 0 must finish before bit 1 can: flip Cin and watch the carry ripple through the middle OR into the second stage.",
+    expr: "{Cout, S1, S0} = A + B + Cin", words: "Chaining adders is how real multi-bit addition is built: each column's carry out becomes the next column's carry in, and the wait for it is the price.",
+    inputs: ["A1", "A0", "B1", "B0", "Cin"], outputs: ["S0", "S1", "Cout"], defaults: { A1: 0, A0: 1, B1: 0, B0: 1, Cin: 0 }, build: ["7486", "7408", "7432"],
+    gates: [ { type: "XOR", ins: ["A0", "B0"], out: "x0", chip: 0, gate: 1 },
+             { type: "AND", ins: ["A0", "B0"], out: "ca0", chip: 1, gate: 1 },
+             { type: "XOR", ins: ["x0", "Cin"], out: "S0", chip: 0, gate: 2 },
+             { type: "AND", ins: ["x0", "Cin"], out: "cb0", chip: 1, gate: 2 },
+             { type: "OR", ins: ["ca0", "cb0"], out: "cry", chip: 2, gate: 1 },
+             { type: "XOR", ins: ["A1", "B1"], out: "x1", chip: 0, gate: 3 },
+             { type: "AND", ins: ["A1", "B1"], out: "ca1", chip: 1, gate: 3 },
+             { type: "XOR", ins: ["x1", "cry"], out: "S1", chip: 0, gate: 4 },
+             { type: "AND", ins: ["x1", "cry"], out: "cb1", chip: 1, gate: 4 },
+             { type: "OR", ins: ["ca1", "cb1"], out: "Cout", chip: 2, gate: 2 } ] },
+  { id: "alu", level: "advanced", name: "1-bit ALU slice", chipsLabel: "7486 + 7408 ×2 + 7432 + 7404 · add/sub/AND/OR",
+    what: "One bit of a real ALU. The adder always runs: Sub flips B (Sub = 1 with Cin = 1 subtracts). Two mux stages pick what reaches F — OP1 OP0 = 0× the adder's Sum, 10 AND, 11 OR. Cout always reports the adder's carry, as it does in a real slice.",
+    expr: "Bx = B ⊕ Sub · Sum = A ⊕ Bx ⊕ Cin · OP 0×: Sum · 10: A·B · 11: A+B", words: "Add and subtract share one adder — subtracting is adding the flipped B plus one. The control lines then pick which answer reaches the output.",
+    inputs: ["A", "B", "Cin", "Sub", "OP1", "OP0"], outputs: ["F", "Cout"],
+    defaults: { A: 1, B: 1, Cin: 0, Sub: 0, OP1: 0, OP0: 0 }, build: ["7486", "7408", "7408", "7432", "7404"],
+    gates: [ { type: "XOR", ins: ["B", "Sub"], out: "Bx", chip: 0, gate: 1 },
+             { type: "XOR", ins: ["A", "Bx"], out: "s1", chip: 0, gate: 2 },
+             { type: "XOR", ins: ["s1", "Cin"], out: "Sum", chip: 0, gate: 3 },
+             { type: "AND", ins: ["A", "Bx"], out: "k1", chip: 1, gate: 1 },
+             { type: "AND", ins: ["s1", "Cin"], out: "k2", chip: 1, gate: 2 },
+             { type: "OR", ins: ["k1", "k2"], out: "Cout", chip: 3, gate: 1 },
+             { type: "AND", ins: ["A", "B"], out: "Ar", chip: 1, gate: 3 },
+             { type: "OR", ins: ["A", "B"], out: "Or", chip: 3, gate: 2 },
+             { type: "NOT", ins: ["OP0"], out: "nOP0", chip: 4, gate: 1 },
+             { type: "NOT", ins: ["OP1"], out: "nOP1", chip: 4, gate: 2 },
+             { type: "AND", ins: ["Ar", "nOP0"], out: "m1a", chip: 1, gate: 4 },
+             { type: "AND", ins: ["Or", "OP0"], out: "m1b", chip: 2, gate: 1 },
+             { type: "OR", ins: ["m1a", "m1b"], out: "m1", chip: 3, gate: 3 },
+             { type: "AND", ins: ["Sum", "nOP1"], out: "m2a", chip: 2, gate: 2 },
+             { type: "AND", ins: ["m1", "OP1"], out: "m2b", chip: 2, gate: 3 },
+             { type: "OR", ins: ["m2a", "m2b"], out: "F", chip: 3, gate: 4 } ] }
+];
+/*BBP-DATA-END*/
+const BBP_LEVELS = [
+  { id: "beginner", label: "Beginner — single gates" },
+  { id: "intermediate", label: "Intermediate — gates combined" },
+  { id: "advanced", label: "Advanced — multi-chip systems" }
+];
+const BBH = { active: "full", fullInputs: state.inputs.full, projects: {}, inputs: {} };
+BBP_PROJECTS.forEach(p => {
+  p.def = computeLevels({ inputs: p.inputs.slice(), outputs: p.outputs.slice(),
+    gates: p.gates.map((g, i) => ({ id: "g" + i, type: g.type, ins: g.ins.slice(), out: g.out })) });
+  BBH.projects[p.id] = p;
+  BBH.inputs[p.id] = Object.assign({}, p.defaults);
+});
+
+/* ---------- generic breadboard renderer (full adder's board is NOT
+   routed through this — it keeps its own hand-drawn renderer) ---------- */
+const BBP_FN_LABEL = { "7408": "QUAD AND", "7432": "QUAD OR", "7486": "QUAD XOR", "7404": "HEX NOT" };
+const BBP_PALETTE = ["#d9480f", "#1971c2", "#862e9c", "#e67700", "#1098ad", "#a61e4d", "#2f9e44", "#e03131", "#0c8599", "#5f3dc4", "#d6336c", "#66a80f", "#1c7ed6", "#f08c00"];
+function drawBBProject(P, st) {
+  const rows = Math.ceil(P.build.length / 3);
+  const H = rows === 2 ? 930 : 600;
+  const chipY = r => 283 + r * 330;
+  const slotX = c => [150, 420, 690][c];
+  const swY = H - 144;
+  function pinPos(ci, pin) {
+    const col = ci % 3, row = Math.floor(ci / 3), y = chipY(row), xs0 = slotX(col);
+    if (pin <= 7) return { x: xs0 + (pin - 1) * 27, y: y + 66, side: 1 };
+    return { x: xs0 + (14 - pin) * 27, y: y - 16, side: -1 };
+  }
+  const srcs = {}, sinks = {}, netLevel = {}, netColor = {};
+  let colorIdx = 0;
+  const colorOf = n => { if (!netColor[n]) netColor[n] = BBP_PALETTE[colorIdx++ % BBP_PALETTE.length]; return netColor[n]; };
+  P.inputs.forEach(n => { netLevel[n] = 0; colorOf(n); });
+  P.gates.forEach((g, gi) => {
+    const pins = CHIPS74[P.build[g.chip]].gates[g.gate - 1];
+    srcs[g.out] = pinPos(g.chip, pins[pins.length - 1]);
+    netLevel[g.out] = P.def.gates[gi].level || 1;
+    colorOf(g.out);
+    g.ins.forEach((n, ii) => { (sinks[n] = sinks[n] || []).push(pinPos(g.chip, pins[ii])); });
+  });
+  const nIn = P.inputs.length;
+  const swX = {}; P.inputs.forEach((n, i) => { swX[n] = nIn <= 3 ? [110, 240, 370][i] : 86 + i * 118; });
+  P.inputs.forEach(n => { srcs[n] = { x: swX[n], y: swY, side: -1 }; });
+  const nOut = P.outputs.length;
+  const lastSw = nIn <= 3 ? 370 : 86 + (nIn - 1) * 118;
+  const ledStart = Math.max(700, lastSw + 120);
+  const ledStep = nOut > 1 ? Math.min(72, (884 - ledStart) / (nOut - 1)) : 0;
+  const ledX = {}; P.outputs.forEach((n, i) => { ledX[n] = Math.round(ledStart + i * ledStep); colorOf(n); });
+  P.outputs.forEach(n => { (sinks[n] = sinks[n] || []).push({ x: ledX[n], y: swY - 4, side: -1 }); });
+
+  let s = "";
+  s += '<rect class="bb-board" x="10" y="10" width="900" height="' + (H - 20) + '" rx="14"/>';
+  s += '<line class="bb-rail-plus" x1="46" y1="58" x2="886" y2="58"/><line class="bb-rail-minus" x1="46" y1="88" x2="886" y2="88"/>';
+  s += '<line class="bb-rail-plus" x1="46" y1="' + (H - 88) + '" x2="886" y2="' + (H - 88) + '"/><line class="bb-rail-minus" x1="46" y1="' + (H - 58) + '" x2="886" y2="' + (H - 58) + '"/>';
+  s += '<text class="bb-txt" x="24" y="62" style="fill:#dc2626;font-weight:700">+</text><text class="bb-txt" x="24" y="92" style="fill:#2563eb;font-weight:700">−</text>';
+  s += '<text class="bb-txt" x="24" y="' + (H - 84) + '" style="fill:#dc2626;font-weight:700">+</text><text class="bb-txt" x="24" y="' + (H - 54) + '" style="fill:#2563eb;font-weight:700">−</text>';
+  s += '<text class="bb-txt" x="892" y="62" text-anchor="end">5V</text><text class="bb-txt" x="892" y="92" text-anchor="end">GND</text>';
+  s += '<text class="bb-txt" x="892" y="' + (H - 54) + '" text-anchor="end">GND</text>';
+  /* holes */
+  let holes = "";
+  const colX = i => 60 + i * 27;
+  const holeRows = [];
+  for (let y = 170; y <= H - 150; y += 25) {
+    let inChip = false;
+    for (let r = 0; r < rows; r++) { if (y > chipY(r) - 24 && y < chipY(r) + 60) inChip = true; }
+    if (!inChip) holeRows.push(y);
+  }
+  for (let i = 0; i <= 30; i++) {
+    [58, 88, H - 88, H - 58].forEach(y => holes += '<circle class="bb-hole" cx="' + colX(i) + '" cy="' + y + '" r="3"/>');
+    holeRows.forEach(y => holes += '<circle class="bb-hole" cx="' + colX(i) + '" cy="' + y + '" r="3.2"/>');
+    if (i % 5 === 0) {
+      holes += '<text class="bb-txt col" x="' + colX(i) + '" y="152">' + (i + 1) + "</text>";
+      holes += '<text class="bb-txt col" x="' + colX(i) + '" y="' + (H - 130) + '">' + (i + 1) + "</text>";
+    }
+  }
+  s += holes;
+  holeRows.forEach((y, i) => { s += '<text class="bb-txt" x="40" y="' + (y + 3) + '">' + "abcdefghij"[i % 10] + "</text>"; });
+  for (let r = 0; r < rows; r++) s += '<text class="bb-txt" x="460" y="' + (chipY(r) + 25) + '" text-anchor="middle" style="font-size:11px">centre gap — each DIP chip straddles it, so its two pin rows are on separate halves</text>';
+  /* power jumpers */
+  P.build.forEach((part, ci) => {
+    const col = ci % 3, row = Math.floor(ci / 3), y = chipY(row), xs0 = slotX(col), xs6 = xs0 + 6 * 27;
+    if (row === 0) s += bbJumper("ONE", "#e03131", -1, "M " + xs0 + " " + (y - 16) + " V 118 H " + (xs0 - 16) + " V 61");
+    else s += bbJumper("ONE", "#e03131", -1, "M " + xs0 + " " + (y - 16) + " V " + (y - 176) + " H 28 V 61 H 44");
+    s += bbJumper("ZERO", "#343a40", -1, "M " + xs6 + " " + (y + 66) + " V " + (y + 150) + " H " + (xs6 + 14) + " V " + (H - 61));
+  });
+  /* signal jumpers */
+  const wireD = (a, b) => "M " + a.x + " " + a.y + " C " + a.x + " " + (a.y + a.side * 46) + ", " + b.x + " " + (b.y + b.side * 46) + ", " + b.x + " " + b.y;
+  Object.keys(sinks).forEach(net => {
+    const src = srcs[net]; if (!src) return;
+    sinks[net].forEach(t => { s += bbJumper(net, colorOf(net), netLevel[net] || 0, wireD(src, t)); });
+  });
+  /* chips */
+  P.build.forEach((part, ci) => {
+    const col = ci % 3, row = Math.floor(ci / 3), y = chipY(row), xs0 = slotX(col);
+    const xs = i => xs0 + i * 27;
+    for (let i = 0; i < 7; i++) {
+      s += '<rect class="bb-pin" x="' + (xs(i) - 3) + '" y="' + (y - 17) + '" width="6" height="18"/>';
+      s += '<rect class="bb-pin" x="' + (xs(i) - 3) + '" y="' + (y + 48) + '" width="6" height="18"/>';
+    }
+    const bx = xs0 - 14, bw = 6 * 27 + 28;
+    s += '<rect class="bb-chip" x="' + bx + '" y="' + y + '" width="' + bw + '" height="50" rx="5"/>';
+    s += '<path d="M ' + bx + " " + (y + 10) + " A 10 10 0 0 1 " + bx + " " + (y + 30) + '" fill="none" stroke="#aeb9c4" stroke-width="1.6"/>';
+    s += '<circle cx="' + xs0 + '" cy="' + (y + 41) + '" r="2.4" fill="#aeb9c4"/>';
+    s += '<text class="bb-chip-name" x="' + (bx + bw / 2) + '" y="' + (y + 22) + '">' + part + "</text>";
+    s += '<text class="bb-chip-sub" x="' + (bx + bw / 2) + '" y="' + (y + 36) + '">' + BBP_FN_LABEL[part] + " · pin 14 = +5V · pin 7 = GND</text>";
+    for (let pin = 1; pin <= 14; pin++) {
+      const p = pinPos(ci, pin);
+      s += '<text class="bb-pin-num" x="' + p.x + '" y="' + (pin <= 7 ? y + 46 : y + 10) + '">' + pin + "</text>";
+    }
+    s += '<g><circle class="bb-badge" data-bbbadge="ONE" cx="' + xs0 + '" cy="' + (y - 31) + '" r="9.5"/><text class="bb-badge-txt one" data-bbbadgetxt="ONE" x="' + xs0 + '" y="' + (y - 27) + '">1</text></g>';
+    P.gates.forEach(g => {
+      if (g.chip !== ci) return;
+      const pins = CHIPS74[part].gates[g.gate - 1];
+      pins.forEach((pin, ii) => {
+        const net = ii === pins.length - 1 ? g.out : g.ins[ii];
+        const p = pinPos(ci, pin);
+        const by = pin <= 7 ? y + 81 : y - 31;
+        s += '<g><circle class="bb-badge" data-bbbadge="' + net + '" cx="' + p.x + '" cy="' + by + '" r="9.5"/><text class="bb-badge-txt" data-bbbadgetxt="' + net + '" x="' + p.x + '" y="' + (by + 4) + '">–</text></g>';
+      });
+    });
+  });
+  /* switches */
+  P.inputs.forEach(n => {
+    const x = swX[n], val = st.inputs[n] ? 1 : 0;
+    s += '<g class="in-node' + (val ? " on" : "") + '" data-input="' + n + '">';
+    s += '<rect x="' + (x - 34) + '" y="' + swY + '" width="68" height="42" rx="7" style="fill:var(--panel);stroke:var(--line2)"/>';
+    s += '<rect x="' + (x - 22) + '" y="' + (swY + 10) + '" width="44" height="12" rx="6" style="fill:var(--panel2);stroke:var(--line2)"/>';
+    s += '<circle data-swknob="' + n + '" data-kx="' + x + '" cx="' + (val ? x + 13 : x - 13) + '" cy="' + (swY + 16) + '" r="6.5" style="fill:var(--amber)"/>';
+    s += '<text class="in-name" x="' + x + '" y="' + (swY + 36) + '">' + n + " = " + val + "</text></g>";
+  });
+  s += '<text class="bb-txt" x="76" y="' + (swY - 6) + '">switches — click to flip</text>';
+  /* LEDs */
+  const ledColors = { red: "#ef4444", green: "#22c55e", blue: "#3b82f6", yellow: "#eab308" };
+  const ledNames = ["red", "green", "blue", "yellow"];
+  P.outputs.forEach((n, i) => {
+    const x = ledX[n], cname = ledNames[i % 4], colr = ledColors[cname];
+    s += '<line x1="' + (x - 6) + '" y1="' + (swY + 22) + '" x2="' + (x - 6) + '" y2="' + (H - 61) + '" stroke="#868e96" stroke-width="2.4"/>';
+    s += '<line x1="' + (x + 6) + '" y1="' + (swY + 22) + '" x2="' + (x + 6) + '" y2="' + (swY + 44) + '" stroke="#868e96" stroke-width="2.4"/>';
+    s += '<path d="M ' + (x + 6) + " " + (swY + 44) + " h 14 v " + (H - 61 - (swY + 44)) + '" fill="none" stroke="#495057" stroke-width="2.2"/>';
+    if (x + 44 < 912) s += '<text class="bb-txt" x="' + (x + 22) + '" y="' + (swY + 36) + '">220Ω</text>';
+    s += '<circle class="bb-led-off" data-bbled="' + n + '" cx="' + x + '" cy="' + (swY + 8) + '" r="13" data-color="' + colr + '"/>';
+    s += '<text class="bb-txt" x="' + x + '" y="' + (swY - 10) + '" text-anchor="middle" style="font-weight:700">' + n.toUpperCase() + " · " + cname + "</text>";
+  });
+  s += '<text class="bb-txt" x="640" y="' + (H - 20) + '">LED cathodes return to the GND rail through a 220 Ω resistor — never wire an LED straight across 5 V.</text>';
+  return { viewBox: "0 0 920 " + H, svg: s };
+}
+function paintBBP(pulsedLevel) {
+  const d = state.displayed, box = $("stageBox");
+  box.querySelectorAll("[data-bbnet]").forEach(el => {
+    const net = el.dataset.bbnet, v = d[net];
+    el.classList.remove("on", "pulse");
+    if (v) el.classList.add("on");
+    if (pulsedLevel !== null && +el.dataset.bblevel === pulsedLevel && v !== undefined) el.classList.add("pulse");
+  });
+  box.querySelectorAll("[data-bbbadgetxt]").forEach(el => {
+    const v = d[el.dataset.bbbadgetxt];
+    el.textContent = v === undefined ? "–" : v;
+    el.classList.toggle("one", !!v);
+  });
+  box.querySelectorAll("[data-bbled]").forEach(el => {
+    const v = d[el.dataset.bbled];
+    if (v) { el.style.fill = el.dataset.color; el.style.filter = "drop-shadow(0 0 9px " + el.dataset.color + ")"; }
+    else { el.style.fill = ""; el.style.filter = ""; }
+  });
+  box.querySelectorAll("[data-swknob]").forEach(el => {
+    const v = curInputs()[el.dataset.swknob], base = +el.dataset.kx;
+    el.setAttribute("cx", v ? base + 13 : base - 13);
+  });
+  box.querySelectorAll("[data-input]").forEach(el => {
+    el.classList.toggle("on", !!curInputs()[el.dataset.input]);
+    const t = el.querySelector(".in-name");
+    if (t) t.textContent = el.dataset.input + " = " + curInputs()[el.dataset.input];
+  });
+  document.querySelectorAll("[data-toggle]").forEach(el => {
+    const v = curInputs()[el.dataset.toggle];
+    el.classList.toggle("on", !!v); el.querySelector(".tval").textContent = v;
+  });
+}
+
+/* ---------- stage integration ---------- */
+function bbInProject() { return BBH.active !== "full" && state.circuitId === "full" && state.view === "breadboard"; }
+function bbSync() {
+  if (state.circuitId === "full" && state.view === "breadboard" && BBH.active !== "full") {
+    state.inputs.full = BBH.inputs[BBH.active];
+    state.def = BBH.projects[BBH.active].def;
+    renderStage(); renderTruth(); startPropagation();
+    if (typeof refreshChrono === "function") refreshChrono(true);
+    if (typeof meterRefresh === "function") meterRefresh(true);
+  }
+}
+function bbSetProject(id) {
+  if (id !== "full" && typeof BBF !== "undefined" && BBF.active) { const ex = $("bbfExit"); if (ex) ex.click(); }
+  BBH.active = id;
+  if (state.circuitId !== "full" || state.view !== "breadboard") { selectCircuit("full"); setView("breadboard"); }
+  if (id === "full") {
+    state.inputs.full = BBH.fullInputs;
+    state.def = computeLevels(defFullAdder());
+    renderStage(); renderTruth(); startPropagation();
+    if (typeof refreshChrono === "function") refreshChrono(true);
+    if (typeof meterRefresh === "function") meterRefresh(true);
+  } else bbSync();
+  bbPaintPicker();
+}
+const _drawBBH = drawBreadboard;
+drawBreadboard = function (st) {
+  if (BBH.active !== "full") return drawBBProject(BBH.projects[BBH.active], st);
+  return _drawBBH(st);
+};
+const _paintBBH2 = paintBreadboard;
+paintBreadboard = function (lvl) {
+  if (bbInProject()) { paintBBP(lvl); return; }
+  _paintBBH2(lvl);
+};
+const _pdH = paintDecimal;
+paintDecimal = function () {
+  _pdH();
+  if (!bbInProject()) return;
+  const P = BBH.projects[BBH.active], d = state.displayed, ins = curInputs();
+  $("decimalLine").textContent = P.def.inputs.map(n => n + " " + ins[n]).join(" · ") + "  →  " +
+    P.def.outputs.map(n => n + " " + (state.settled ? d[n] : "…")).join(" · ");
+  $("checkLine").textContent = state.settled
+    ? "✓ Wired from real 74xx chips — all " + (1 << P.def.inputs.length) + " truth-table rows beside the stage are computed by the netlist engine."
+    : "";
+  const bp = $("begSummary"); if (bp) bp.textContent = P.words;
+  const np = $("netlistPanel");
+  if (np) np.textContent = "Breadboard build: " + P.build.join(" + ") + " · " + P.def.gates.length + " gates wired · longest path = " + P.def.maxLevel + " gate levels\nBoolean: " + P.expr;
+};
+const _selH = selectCircuit;
+selectCircuit = function (id) {
+  if (BBH.active !== "full" && id !== "full") { state.inputs.full = BBH.fullInputs; state.def = computeLevels(defFullAdder()); }
+  _selH(id); bbSync();
+};
+const _setViewH = setView;
+setView = function (v) {
+  if (BBH.active !== "full" && v !== "breadboard") { state.inputs.full = BBH.fullInputs; state.def = computeLevels(defFullAdder()); }
+  _setViewH(v); bbSync();
+};
+/* the fault trainer always gets its own board back */
+document.addEventListener("click", e => {
+  if (e.target && e.target.id === "bbfNew" && BBH.active !== "full") {
+    BBH.active = "full"; state.inputs.full = BBH.fullInputs; state.def = computeLevels(defFullAdder()); bbPaintPicker();
+  }
+}, true);
+/* meter: the trainer's extra probe pins belong to the full-adder board only */
+const _meterNetsH = meterNets;
+meterNets = function () {
+  const n = _meterNetsH();
+  if (BBH.active === "full") return n;
+  return n.filter(x => ["P14_7486", "P2_7486", "P13_7486"].indexOf(x) < 0);
+};
+
+/* ---------- project picker UI ---------- */
+const bbPickerEl = document.createElement("div");
+bbPickerEl.className = "bb-picker"; bbPickerEl.id = "bbPicker"; bbPickerEl.hidden = true;
+bbPickerEl.setAttribute("aria-label", "Breadboard projects");
+(function buildBBPicker() {
+  const intro = document.createElement("div");
+  intro.className = "ctrl-label"; intro.style.marginBottom = "4px";
+  intro.textContent = "Breadboard projects — pick a build";
+  bbPickerEl.appendChild(intro);
+  BBP_LEVELS.forEach((lv, li) => {
+    const head = document.createElement("button");
+    head.type = "button"; head.className = "bp-head"; head.setAttribute("aria-expanded", li === 0 ? "true" : "false");
+    head.innerHTML = "<span></span><span class=\"bp-chev\">" + (li === 0 ? "▾" : "▸") + "</span>";
+    head.querySelector("span").textContent = lv.label;
+    const row = document.createElement("div");
+    row.className = "bp-row"; row.hidden = li !== 0;
+    head.addEventListener("click", () => {
+      const open = row.hidden = !row.hidden;
+      head.setAttribute("aria-expanded", open ? "true" : "false");
+      head.querySelector(".bp-chev").textContent = open ? "▾" : "▸";
+    });
+    bbPickerEl.appendChild(head); bbPickerEl.appendChild(row);
+    const items = lv.id === "advanced"
+      ? [{ id: "full", name: "Full adder", chipsLabel: "7486 · 7408 · 7432" }].concat(BBP_PROJECTS.filter(p => p.level === "advanced"))
+      : BBP_PROJECTS.filter(p => p.level === lv.id);
+    items.forEach(p => {
+      const b = document.createElement("button");
+      b.type = "button"; b.dataset.bbproj = p.id; b.setAttribute("aria-pressed", p.id === "full" ? "true" : "false");
+      b.innerHTML = "<span></span><small></small>";
+      b.querySelector("span").textContent = p.name;
+      b.querySelector("small").textContent = p.chipsLabel;
+      b.addEventListener("click", () => bbSetProject(p.id));
+      row.appendChild(b);
+    });
+  });
+})();
+const stageBoxEl = $("stageBox");
+if (stageBoxEl && stageBoxEl.parentNode) stageBoxEl.parentNode.insertBefore(bbPickerEl, stageBoxEl);
+function bbPaintPicker() {
+  bbPickerEl.querySelectorAll("[data-bbproj]").forEach(b => b.setAttribute("aria-pressed", b.dataset.bbproj === BBH.active ? "true" : "false"));
+}
+function bbPartsHTML(P) {
+  let html = '<ul class="parts-list">';
+  P.build.forEach((part, ci) => {
+    const used = P.gates.filter(g => g.chip === ci);
+    const contrib = used.map(g => {
+      const pins = CHIPS74[part].gates[g.gate - 1];
+      return "Gate " + g.gate + ": " + g.ins.join(" · ") + " → " + g.out + " (pins (" + pins.slice(0, -1).join(",") + ")→" + pins[pins.length - 1] + ")";
+    }).join(" · ");
+    html += "<li><b>" + part + "</b> — " + BBP_FN_LABEL[part].toLowerCase() + '<span class="contrib">' + contrib + ".</span></li>";
+  });
+  html += "<li><b>Switches ×" + P.inputs.length + ", LEDs ×" + P.outputs.length + ", 220 Ω ×" + P.outputs.length + '</b><span class="contrib">Switches drive ' + P.inputs.join(", ") + ". One LED per output (" + P.outputs.join(", ") + "), each with its own resistor to ground.</span></li></ul>" +
+    '<p class="bench-note">Wired as on a real bench: pin 14 of every chip to +5 V, pin 7 to ground, inputs on switches, outputs on LEDs. The badges on the pins show the live 0/1 at each used pin, and the truth table beside the stage is the check — set the switches, compare lamps.</p>';
+  return html;
+}
+const _renderStageH = renderStage;
+renderStage = function () {
+  _renderStageH();
+  const inBB = state.circuitId === "full" && state.view === "breadboard" && !$("circuitsView").hidden;
+  bbPickerEl.hidden = !inBB;
+  if (!inBB || BBH.active === "full") return;
+  const P = BBH.projects[BBH.active];
+  $("stageTitle").textContent = P.name + " — on the breadboard";
+  $("stageWhat").textContent = P.what;
+  $("exprLine").textContent = P.expr;
+  const panel = $("extraPanel"), body = $("extraBody");
+  panel.hidden = false; $("extraTitle").textContent = "Parts list — the bench build";
+  body.innerHTML = bbPartsHTML(P);
+};
+
+/* ---------- menu registration (Breadboard grouping, by level) ----------
+   The items join the existing breadboard entries inside the
+   Logic & Circuits module group; counts are then rebuilt from the
+   live DOM so the Menu, module index and banners all agree. */
+(function registerBBProjects() {
+  const list = $("menuList"); if (!list) return;
+  const levelName = { beginner: "Beginner", intermediate: "Intermediate", advanced: "Advanced" };
+  const mk = p => {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "menu-item"; b.dataset.key = "bb-" + p.id;
+    b.dataset.search = (p.name + " breadboard " + levelName[p.level] + " " + p.chipsLabel + " project").toLowerCase();
+    b.innerHTML = '<span class="mi-dot" aria-hidden="true"></span><span class="mi-label"></span><small></small>';
+    b.querySelector(".mi-label").textContent = p.name + " — on the breadboard";
+    b.querySelector("small").textContent = "Breadboard · " + levelName[p.level];
+    b.addEventListener("click", () => {
+      $("menuPanel").hidden = true; $("menuBtn").setAttribute("aria-expanded", "false");
+      setTopArea("circuits"); syncRail("breadboard"); bbSetProject(p.id);
+      const t = $("stageTitle"); if (t) setTimeout(() => t.scrollIntoView({ behavior: "smooth", block: "start" }), 60);
+    });
+    return b;
+  };
+  const ordered = BBP_PROJECTS.slice().sort((a, b) =>
+    BBP_LEVELS.findIndex(l => l.id === a.level) - BBP_LEVELS.findIndex(l => l.id === b.level));
+  let anchor = list.querySelector('[data-key="fault-trainer"]') || list.querySelector('[data-key="breadboard"]');
+  if (!anchor) return;
+  ordered.forEach(p => { const b = mk(p); anchor.parentNode.insertBefore(b, anchor.nextSibling); anchor = b; });
+  /* rebuild every count from the live menu DOM */
+  const groups = []; let cur = null;
+  Array.prototype.slice.call(list.children).forEach(el => {
+    if (el.classList.contains("menu-group")) { cur = { name: (el.dataset.group || "").trim(), header: el, items: [] }; groups.push(cur); }
+    else if (el.classList.contains("menu-item") && cur) cur.items.push(el);
+  });
+  let total = 0;
+  groups.forEach(g => {
+    total += g.items.length;
+    const c = g.header.querySelector(".mi-count"); if (c) c.textContent = g.items.length;
+  });
+  window.LAB_MENU = { groups: groups.map(g => ({ name: g.name, items: g.items.map(b => { const l = b.querySelector(".mi-label"); return l ? l.textContent : ""; }) })), count: total };
+  window.LAB_MENU_F = { blocks: groups.map(g => ({ name: g.name, count: g.items.length, folded: g.header.dataset.folded === "true" })), total };
+  window.LAB_MODULES = { modules: groups.map(g => ({ name: g.name, count: g.items.length })), total };
+  document.querySelectorAll(".module-row").forEach(r => {
+    const nm = r.querySelector(".mr-name"), ct = r.querySelector(".mr-count");
+    if (!nm || !ct) return;
+    const g = groups.find(x => x.name === nm.textContent.trim());
+    if (g) ct.textContent = g.items.length + " items";
+  });
+  document.querySelectorAll(".module-banner").forEach(bn => {
+    const b = bn.querySelector("b"), sp = bn.querySelector("span");
+    if (!b || !sp) return;
+    const g = groups.find(x => ("Module · " + x.name) === b.textContent.trim());
+    if (g) sp.textContent = g.items.length + " items in the Menu";
+  });
+  const mhCount = document.querySelector("#module-org .mh-count");
+  if (mhCount) { /* systems module heads keep their own module counts — recomputed below */ }
+  ["org", "arch", "os"].forEach(id => {
+    const head = document.querySelector("#module-" + id + " .mh-count");
+    if (!head) return;
+    const gname = { org: "Computer Organization", arch: "Computer Architecture", os: "Operating Systems" }[id];
+    const g = groups.find(x => x.name === gname);
+    if (g) head.textContent = g.items.length + " items";
+  });
+  const boardsHead = document.querySelector("#module-boards .mh-count");
+  if (boardsHead) { const g = groups.find(x => x.name === "Boards, Modulation & Projects"); if (g) boardsHead.textContent = g.items.length + " items"; }
 })();
 </script>
