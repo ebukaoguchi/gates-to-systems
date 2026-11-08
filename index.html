@@ -11307,3 +11307,1044 @@ drGen();
   renderPickerFold();
 })();
 </script>
+
+<style>
+/* ===== Round F: Verilog export, fault trainer, UART, menu declutter ===== */
+.menu-group{cursor:pointer;padding-right:20px;position:relative}
+.menu-group::after{content:"▾";position:absolute;right:6px;top:0;color:var(--muted);font-size:11px}
+.menu-group[data-folded="true"]::after{content:"▸"}
+.menu-group .mi-count{font-weight:600;color:var(--amber);letter-spacing:0;text-transform:none;margin-left:6px;font-size:11px}
+.menu-item.menu-folded{display:none !important}
+.menu-fold-row{display:flex;gap:6px;margin-top:8px}
+.menu-fold-row button{border:1px solid var(--line2);background:var(--panel2);border-radius:7px;padding:4px 10px;font-size:12px;font-weight:600;cursor:pointer;color:var(--ink)}
+.uart-seg-wrap{display:flex;flex-wrap:wrap;gap:12px 20px;align-items:flex-end;margin-top:10px}
+.uart-lab-svg text{font-family:"IBM Plex Mono",monospace}
+.bbf-opts{display:flex;flex-direction:column;align-items:stretch;gap:6px;margin-top:8px}
+.bbf-opts button{border:1px solid var(--line2);background:var(--panel);border-radius:8px;padding:8px 12px;font-family:"IBM Plex Mono",monospace;font-size:12.5px;font-weight:600;cursor:pointer;text-align:left;color:var(--ink)}
+.bbf-opts button[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+#sbVerilogCode{white-space:pre;overflow:auto}
+</style>
+<script>
+"use strict";
+/* ================================================================
+   ROUND F — three features on the site's own machinery:
+   1. Verilog export from the sandbox netlist (with a parser-based
+      self-verification against the engine's truth tables).
+   2. Breadboard fault-finding trainer — faults act on the simulated
+      nets of the real breadboard full adder (three-valued logic:
+      a floating net is genuinely undefined, and the existing
+      multimeter / lamps / badges read it as such).
+   3. UART serial-link simulator — frame encoder + a receiver that
+      samples the waveform at its own baud rate.
+   Plus: Menu registration for all three, and a reorganise-only
+   Menu declutter (group ordering + folding; nothing removed,
+   nothing renamed).
+   ================================================================ */
+const $F = id => document.getElementById(id);
+const escF = s => String(s).replace(/</g, "&lt;");
+
+/* ================================================================
+   F1 — VERILOG EXPORT
+   ================================================================ */
+const VLG_RESERVED = new Set(("module endmodule input output wire assign reg always always_ff always_comb begin end if else case endcase default posedge negedge initial parameter localparam genvar generate endgenerate function endfunction task endtask supply0 supply1 tri wand wor buf not and or nand nor xnor xor logic bit int integer time real event").split(" "));
+function vlgSanitize(raw) {
+  let t = String(raw == null ? "" : raw).replace(/[^A-Za-z0-9_$]/g, "_");
+  if (!t) t = "sig";
+  if (/^[0-9]/.test(t)) t = "n_" + t;
+  if (VLG_RESERVED.has(t)) t += "_sig";
+  return t;
+}
+function vlgUniquifier() {
+  const used = new Set(), map = {};
+  return {
+    port(label) {
+      if (map[label]) return map[label];
+      let base = vlgSanitize(label), id = base, k = 2;
+      while (used.has(id)) id = base + "_" + (k++);
+      used.add(id); map[label] = id; return id;
+    },
+    wire(base) { let id = base, k = 2; while (used.has(id)) id = base + "_" + (k++); used.add(id); return id; },
+    has(id) { return used.has(id); }
+  };
+}
+function vlgExpr(type, ins) {
+  if (type === "NOT") return "~" + ins[0];
+  if (type === "AND") return ins.join(" & ");
+  if (type === "OR") return ins.join(" | ");
+  if (type === "XOR") return ins.join(" ^ ");
+  if (type === "NAND") return "~(" + ins.join(" & ") + ")";
+  if (type === "NOR") return "~(" + ins.join(" | ") + ")";
+  if (type === "XNOR") return "~(" + ins.join(" ^ ") + ")";
+  return ins[0] || "1'b0";
+}
+/* Generate one module from a sandbox-format design. Returns
+   { text, renames:[{from,to}], portMap:{label:id}, instances:[chipNames] } */
+function vlgModule(design, modName, chipModules, chipPortMaps) {
+  const uniq = vlgUniquifier();
+  const renames = [];
+  const inParts = design.parts.filter(p => p.kind === "in");
+  const outParts = design.parts.filter(p => p.kind === "out");
+  const portMap = {};
+  inParts.concat(outParts).forEach(p => {
+    const id = uniq.port(p.label);
+    portMap[p.label] = id;
+    if (id !== p.label) renames.push({ from: p.label, to: id });
+  });
+  const partById = {}; design.parts.forEach(p => partById[p.id] = p);
+  const gateWire = {};   /* gate part id -> wire name */
+  const chipWire = {};   /* chip part id + ':' + pin label -> wire name */
+  design.parts.filter(p => p.kind === "gate").forEach(p => { gateWire[p.id] = uniq.wire("n" + p.id); });
+  const chipNameOf = {};
+  design.parts.filter(p => p.kind === "chip").forEach(p => {
+    chipNameOf[p.id] = chipModules[p.chip];
+    sbxGateOuts(p).forEach(pin => { chipWire[p.id + ":" + pin] = uniq.wire("n" + p.id + "_" + vlgSanitize(pin)); });
+  });
+  function srcNet(w) {
+    const p = partById[w.f.p]; if (!p) return "1'b0";
+    if (p.kind === "in") return portMap[p.label];
+    if (p.kind === "gate") return gateWire[p.id];
+    if (p.kind === "chip") return chipWire[p.id + ":" + w.f.pin];
+    return "1'b0";
+  }
+  function wireTo(partId, pin) { return design.wires.find(w => w.t.p === partId && w.t.pin === pin); }
+  const lines = [];
+  const portDecls = [];
+  inParts.forEach(p => portDecls.push("input wire " + portMap[p.label]));
+  outParts.forEach(p => portDecls.push("output wire " + portMap[p.label]));
+  lines.push("module " + modName + " (");
+  lines.push(portDecls.map(d => "  " + d).join(",\n"));
+  lines.push(");");
+  Object.keys(gateWire).forEach(id => lines.push("  wire " + gateWire[id] + ";"));
+  Object.keys(chipWire).forEach(k => lines.push("  wire " + chipWire[k] + ";"));
+  const usedChips = [];
+  design.parts.filter(p => p.kind === "gate" || p.kind === "chip").forEach(p => {
+    if (p.kind === "gate") {
+      const ins = sbxGateIns(p).map(pin => { const w = wireTo(p.id, pin); return w ? srcNet(w) : "1'b0"; });
+      lines.push("  assign " + gateWire[p.id] + " = " + vlgExpr(p.type, ins) + ";  // " + p.type + " gate");
+    } else {
+      if (usedChips.indexOf(p.chip) < 0) usedChips.push(p.chip);
+      const conns = [];
+      const pm = (chipPortMaps && chipPortMaps[p.chip]) || {};
+      const portName = pin => pm[pin] || vlgSanitize(pin);
+      sbxGateIns(p).forEach(pin => { const w = wireTo(p.id, pin); conns.push("." + portName(pin) + "(" + (w ? srcNet(w) : "") + ")"); });
+      sbxGateOuts(p).forEach(pin => conns.push("." + portName(pin) + "(" + chipWire[p.id + ":" + pin] + ")"));
+      lines.push("  " + chipModules[p.chip] + " u" + p.id + " (" + conns.join(", ") + ");  // saved chip “" + p.chip + "”");
+    }
+  });
+  outParts.forEach(p => { const w = wireTo(p.id, "i"); lines.push("  assign " + portMap[p.label] + " = " + (w ? srcNet(w) : "1'b0") + ";"); });
+  lines.push("endmodule");
+  return { text: lines.join("\n"), renames, portMap, usedChips };
+}
+function vlgGenerate(design) {
+  /* NB: the caller refreshes SBX_CHIP_LIB (sbRefreshChipLib) — this
+     function must not, or verification with a temporary chip breaks. */
+  const built = sbxBuildDef(design);
+  if (!built.def) return { error: built.errors && built.errors.length ? built.errors[0] : "The design does not build." };
+  /* submodule names for every chip used (dedupe by definition) */
+  const chipModules = {}, renames = [];
+  const seenDef = {};
+  design.parts.filter(p => p.kind === "chip").forEach(p => {
+    if (chipModules[p.chip]) return;
+    const def = SBX_CHIP_LIB[p.chip];
+    if (!def) return;
+    let base = vlgSanitize(p.chip), name = base, k = 2;
+    const key = JSON.stringify(def.design);
+    while (seenDef[name] && seenDef[name] !== key) name = base + "_" + (k++);
+    seenDef[name] = key; chipModules[p.chip] = name;
+    if (name !== p.chip) renames.push({ from: p.chip, to: name });
+  });
+  /* generate submodules first so the top module's instance connections
+     use the submodules' actual port names */
+  const subTexts = {}, subPortMaps = {};
+  Object.keys(chipModules).forEach(name => {
+    const def = SBX_CHIP_LIB[name]; if (!def) return;
+    const sub = vlgModule(def.design, chipModules[name], {}, null);
+    subTexts[name] = sub.text; subPortMaps[name] = sub.portMap;
+    renames.push.apply(renames, sub.renames);
+  });
+  const top = vlgModule(design, "sandbox_design", chipModules, subPortMaps);
+  renames.push.apply(renames, top.renames);
+  let text = "// Generated from the free-build sandbox — every assign below is one gate\n" +
+    "// of the design's actual netlist, and the ports are the design's own\n" +
+    "// input switches (inputs) and output lamps (outputs), in canvas order.\n";
+  if (renames.length) text += "// Labels changed to make valid Verilog identifiers: " + renames.map(r => "“" + r.from + "” → " + r.to).join(", ") + ".\n";
+  text += "\n" + top.text + "\n";
+  top.usedChips.forEach(name => {
+    if (!subTexts[name]) return;
+    text += "\n// Submodule for the saved chip “" + name + "” — generated from the chip's\n// own saved netlist, so the hierarchy matches what you built.\n" + subTexts[name] + "\n";
+  });
+  return { text, renames, portMap: top.portMap, chips: top.usedChips };
+}
+/* --- a small parser + evaluator for exactly the Verilog subset the
+       exporter emits (assigns with ~ & | ^ and parentheses, and
+       module instantiations). Used to prove the emitted text, parsed
+       back, reproduces the engine's truth table on every row. --- */
+function vlgTokenize(s) {
+  const toks = []; let i = 0;
+  while (i < s.length) {
+    const c = s[i];
+    if (/\s/.test(c)) { i++; continue; }
+    if ("~&|^()".indexOf(c) >= 0) { toks.push(c); i++; continue; }
+    const m = /^[A-Za-z0-9_$]+/.exec(s.slice(i));
+    if (m) { toks.push(m[0]); i += m[0].length; continue; }
+    if (s.slice(i, i + 4) === "1'b0" || s.slice(i, i + 4) === "1'b1") { toks.push(s.slice(i, i + 4)); i += 4; continue; }
+    i++;
+  }
+  return toks;
+}
+function vlgParseExpr(s) {
+  const toks = vlgTokenize(s); let pos = 0;
+  function parseOr() { let a = parseXor(); while (toks[pos] === "|") { pos++; a = { op: "|", a, b: parseXor() }; } return a; }
+  function parseXor() { let a = parseAnd(); while (toks[pos] === "^") { pos++; a = { op: "^", a, b: parseAnd() }; } return a; }
+  function parseAnd() { let a = parseUnary(); while (toks[pos] === "&") { pos++; a = { op: "&", a, b: parseUnary() }; } return a; }
+  function parseUnary() { if (toks[pos] === "~") { pos++; return { op: "~", a: parseUnary() }; } return parsePrim(); }
+  function parsePrim() {
+    const t = toks[pos++];
+    if (t === "(") { const e = parseOr(); pos++; return e; }
+    if (t === "1'b0") return { op: "const", v: 0 };
+    if (t === "1'b1") return { op: "const", v: 1 };
+    return { op: "net", name: t };
+  }
+  return parseOr();
+}
+function vlgEvalAst(ast, nets) {
+  if (ast.op === "const") return ast.v;
+  if (ast.op === "net") return nets[ast.name] === undefined ? undefined : (nets[ast.name] ? 1 : 0);
+  if (ast.op === "~") { const a = vlgEvalAst(ast.a, nets); return a === undefined ? undefined : (a ? 0 : 1); }
+  const a = vlgEvalAst(ast.a, nets), b = vlgEvalAst(ast.b, nets);
+  if (a === undefined || b === undefined) return undefined;
+  if (ast.op === "&") return a & b;
+  if (ast.op === "|") return a | b;
+  return a ^ b;
+}
+function vlgParseModules(text) {
+  const clean = text.replace(/\/\/[^\n]*/g, "");
+  const mods = {};
+  const re = /module\s+([A-Za-z0-9_$]+)\s*\(([\s\S]*?)\)\s*;([\s\S]*?)endmodule/g;
+  let m;
+  while ((m = re.exec(clean))) {
+    const ports = m[2].split(",").map(s => s.trim()).filter(Boolean).map(d => {
+      const mm = /^(input|output)\s+(?:wire\s+)?([A-Za-z0-9_$]+)$/.exec(d);
+      return mm ? { dir: mm[1], name: mm[2] } : null;
+    }).filter(Boolean);
+    const assigns = [], instances = [];
+    m[3].split(";").map(s => s.trim()).filter(Boolean).forEach(st => {
+      let am = /^assign\s+([A-Za-z0-9_$]+)\s*=\s*([\s\S]+)$/.exec(st);
+      if (am) { assigns.push({ out: am[1], ast: vlgParseExpr(am[2]) }); return; }
+      if (/^wire\s/.test(st)) return;
+      let im = /^([A-Za-z0-9_$]+)\s+([A-Za-z0-9_$]+)\s*\(([\s\S]*)\)$/.exec(st);
+      if (im) {
+        const conns = {};
+        const cre = /\.([A-Za-z0-9_$]+)\s*\(\s*([A-Za-z0-9_$]*)\s*\)/g; let cm;
+        while ((cm = cre.exec(im[3]))) conns[cm[1]] = cm[2];
+        instances.push({ mod: im[1], conns });
+      }
+    });
+    mods[m[1]] = { ports, assigns, instances };
+  }
+  return mods;
+}
+function vlgEvalModule(mods, name, inputVals, depth) {
+  const mod = mods[name]; if (!mod || (depth || 0) > 6) return {};
+  const nets = {};
+  mod.ports.filter(p => p.dir === "input").forEach(p => { if (inputVals[p.name] !== undefined) nets[p.name] = inputVals[p.name] ? 1 : 0; });
+  const doneInst = new Set();
+  for (let pass = 0; pass < 60; pass++) {
+    let progress = false;
+    mod.assigns.forEach(a => {
+      if (nets[a.out] !== undefined) return;
+      const v = vlgEvalAst(a.ast, nets);
+      if (v !== undefined) { nets[a.out] = v; progress = true; }
+    });
+    mod.instances.forEach((inst, ii) => {
+      if (doneInst.has(ii)) return;
+      const sub = mods[inst.mod]; if (!sub) return;
+      const inVals = {}; let ready = true;
+      sub.ports.filter(p => p.dir === "input").forEach(p => {
+        const net = inst.conns[p.name];
+        if (!net || nets[net] === undefined) ready = false; else inVals[p.name] = nets[net];
+      });
+      if (!ready) return;
+      const subNets = vlgEvalModule(mods, inst.mod, inVals, (depth || 0) + 1);
+      sub.ports.filter(p => p.dir === "output").forEach(p => {
+        const net = inst.conns[p.name];
+        if (net && subNets[p.name] !== undefined && nets[net] === undefined) { nets[net] = subNets[p.name]; progress = true; }
+      });
+      doneInst.add(ii);
+    });
+    if (!progress) break;
+  }
+  return nets;
+}
+function vlgVerifyDesign(design) {
+  const gen = vlgGenerate(design);
+  if (gen.error) return { ok: false, why: gen.error, rows: 0, matched: 0 };
+  const mods = vlgParseModules(gen.text);
+  const truth = sbxTruth(design);
+  if (!truth) return { ok: false, why: "engine truth table unavailable", rows: 0, matched: 0 };
+  const built = sbxBuildDef(design);
+  const inLabels = built.def.inputs, outLabels = built.def._outLabels;
+  let matched = 0;
+  truth.forEach(row => {
+    const inVals = {};
+    inLabels.forEach(l => inVals[gen.portMap[l]] = row.ins[l]);
+    const nets = vlgEvalModule(mods, "sandbox_design", inVals, 0);
+    const ok = outLabels.every(l => nets[gen.portMap[l]] === row.outs[l]);
+    if (ok) matched++;
+  });
+  return { ok: matched === truth.length, rows: truth.length, matched };
+}
+function vlgVerifyAll() {
+  const out = {};
+  out.xorFromNands = vlgVerifyDesign(sbxStarterXorNand());
+  /* full adder from two saved half-adder chips + OR (same construction
+     the sandbox's own chip verification uses) */
+  const saved = SBX_CHIP_LIB;
+  try {
+    const haDesign = { seq: 10, parts: [
+      sbxPart(1, "in", "A", 0.6, 2), sbxPart(2, "in", "B", 0.6, 5),
+      sbxPart(3, "gate", "S", 5, 2, { type: "XOR" }), sbxPart(4, "gate", "C", 5, 5, { type: "AND" }),
+      sbxPart(5, "out", "S", 10.6, 2), sbxPart(6, "out", "C", 10.6, 5)
+    ], wires: [
+      sbxWire(1, "o", 3, "i0"), sbxWire(2, "o", 3, "i1"),
+      sbxWire(1, "o", 4, "i0"), sbxWire(2, "o", 4, "i1"),
+      sbxWire(3, "o", 5, "i"), sbxWire(4, "o", 6, "i")
+    ] };
+    SBX_CHIP_LIB = Object.assign({}, saved, { HA: { name: "HA", inputs: ["A", "B"], outputs: ["S", "C"], design: haDesign } });
+    const faDesign = { seq: 20, parts: [
+      sbxPart(1, "in", "A", 0.6, 1), sbxPart(2, "in", "B", 0.6, 3.4), sbxPart(3, "in", "Cin", 0.6, 5.8),
+      sbxPart(4, "chip", "HA1", 4.2, 2.2, { chip: "HA" }), sbxPart(5, "chip", "HA2", 7.6, 3.6, { chip: "HA" }),
+      sbxPart(6, "gate", "OR", 10, 5.6, { type: "OR" }),
+      sbxPart(7, "out", "Sum", 11.3, 3.4), sbxPart(8, "out", "Cout", 11.3, 6.2)
+    ], wires: [
+      sbxWire(1, "o", 4, "A"), sbxWire(2, "o", 4, "B"),
+      sbxWire(4, "S", 5, "A"), sbxWire(3, "o", 5, "B"),
+      sbxWire(4, "C", 6, "i0"), sbxWire(5, "C", 6, "i1"),
+      sbxWire(5, "S", 7, "i"), sbxWire(6, "o", 8, "i")
+    ] };
+    out.fullAdderFromChips = vlgVerifyDesign(faDesign);
+    const gen = vlgGenerate(faDesign);
+    out.faTextHasSubmodule = !!gen.text && gen.text.indexOf("module HA") >= 0 && gen.text.indexOf("HA u4") >= 0;
+    out.majority = vlgVerifyDesign(sbxStarterMajority());
+  } finally { SBX_CHIP_LIB = saved; }
+  return out;
+}
+window.VERILOGX = { generate: vlgGenerate, verifyDesign: vlgVerifyDesign, verifyAll: vlgVerifyAll, lastVerify: null };
+try { window.VERILOGX.lastVerify = vlgVerifyAll(); } catch (e) { window.VERILOGX.lastVerify = { error: String(e && e.message || e) }; }
+
+/* --- F1 UI: block inside the sandbox, under Save & share --- */
+(function vlgUI() {
+  const sec = $F("sandboxView"); if (!sec) return;
+  const block = document.createElement("div");
+  block.id = "sbVerilogBlock";
+  block.style.cssText = "margin-top:14px;border-top:1px solid var(--line);padding-top:12px";
+  block.innerHTML =
+    '<div class="ctrl-label">Export as Verilog — synthesizable, from this netlist</div>' +
+    '<p style="font-size:13px;margin:4px 0 8px">Turns the design on the canvas into a Verilog module: ports are your input switches and output lamps (by label), internal wires are the intermediate nets, and there is one <span class="mono">assign</span> per gate — generated from the actual netlist the engine runs, never a template. A design that uses saved chips exports too: each chip becomes a submodule generated from its own saved netlist, instantiated in the top module.</p>' +
+    '<div class="share-row">' +
+    '<button type="button" class="btn primary" id="sbVerilogBtn">Export as Verilog</button>' +
+    '<button type="button" class="btn" id="sbVerilogCopy">Copy Verilog</button>' +
+    '<button type="button" class="btn" id="sbVerilogDl">Download .v</button>' +
+    '<span class="mono" id="sbVerilogNote" style="font-size:12px;color:var(--muted)"></span></div>' +
+    '<details class="details-disclosure" id="sbVerilogDetails"><summary>Details — the generated Verilog</summary>' +
+    '<pre class="sketch" id="sbVerilogCode" style="max-height:360px;overflow:auto">Press “Export as Verilog” — the module for the design currently on the canvas will appear here.</pre>' +
+    '<p class="proj-teaches">Reading it: <span class="mono">input wire</span> ports are driven by your switches, <span class="mono">output wire</span> ports drive your lamps, plain <span class="mono">wire</span> declarations are the nets between gates, and each <span class="mono">assign</span> is one gate (<span class="mono">&amp;</span> AND, <span class="mono">|</span> OR, <span class="mono">^</span> XOR, <span class="mono">~</span> NOT — NAND/NOR/XNOR are the negated forms). Feed the file to any synthesis or simulation flow that takes Verilog-2001.</p>' +
+    '<p class="progress-line" id="sbVerilogSelfCheck"></p></details>';
+  const det = sec.querySelector("details.details-disclosure");
+  if (det) sec.insertBefore(block, det); else sec.appendChild(block);
+  let lastText = "";
+  const lv = window.VERILOGX.lastVerify;
+  if (lv && lv.xorFromNands) {
+    $F("sbVerilogSelfCheck").textContent = "Exporter self-check (runs the emitted Verilog back through a parser and compares it with the engine's own truth table on every row): XOR-from-NANDs starter " +
+      lv.xorFromNands.matched + "/" + lv.xorFromNands.rows + " rows match · full adder built from two saved half-adder chips + OR " +
+      (lv.fullAdderFromChips ? lv.fullAdderFromChips.matched + "/" + lv.fullAdderFromChips.rows + " rows match" : "—") +
+      " · majority voter " + (lv.majority ? lv.majority.matched + "/" + lv.majority.rows : "—") + ".";
+  }
+  $F("sbVerilogBtn").addEventListener("click", () => {
+    if (typeof sbRefreshChipLib === "function") sbRefreshChipLib();
+    const gen = vlgGenerate(sb.design);
+    const note = $F("sbVerilogNote");
+    if (gen.error) {
+      lastText = "";
+      $F("sbVerilogCode").textContent = "// Nothing exported — the design does not run yet.\n// Fix this first: " + gen.error;
+      note.textContent = "Export refused: the design has errors (see the red list above the canvas).";
+      $F("sbVerilogDetails").open = true;
+      return;
+    }
+    lastText = gen.text;
+    $F("sbVerilogCode").textContent = gen.text;
+    note.textContent = "Generated from the current canvas" + (gen.chips && gen.chips.length ? " — includes submodule(s): " + gen.chips.join(", ") + "." : ".") +
+      (gen.renames.length ? " Renamed labels: " + gen.renames.map(r => r.from + " → " + r.to).join(", ") + "." : "");
+    $F("sbVerilogDetails").open = true;
+  });
+  $F("sbVerilogCopy").addEventListener("click", () => {
+    if (!lastText) $F("sbVerilogBtn").click();
+    if (!lastText) return;
+    const done = ok => { $F("sbVerilogNote").textContent = ok ? "Verilog copied to the clipboard." : "Copy is unavailable in this preview — the code is in the Details panel below; select it there, or use Download .v."; };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(lastText).then(() => done(true), () => done(false));
+    else done(false);
+  });
+  $F("sbVerilogDl").addEventListener("click", () => {
+    if (!lastText) $F("sbVerilogBtn").click();
+    if (!lastText) return;
+    try {
+      const blob = new Blob([lastText], { type: "text/plain" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = "sandbox_design.v";
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 800);
+      $F("sbVerilogNote").textContent = "Downloaded sandbox_design.v — the module above, as a file.";
+    } catch (e) { $F("sbVerilogNote").textContent = "Download is unavailable in this preview — the code is in the Details panel below."; }
+  });
+})();
+
+/* ================================================================
+   F2 — BREADBOARD FAULT-FINDING TRAINER
+   Faults are applied to the simulated nets of the stage's full
+   adder. Three-valued logic: null = floating (no driver). The
+   stage's state.displayed simply omits floating nets, so the
+   existing lamps, pin badges, decimal line and multimeter all
+   read them exactly as they read a net that has not settled:
+   pending / unstable. Nothing is faked at the label level.
+   ================================================================ */
+function bbfAnd(a, b) { if (a === 0 || b === 0) return 0; if (a === null || b === null) return null; return 1; }
+function bbfOr(a, b) { if (a === 1 || b === 1) return 1; if (a === null || b === null) return null; return 0; }
+function bbfXor(a, b) { if (a === null || b === null) return null; return a ^ b; }
+function bbfEval(ins, faultId) {
+  const A = ins.A ? 1 : 0, B = ins.B ? 1 : 0, Cin = ins.Cin ? 1 : 0;
+  const healthy = evaluateAll(computeLevels(defFullAdder()), { A, B, Cin });
+  const pins = { P14_7486: 1, P2_7486: B, P13_7486: null };
+  let nets;
+  if (faultId === "swap") {
+    nets = { A, B, Cin, s1: healthy.s1, c1: healthy.c1, c2: healthy.c2, Sum: healthy.Cout, Cout: healthy.Sum };
+  } else if (faultId === "nopower") {
+    /* 7486 unpowered: both XOR outputs float. 7408/7432 stay alive. */
+    const s1 = null, c1 = bbfAnd(A, B), c2 = bbfAnd(s1, Cin);
+    nets = { A, B, Cin, s1, c1, c2, Sum: null, Cout: bbfOr(c1, c2) };
+    pins.P14_7486 = null;
+  } else if (faultId === "floatcin") {
+    const s1 = bbfXor(A, B), c1 = bbfAnd(A, B), c2 = bbfAnd(s1, null);
+    nets = { A, B, Cin: null, s1, c1, c2, Sum: bbfXor(s1, null), Cout: bbfOr(c1, c2) };
+  } else if (faultId === "wrongpin") {
+    /* B's jumper to the 7486 lands on unused pin 13: the XOR gate's
+       B input floats; the 7408 still receives the real B. */
+    const s1 = bbfXor(A, null), c1 = bbfAnd(A, B), c2 = bbfAnd(s1, Cin);
+    nets = { A, B, Cin, s1, c1, c2, Sum: bbfXor(s1, Cin), Cout: bbfOr(c1, c2) };
+    pins.P2_7486 = null; pins.P13_7486 = B;
+  } else {
+    nets = { A, B, Cin, s1: healthy.s1, c1: healthy.c1, c2: healthy.c2, Sum: healthy.Sum, Cout: healthy.Cout };
+  }
+  return { nets, pins };
+}
+const BBF_FAULTS = [
+  { id: "healthy", label: "No fault — the board is working", short: "working board" },
+  { id: "swap", label: "Sum and Cout wires swapped at the LEDs", short: "swapped Sum/Cout wires" },
+  { id: "nopower", label: "7486 (XOR chip) missing its power connection", short: "7486 unpowered" },
+  { id: "floatcin", label: "Floating input — the Cin wire never lands", short: "floating Cin input" },
+  { id: "wrongpin", label: "B switch wired to the wrong 7486 pin", short: "B on the wrong pin" }
+];
+const BBF_EXPLAIN = {
+  healthy: "Every row matches the full-adder truth table, s1/c1/c2 probe exactly as the schematic predicts, and P14_7486 reads 5 V. Not every board on the bench is broken — proving a board good is a diagnosis too.",
+  swap: "The giveaway: the internal nets are all correct (probe s1, c1, c2 — they follow the schematic on every row), but the two lamps trade values. At A=1, B=0, Cin=0 the board lights Cout instead of Sum; at A=B=Cin=1 both lamps are 1 so the swap hides. Only the last two wires — from the chips to the LEDs — are crossed, so everything upstream of them checks out.",
+  nopower: "The giveaway: s1 and Sum read unstable/floating on the meter at every switch setting, while c1 = A·B keeps working — the 7408 is alive and the 7486 is dead. Probing P14_7486 against GND reads floating instead of 5 V: with no power, the chip's outputs are high-impedance, so every net only it drives floats. Cout still lights when c1 forces the OR gate, which is why the board looks 'half alive'.",
+  floatcin: "The giveaway: everything that depends only on A and B is right (s1 and c1 probe correctly), but Sum floats at every setting and Cout is only right when c1 = 1 forces it. Probe the Cin net at the chips: floating — while the Cin switch itself still flips 0/1. The wire from the switch never lands, so both chips' Cin pins float and every gate downstream of Cin inherits the undefined value.",
+  wrongpin: "The giveaway: c1 = A·B is correct, so B clearly reaches the 7408 — but s1 floats, taking Sum with it. Probe the pins: P2_7486 (the 7486's B input) floats, while P13_7486 — an unused pin — carries B's value and follows the B switch. The B jumper to the 7486 landed one row out, on pin 13 instead of pin 2, so the XOR gate's B input has no driver."
+};
+const BBF_HINT = {
+  healthy: "Hint: run all 8 switch combinations against the truth table beside the stage before concluding anything is broken.",
+  swap: "Hint: probe the internal nets s1, c1, c2 as well as the lamps. If the internals are right and only the lamps disagree, the fault is downstream of the chips.",
+  nopower: "Hint: check whether every chip is actually powered — probe P14_7486 against GND, and notice which chip's outputs float while the others keep working.",
+  floatcin: "Hint: compare the Cin switch's own value with the Cin net probed at the chips. A switch can be healthy while its wire is not.",
+  wrongpin: "Hint: B reaches one chip correctly (c1 works). Probe B at the other chip's pins — P2_7486 and its neighbours — and see where B actually landed."
+};
+const BBF = { active: false, id: null, bag: [], caseNo: 0, picked: null, attempts: 0, solved: 0, caseSolved: false, lastVerify: null };
+function bbfVerify() {
+  const ref = enumerateTruth(computeLevels(defFullAdder()));
+  let healthyMatched = 0;
+  ref.forEach(r => {
+    const ev = bbfEval(r.ins, "healthy");
+    if (ev.nets.Sum === r.outs[0] && ev.nets.Cout === r.outs[1]) healthyMatched++;
+  });
+  const perFault = {};
+  BBF_FAULTS.forEach(f => {
+    if (f.id === "healthy") return;
+    let diffRows = 0; const examples = [];
+    ref.forEach(r => {
+      const h = bbfEval(r.ins, "healthy"), x = bbfEval(r.ins, f.id);
+      const keys = ["s1", "c1", "c2", "Sum", "Cout"];
+      const pinKeys = ["P14_7486", "P2_7486", "P13_7486"];
+      const netDiff = keys.filter(k => h.nets[k] !== x.nets[k]);
+      const pinDiff = pinKeys.filter(k => h.pins[k] !== x.pins[k]);
+      if (netDiff.length || pinDiff.length) {
+        diffRows++;
+        if (examples.length < 2) examples.push({ ins: r.ins, netDiff, pinDiff, got: { Sum: x.nets.Sum, Cout: x.nets.Cout, s1: x.nets.s1 }, want: { Sum: h.nets.Sum, Cout: h.nets.Cout, s1: h.nets.s1 } });
+      }
+    });
+    perFault[f.id] = { diffRows, examples };
+  });
+  return { healthyMatched, healthyRows: ref.length, perFault };
+}
+try { BBF.lastVerify = bbfVerify(); } catch (e) { BBF.lastVerify = { error: String(e && e.message || e) }; }
+window.BBFault = { eval: bbfEval, faults: BBF_FAULTS, verify: bbfVerify, state: BBF, lastVerify: BBF.lastVerify };
+
+/* hooks into the stage: propagation, decimal line, breadboard paint, meter */
+const _bbfStartProp = startPropagation;
+startPropagation = function () {
+  if (BBF.active && state.circuitId === "full" && state.def) {
+    clearTimers();
+    const ev = bbfEval(curInputs(), BBF.id);
+    state.displayed = { ZERO: 0, ONE: 1 };
+    Object.keys(ev.nets).forEach(k => { if (ev.nets[k] !== null && ev.nets[k] !== undefined) state.displayed[k] = ev.nets[k]; });
+    state.settled = true; state.levelIdx = state.def.maxLevel;
+    paintState(null);
+    $F("flowStatus").innerHTML = "Fault trainer case " + BBF.caseNo + " is live on this board — flip A, B, Cin, watch the lamps, and probe with the multimeter in the side panel. The truth table beside the stage is the healthy reference.";
+    const sb2 = $F("stepBtn"); if (sb2) sb2.disabled = true;
+    return;
+  }
+  _bbfStartProp();
+};
+const _bbfPaintDecimal = paintDecimal;
+paintDecimal = function () {
+  _bbfPaintDecimal();
+  if (BBF.active && state.circuitId === "full") {
+    const ev = bbfEval(curInputs(), BBF.id), ins = curInputs();
+    const show = v => v === null || v === undefined ? "floating" : String(v);
+    $F("decimalLine").textContent = "Trainer board: " + ins.A + " + " + ins.B + " + Cin " + ins.Cin + "   →   Sum " + show(ev.nets.Sum) + ", Cout " + show(ev.nets.Cout) +
+      "   (s1 " + show(ev.nets.s1) + " · c1 " + show(ev.nets.c1) + " · c2 " + show(ev.nets.c2) + ")" + (BBF.id === "floatcin" ? "   · Cin at the chips: floating" : "");
+  }
+};
+const _bbfPaintBB = paintBreadboard;
+paintBreadboard = function (lvl) {
+  _bbfPaintBB(lvl);
+  if (BBF.active && BBF.id === "nopower" && state.view === "breadboard") {
+    /* the 7486's VCC jumper (first ONE glow drawn) never landed */
+    const box = $F("stageBox");
+    const glows = box ? box.querySelectorAll('[data-bbnet="ONE"]') : [];
+    if (glows.length) {
+      glows[0].style.opacity = "0";
+      const jumper = glows[0].nextElementSibling;
+      if (jumper && jumper.classList.contains("bb-jumper")) jumper.style.opacity = "0.12";
+    }
+  }
+  bbfReadout();
+};
+const _bbfMeterNets = meterNets;
+meterNets = function () {
+  const nets = _bbfMeterNets();
+  if (state.circuitId === "full") ["P14_7486", "P2_7486", "P13_7486"].forEach(n => { if (nets.indexOf(n) < 0) nets.push(n); });
+  return nets;
+};
+const _bbfMeterVal = meterVal;
+meterVal = function (net) {
+  if (net === "P14_7486" || net === "P2_7486" || net === "P13_7486") {
+    const ev = bbfEval(curInputs(), BBF.active ? BBF.id : "healthy");
+    const v = ev.pins[net];
+    return v === null || v === undefined ? null : v;
+  }
+  if (BBF.active && state.circuitId === "full" && (net === "Sum" || net === "Cout" || net === "s1" || net === "c1" || net === "c2" || net === "Cin")) {
+    const ev = bbfEval(curInputs(), BBF.id);
+    const v = ev.nets[net];
+    return v === null || v === undefined ? null : v;
+  }
+  return _bbfMeterVal(net);
+};
+function bbfReadout() {
+  const el = $F("bbfReadout"); if (!el) return;
+  if (!BBF.active) { el.textContent = "No case running. Press “New fault” — the stage above becomes the board under test."; return; }
+  const ev = bbfEval(curInputs(), BBF.id), ins = curInputs();
+  const show = v => v === null || v === undefined ? "floating" : String(v);
+  el.textContent = "On the board now: A = " + ins.A + " · B = " + ins.B + " · Cin = " + ins.Cin + "   →   Sum " + show(ev.nets.Sum) + " · Cout " + show(ev.nets.Cout) +
+    "   (s1 " + show(ev.nets.s1) + " · c1 " + show(ev.nets.c1) + " · c2 " + show(ev.nets.c2) + ") — these are the simulated nets, the same values the meter probes.";
+}
+function bbfNextFault() {
+  if (!BBF.bag.length) {
+    BBF.bag = BBF_FAULTS.map(f => f.id);
+    for (let i = BBF.bag.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); const t = BBF.bag[i]; BBF.bag[i] = BBF.bag[j]; BBF.bag[j] = t; }
+    if (BBF.bag[BBF.bag.length - 1] === BBF.id) { const t = BBF.bag[0]; BBF.bag[0] = BBF.bag[BBF.bag.length - 1]; BBF.bag[BBF.bag.length - 1] = t; }
+  }
+  return BBF.bag.pop();
+}
+/* trainer card */
+(function bbfUI() {
+  const view = $F("circuitsView"), chrono = $F("chronoCard");
+  if (!view || !chrono) return;
+  const card = document.createElement("section");
+  card.className = "card stage-card"; card.id = "faultTrainerCard"; card.style.marginTop = "16px";
+  card.innerHTML =
+    '<div class="stage-head"><div><h2>Breadboard fault-finding trainer</h2>' +
+    '<p class="what">The full adder on the stage, working — or carrying exactly one realistic bench fault. The faults are wired into the simulation itself: the affected nets genuinely carry wrong or floating values, so the lamps, the pin badges and the multimeter all tell the same story. Probe first, then commit to a diagnosis.</p></div></div>' +
+    '<div class="share-row"><button type="button" class="btn primary" id="bbfNew">New fault ▸</button>' +
+    '<button type="button" class="btn" id="bbfExit">Restore healthy board</button>' +
+    '<span class="mono" id="bbfStatus" style="font-size:12.5px;color:var(--muted)">No case running.</span></div>' +
+    '<div class="decimal-line" id="bbfReadout">No case running. Press “New fault” — the stage above becomes the board under test.</div>' +
+    '<div class="ctrl-label" style="margin-top:14px">Your diagnosis — pick one, then check</div>' +
+    '<div class="bbf-opts" id="bbfOpts" role="group" aria-label="Fault diagnosis options"></div>' +
+    '<div class="share-row"><button type="button" class="btn primary" id="bbfCheck">Check diagnosis</button></div>' +
+    '<div class="feedback-line" id="bbfFeedback" aria-live="polite"></div>' +
+    '<details class="details-disclosure"><summary>Details — how to hunt, and the extra probe points</summary>' +
+    '<p class="proj-teaches">Work it like a bench: run all 8 switch combinations and compare the lamps with the truth table (side panel). Then probe with the multimeter there: internal nets <b>s1, c1, c2</b> localise a fault to one chip; a reading of <b>≈ unstable — floating</b> means that net has no driver at all. Three extra probe points appear in the meter\'s list while the full adder is on stage: <b>P14_7486</b> (the 7486\'s power pin — 5 V on a healthy board), <b>P2_7486</b> (its B input pin) and <b>P13_7486</b> (an unused pin — floating on a healthy board, which is exactly what gives one fault away).</p>' +
+    '<p class="progress-line" id="bbfSelfCheck"></p></details>';
+  view.insertBefore(card, chrono);
+  const opts = $F("bbfOpts");
+  BBF_FAULTS.forEach(f => {
+    const b = document.createElement("button");
+    b.type = "button"; b.dataset.bbf = f.id; b.setAttribute("aria-pressed", "false");
+    b.textContent = f.label;
+    b.addEventListener("click", () => {
+      BBF.picked = f.id;
+      opts.querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x === b ? "true" : "false"));
+    });
+    opts.appendChild(b);
+  });
+  const lv = BBF.lastVerify;
+  if (lv && lv.perFault) {
+    $F("bbfSelfCheck").textContent = "Trainer self-check (each fault simulated on all 8 input rows and compared with the healthy board): healthy board reproduces the full-adder truth table on " +
+      lv.healthyMatched + "/" + lv.healthyRows + " rows · swapped wires change the observable nets on " + lv.perFault.swap.diffRows + "/8 rows · unpowered 7486 on " + lv.perFault.nopower.diffRows +
+      "/8 rows · floating Cin on " + lv.perFault.floatcin.diffRows + "/8 rows · wrong-pin B on " + lv.perFault.wrongpin.diffRows + "/8 rows (pin probes included).";
+  }
+  function bbfStatus() {
+    $F("bbfStatus").textContent = BBF.active
+      ? "Case " + BBF.caseNo + (BBF.caseSolved ? " solved ✓ — board left as found for inspection." : " on the stage — diagnosis not yet checked.") + " Session: " + BBF.solved + " solved / " + BBF.attempts + " checked."
+      : "No case running. Session: " + BBF.solved + " solved / " + BBF.attempts + " checked.";
+  }
+  $F("bbfNew").addEventListener("click", () => {
+    BBF.id = bbfNextFault(); BBF.active = true; BBF.caseNo++; BBF.picked = null; BBF.caseSolved = false;
+    opts.querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", "false"));
+    const fb = $F("bbfFeedback"); fb.textContent = ""; fb.className = "feedback-line";
+    setTopArea("circuits"); syncRail("breadboard");
+    selectCircuit("full"); setView("breadboard");
+    startPropagation(); meterRefresh(true); bbfReadout(); bbfStatus();
+    $F("stageTitle").scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+  $F("bbfExit").addEventListener("click", () => {
+    BBF.active = false; BBF.id = null;
+    if (state.circuitId === "full") { startPropagation(); meterRefresh(true); }
+    bbfReadout(); bbfStatus();
+    const fb = $F("bbfFeedback"); fb.textContent = "Trainer off — the board is the healthy full adder again."; fb.className = "feedback-line";
+  });
+  $F("bbfCheck").addEventListener("click", () => {
+    const fb = $F("bbfFeedback");
+    if (!BBF.active) { fb.textContent = "No case is running — press “New fault” first."; fb.className = "feedback-line bad"; return; }
+    if (!BBF.picked) { fb.textContent = "Pick a diagnosis from the list first — probing is free, guessing is what the check is for."; fb.className = "feedback-line bad"; return; }
+    if (BBF.caseSolved) { fb.textContent = "This case is already solved — the board stays as it was so you can re-check the readings. Press “New fault” for the next case."; fb.className = "feedback-line"; return; }
+    BBF.attempts++;
+    if (BBF.picked === BBF.id) {
+      BBF.solved++; BBF.caseSolved = true;
+      fb.innerHTML = "✓ <b>Correct — " + escF(BBF_FAULTS.find(f => f.id === BBF.id).short) + ".</b> " + escF(BBF_EXPLAIN[BBF.id]);
+      fb.className = "feedback-line good";
+    } else {
+      fb.innerHTML = "✗ Not that one. " + escF(BBF_HINT[BBF.id]);
+      fb.className = "feedback-line bad";
+    }
+    bbfStatus();
+  });
+  bbfStatus();
+})();
+
+/* ================================================================
+   F3 — UART SERIAL-LINK SIMULATOR
+   Frame: idle(1) · start(0) · data LSB-first · parity · stop(1s).
+   The receiver resynchronises on the start edge, then samples at
+   the centre of ITS OWN bit period — with the mismatch on, its
+   period is twice the transmitter's, so samples drift across the
+   frame and the decode garbles exactly as the model predicts.
+   ================================================================ */
+function uartFrameBits(byte, parity, stop) {
+  const bits = [0];
+  let ones = 0;
+  for (let i = 0; i < 8; i++) { const b = (byte >> i) & 1; bits.push(b); ones += b; }
+  if (parity !== "none") bits.push(parity === "even" ? (ones & 1) : ((ones & 1) ^ 1));
+  for (let s = 0; s < stop; s++) bits.push(1);
+  return bits;
+}
+function uartReceive(frameBits, parity, stop, factor) {
+  const valueAt = t => {
+    const idx = Math.floor(t + 1e-9);
+    if (idx < 0 || idx >= frameBits.length) return 1; /* idle line */
+    return frameBits[idx];
+  };
+  const nSamples = 1 + 8 + (parity !== "none" ? 1 : 0) + stop;
+  const samples = [];
+  for (let k = 0; k < nSamples; k++) samples.push(valueAt((k + 0.5) * factor));
+  let byte = 0;
+  for (let i = 0; i < 8; i++) byte |= (samples[1 + i] ? 1 : 0) << i;
+  let parityOk = true;
+  if (parity !== "none") {
+    let ones = 0; for (let i = 0; i < 8; i++) ones += samples[1 + i] ? 1 : 0;
+    const expect = parity === "even" ? (ones & 1) : ((ones & 1) ^ 1);
+    parityOk = samples[9] === expect;
+  }
+  const stopOk = samples.slice(nSamples - stop).every(v => v === 1);
+  const startOk = samples[0] === 0;
+  return { byte, samples, startOk, parityOk, stopOk, framingError: !startOk || !stopOk };
+}
+function uartVerify() {
+  const bytes = [0x00, 0x55, 0x41, 0xFF, 0xA5, 0x3C];
+  let rtPass = 0, rtTotal = 0;
+  bytes.forEach(b => ["none", "even", "odd"].forEach(p => [1, 2].forEach(s => {
+    rtTotal++;
+    const r = uartReceive(uartFrameBits(b, p, s), p, s, 1);
+    if (r.byte === b && !r.framingError && r.parityOk) rtPass++;
+  })));
+  const mismatch = [0x00, 0x41, 0x55, 0xA5].map(b => {
+    const r = uartReceive(uartFrameBits(b, "none", 1), "none", 1, 2);
+    return { sent: b, got: r.byte, framingError: r.framingError, garbled: r.byte !== b || r.framingError };
+  });
+  return { roundTrip: { pass: rtPass, total: rtTotal }, mismatch };
+}
+window.UARTX = { frameBits: uartFrameBits, receive: uartReceive, verify: uartVerify, lastVerify: null };
+try { window.UARTX.lastVerify = uartVerify(); } catch (e) { window.UARTX.lastVerify = { error: String(e && e.message || e) }; }
+
+const uart = { byte: 0x41, baud: 9600, parity: "none", stop: 1, mismatch: false, playing: false, raf: null, phase: 0 };
+function uartSegments() {
+  const segs = [{ name: "IDLE", bit: 1, kind: "idle" }, { name: "START", bit: 0, kind: "start" }];
+  for (let i = 0; i < 8; i++) segs.push({ name: "D" + i, bit: (uart.byte >> i) & 1, kind: "data", sub: "bit " + i });
+  if (uart.parity !== "none") {
+    let ones = 0; for (let i = 0; i < 8; i++) ones += (uart.byte >> i) & 1;
+    segs.push({ name: "PARITY", bit: uart.parity === "even" ? (ones & 1) : ((ones & 1) ^ 1), kind: "parity" });
+  }
+  for (let s = 0; s < uart.stop; s++) segs.push({ name: uart.stop === 2 ? "STOP " + (s + 1) : "STOP", bit: 1, kind: "stop" });
+  segs.push({ name: "IDLE", bit: 1, kind: "idle" });
+  return segs;
+}
+function uartDraw() {
+  const svg = $F("uartSvg"); if (!svg) return;
+  const segs = uartSegments();
+  const W = 920, padL = 12, padR = 12, plotW = W - padL - padR, cw = plotW / segs.length;
+  const yHi = 36, yLo = 78, H = 128;
+  svg.setAttribute("viewBox", "0 0 " + W + " " + H);
+  let s = "";
+  segs.forEach((g, i) => {
+    const x0 = padL + i * cw;
+    s += '<line class="ch-grid" x1="' + x0 + '" y1="14" x2="' + x0 + '" y2="98"/>';
+    if (uart.phase >= i && uart.phase < i + 1) s += '<rect x="' + x0 + '" y="14" width="' + cw + '" height="84" style="fill:var(--canvas-hi)"/>';
+    s += '<text class="ch-tick" x="' + (x0 + cw / 2) + '" y="110">' + g.name + "</text>";
+    s += '<text class="ch-tick" x="' + (x0 + cw / 2) + '" y="122" style="font-weight:700;fill:var(--ink)">' + g.bit + "</text>";
+  });
+  s += '<line class="ch-grid" x1="' + (padL + plotW) + '" y1="14" x2="' + (padL + plotW) + '" y2="98"/>';
+  let d1 = "", d0 = "", cur1 = null, cur0 = null;
+  segs.forEach((g, i) => {
+    const x0 = padL + i * cw, x1 = x0 + cw;
+    if (g.bit) { if (cur1 === null) { d1 += "M " + x0 + " " + yHi; cur1 = true; } d1 += " L " + x1 + " " + yHi; if (i + 1 < segs.length && !segs[i + 1].bit) d1 += " L " + x1 + " " + yLo; cur0 = null; }
+    else { if (cur0 === null) { d0 += "M " + x0 + " " + yLo; cur0 = true; } d0 += " L " + x1 + " " + yLo; if (i + 1 < segs.length && segs[i + 1].bit) d0 += " L " + x1 + " " + yHi; cur1 = null; }
+  });
+  if (d0) s += '<path class="ch-zero" d="' + d0 + '"/>';
+  if (d1) s += '<path class="ch-one" d="' + d1 + '"/>';
+  /* receiver sample ticks: sample k sits (k+0.5) receiver-periods after
+     the start edge, which is 1 cell into the strip */
+  const factor = uart.mismatch ? 2 : 1;
+  const frame = uartFrameBits(uart.byte, uart.parity, uart.stop);
+  const rx = uartReceive(frame, uart.parity, uart.stop, factor);
+  const nSamples = rx.samples.length;
+  for (let k = 0; k < nSamples; k++) {
+    const cellPos = 1 + (k + 0.5) * factor;
+    if (cellPos > segs.length) break;
+    const x = padL + cellPos * cw;
+    s += '<line x1="' + x + '" y1="6" x2="' + x + '" y2="16" style="stroke:var(--teal);stroke-width:2.4"/><text class="ch-tick" x="' + x + '" y="5" style="fill:var(--teal);font-weight:700">↓' + rx.samples[k] + "</text>";
+  }
+  if (uart.playing || uart.phase > 0) {
+    const x = padL + Math.min(uart.phase, segs.length) * cw;
+    s += '<line x1="' + x + '" y1="10" x2="' + x + '" y2="100" style="stroke:var(--teal);stroke-width:2.6"/>';
+  }
+  svg.innerHTML = s;
+  /* readouts */
+  const bitsStr = frame.join(" ");
+  $F("uartFrameLine").textContent = "Frame on the wire: start 0 · data (LSB first) " + frame.slice(1, 9).join(" ") +
+    (uart.parity !== "none" ? " · parity " + frame[9] + " (" + uart.parity + ")" : " · no parity") +
+    " · stop " + frame.slice(frame.length - uart.stop).join(" ") + "   —   byte 0x" + uart.byte.toString(16).toUpperCase().padStart(2, "0") +
+    " = " + uart.byte + (uart.byte >= 32 && uart.byte < 127 ? " = '" + String.fromCharCode(uart.byte) + "'" : " (not a printable character)") +
+    " · at " + uart.baud + " baud one bit lasts " + (1e6 / uart.baud).toFixed(1) + " µs, the frame " + ((frame.length * 1e3) / uart.baud).toFixed(2) + " ms.";
+  const r = rx;
+  const charTxt = r.byte >= 32 && r.byte < 127 ? " = '" + String.fromCharCode(r.byte) + "'" : "";
+  $F("uartRxLine").innerHTML = uart.mismatch
+    ? "Receiver (running at <b>half</b> the transmitter's baud — its samples drift, see the ↓ ticks): decodes <b>0x" + r.byte.toString(16).toUpperCase().padStart(2, "0") + "</b>" + charTxt +
+      (r.framingError ? ' · <b style="color:var(--red)">FRAMING ERROR</b> — a stop sample read ' + (r.stopOk ? "" : "0 instead of 1") + (r.startOk ? "" : "; the start sample missed the start bit") : "") +
+      (uart.parity !== "none" && !r.parityOk ? ' · <b style="color:var(--red)">PARITY ERROR</b>' : "") +
+      " · this is a <b>garbled byte</b>: same wire, wrong clock."
+    : "Receiver (same baud — samples land mid-bit, see the ↓ ticks): decodes <b>0x" + r.byte.toString(16).toUpperCase().padStart(2, "0") + "</b>" + charTxt +
+      (r.byte === uart.byte && !r.framingError && r.parityOk ? " — matches the transmitted byte ✓" : "") +
+      (uart.parity !== "none" ? " · parity " + (r.parityOk ? "OK" : "ERROR") : "") + " · stop bit(s) " + (r.stopOk ? "OK" : "ERROR") + ".";
+  const seg = segs[Math.min(segs.length - 1, Math.floor(uart.phase))];
+  if (uart.playing) $F("uartPlayStatus").textContent = "Sending: " + seg.name + " = " + seg.bit + (seg.kind === "data" ? " (data bit, LSB first)" : seg.kind === "start" ? " (the falling edge the receiver syncs to)" : seg.kind === "parity" ? " (" + uart.parity + " parity over the 8 data bits)" : seg.kind === "stop" ? " (line returns to idle level)" : " (line idle, held HIGH)");
+}
+function uartStopPlay() {
+  uart.playing = false;
+  if (uart.raf) cancelAnimationFrame(uart.raf);
+  uart.raf = null;
+  const b = $F("uartPlayBtn"); if (b) b.textContent = "▶ Play — sweep the frame";
+}
+(function uartUI() {
+  const host = $F("advModulation"); if (!host) return;
+  const card = document.createElement("div");
+  card.className = "card stage-card"; card.id = "uartCard"; card.style.marginTop = "16px";
+  card.innerHTML =
+    '<h2>UART serial-link simulator — one byte, bit by bit</h2>' +
+    '<p class="what">The modulation studio put bits on a wave; this puts them on a wire with a protocol. A UART frame is pure timing: the line idles HIGH, a start bit (0) announces the byte, 8 data bits follow <b>least-significant bit first</b>, an optional parity bit checks them, and stop bits return the line to idle. There is no clock wire — the receiver has to guess the bit centres from the baud rate alone, which is exactly what the mismatch switch breaks.</p>' +
+    '<div class="uart-seg-wrap">' +
+    '<label class="fld">Character <input type="text" id="uartChar" value="A" maxlength="1" style="width:64px" /></label>' +
+    '<label class="fld">Byte (hex) <input type="text" id="uartHex" value="41" maxlength="2" style="width:64px" /></label>' +
+    '<label class="fld">Baud rate <select id="uartBaud"><option value="300">300</option><option value="1200">1200</option><option value="2400">2400</option><option value="9600" selected>9600</option><option value="19200">19200</option><option value="115200">115200</option></select></label>' +
+    '<span><span class="ctrl-label" style="display:block">Parity</span><span class="seg" role="group" aria-label="Parity" id="uartParitySeg">' +
+    '<button type="button" data-uparity="none" aria-pressed="true">None</button><button type="button" data-uparity="even" aria-pressed="false">Even</button><button type="button" data-uparity="odd" aria-pressed="false">Odd</button></span></span>' +
+    '<span><span class="ctrl-label" style="display:block">Stop bits</span><span class="seg" role="group" aria-label="Stop bits" id="uartStopSeg">' +
+    '<button type="button" data-ustop="1" aria-pressed="true">1</button><button type="button" data-ustop="2" aria-pressed="false">2</button></span></span>' +
+    '<span><span class="ctrl-label" style="display:block">Receiver clock</span>' +
+    '<button type="button" class="btn" id="uartMismatch" aria-pressed="false">Baud mismatch: off</button></span>' +
+    '</div>' +
+    '<div class="schematic-box uart-lab-svg" style="margin-top:12px"><svg id="uartSvg" viewBox="0 0 920 128" role="img" aria-label="UART frame waveform: idle, start bit, data bits LSB first, parity, stop bits, with receiver sample points"></svg></div>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;align-items:center">' +
+    '<button type="button" class="btn primary" id="uartPlayBtn">▶ Play — sweep the frame</button>' +
+    '<span class="mono" id="uartPlayStatus" style="font-size:13px"></span></div>' +
+    '<div class="decimal-line" id="uartFrameLine"></div>' +
+    '<div class="decimal-line" id="uartRxLine"></div>' +
+    '<details class="details-disclosure"><summary>Details — how the receiver samples, and why baud mismatch garbles</summary>' +
+    '<p class="proj-teaches">The receiver watches for the idle→start falling edge, then samples once per bit at what it believes is each bit\'s centre: sample k at (k + ½) × its own bit period after the edge (the ↓ ticks on the waveform). Real UARTs oversample 16× and majority-vote the middle samples; the one-centre-sample model here is the same idea with the training wheels visible. Parity: even parity sets the parity bit so the 8 data bits plus parity contain an even number of 1s; odd parity makes it odd — a single flipped bit always breaks parity, two flipped bits slip through.</p>' +
+    '<p class="proj-teaches">With the mismatch on, the receiver runs at <b>half</b> the transmitter\'s baud: its bit period is twice as long, so each sample lands one full transmitter-bit later than the last — it reads every second bit, mistakes data for framing, and the stop sample lands on a data bit or out in the idle. The decoded byte and the framing error in the receiver line are computed by that sampler, not scripted.</p>' +
+    '<p class="progress-line" id="uartSelfCheck"></p></details>';
+  host.appendChild(card);
+  const lv = window.UARTX.lastVerify;
+  if (lv && lv.roundTrip) {
+    $F("uartSelfCheck").textContent = "Link self-check (encode → sample → decode, all computed by the functions above): round-trips pass for " + lv.roundTrip.pass + "/" + lv.roundTrip.total +
+      " combinations (6 bytes × none/even/odd parity × 1/2 stop bits). Baud mismatch at half rate: " +
+      lv.mismatch.map(m => "0x" + m.sent.toString(16).toUpperCase().padStart(2, "0") + " → 0x" + m.got.toString(16).toUpperCase().padStart(2, "0") + (m.framingError ? " + framing error" : "")).join(" · ") + ".";
+  }
+  function syncFromByte() {
+    $F("uartHex").value = uart.byte.toString(16).toUpperCase().padStart(2, "0");
+    $F("uartChar").value = uart.byte >= 32 && uart.byte < 127 ? String.fromCharCode(uart.byte) : "";
+    uartDraw();
+  }
+  $F("uartChar").addEventListener("input", () => {
+    const v = $F("uartChar").value;
+    if (v.length) { uart.byte = v.charCodeAt(0) & 0xFF; syncFromByte(); }
+  });
+  $F("uartHex").addEventListener("input", () => {
+    const v = parseInt(($F("uartHex").value || "").trim(), 16);
+    if (!isNaN(v) && v >= 0 && v <= 255) { uart.byte = v; $F("uartChar").value = v >= 32 && v < 127 ? String.fromCharCode(v) : ""; uartDraw(); }
+  });
+  $F("uartBaud").addEventListener("change", () => { uart.baud = +$F("uartBaud").value; uartDraw(); });
+  $F("uartParitySeg").querySelectorAll("[data-uparity]").forEach(b => b.addEventListener("click", () => {
+    uart.parity = b.dataset.uparity;
+    $F("uartParitySeg").querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x === b ? "true" : "false"));
+    uartDraw();
+  }));
+  $F("uartStopSeg").querySelectorAll("[data-ustop]").forEach(b => b.addEventListener("click", () => {
+    uart.stop = +b.dataset.ustop;
+    $F("uartStopSeg").querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x === b ? "true" : "false"));
+    uartDraw();
+  }));
+  $F("uartMismatch").addEventListener("click", () => {
+    uart.mismatch = !uart.mismatch;
+    $F("uartMismatch").setAttribute("aria-pressed", uart.mismatch ? "true" : "false");
+    $F("uartMismatch").textContent = uart.mismatch ? "Baud mismatch: ON (receiver at ½ baud)" : "Baud mismatch: off";
+    uartDraw();
+  });
+  $F("uartPlayBtn").addEventListener("click", () => {
+    if (uart.playing) { uartStopPlay(); uartDraw(); return; }
+    const reduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const segs = uartSegments();
+    if (reduced) { uart.phase = segs.length; uartDraw(); $F("uartPlayStatus").textContent = "Frame complete (reduced motion: sweep skipped). Receiver line below has the decode."; return; }
+    uart.playing = true; uart.phase = 0;
+    $F("uartPlayBtn").textContent = "⏸ Pause";
+    const t0 = performance.now(), perCell = 620, total = segs.length * perCell;
+    const tick = now => {
+      if (!uart.playing) return;
+      uart.phase = Math.min(segs.length, (now - t0) / perCell);
+      uartDraw();
+      if (now - t0 >= total) { uartStopPlay(); uart.phase = segs.length; uartDraw(); $F("uartPlayStatus").textContent = "Frame sent — the receiver line below has the decode."; return; }
+      uart.raf = requestAnimationFrame(tick);
+    };
+    uart.raf = requestAnimationFrame(tick);
+  });
+  uartDraw();
+})();
+/* theme switches redraw canvases elsewhere; the UART strip is SVG with
+   theme variables, but redraw anyway so nothing can go stale */
+if (typeof redrawThemedSurfaces === "function") {
+  const _uartRedraw = redrawThemedSurfaces;
+  redrawThemedSurfaces = function () { _uartRedraw(); try { uartDraw(); } catch (e) {} };
+}
+
+/* ================================================================
+   MENU — register the three new features (Round F pattern: same
+   item markup, same close-and-go behaviour as every other round)
+   ================================================================ */
+function menuFAddItem(afterKey, item) {
+  const list = $F("menuList"); if (!list) return false;
+  const anchor = list.querySelector('[data-key="' + afterKey + '"]');
+  if (!anchor) return false;
+  const b = document.createElement("button");
+  b.type = "button"; b.className = "menu-item"; b.dataset.key = item.key;
+  b.dataset.search = (item.label + " " + (item.hint || "") + " round f").toLowerCase();
+  b.innerHTML = '<span class="mi-dot" aria-hidden="true"></span><span class="mi-label"></span>' + (item.hint ? "<small></small>" : "");
+  b.querySelector(".mi-label").textContent = item.label;
+  if (item.hint) b.querySelector("small").textContent = item.hint;
+  b.addEventListener("click", () => { $F("menuPanel").hidden = true; $F("menuBtn").setAttribute("aria-expanded", "false"); item.go(); });
+  anchor.parentNode.insertBefore(b, anchor.nextSibling);
+  return true;
+}
+(function registerRoundFMenu() {
+  const jumpTo = id => { const el = id && $F(id); if (el) setTimeout(() => el.scrollIntoView({ behavior: "smooth", block: "start" }), 60); };
+  const okV = menuFAddItem("sbx-sandbox", { key: "verilog-export", label: "Verilog export — from the sandbox", hint: "Sandbox · synthesizable HDL",
+    go: () => { setTopArea("circuits"); syncRail("circuits"); showSandbox(); jumpTo("sbVerilogBlock"); } });
+  const okF = menuFAddItem("breadboard", { key: "fault-trainer", label: "Breadboard fault-finding trainer", hint: "Breadboard · diagnose the seeded fault",
+    go: () => { setTopArea("circuits"); syncRail("breadboard"); selectCircuit("full"); setView("breadboard"); jumpTo("faultTrainerCard"); } });
+  const okU = menuFAddItem("adv-mod", { key: "uart-sim", label: "UART serial-link simulator", hint: "Modulation · frames, parity, baud mismatch",
+    go: () => { setTopArea("advanced"); syncRail("advanced"); document.querySelector('#advPicker [data-adv="modulation"]').click(); jumpTo("uartCard"); } });
+  if (window.LAB_MENU) {
+    const pushTo = (groupName, label) => { const g = window.LAB_MENU.groups.find(g => g.name === groupName); if (g) g.items.push(label); };
+    if (okV) { pushTo("Round C — build, chips, challenges & drills", "Verilog export — from the sandbox"); window.LAB_MENU.count++; }
+    if (okF) { pushTo("Breadboard", "Breadboard fault-finding trainer"); window.LAB_MENU.count++; }
+    if (okU) { pushTo("Advanced — hardware, projects, tools", "UART serial-link simulator"); window.LAB_MENU.count++; }
+  }
+})();
+
+/* ================================================================
+   MENU DECLUTTER — reorganise only. No entry is removed; every
+   button node is moved, never recreated, so all click handlers
+   and ids survive. Group headers get plain student-facing names
+   (the build-round labels were internal bookkeeping). Groups are
+   ordered most-used first; long groups start folded (header
+   click unfolds); the group holding the current location always
+   opens expanded; typing in the filter unfolds everything so
+   matches show.
+   ================================================================ */
+(function menuDeclutter() {
+  const list = $F("menuList"); if (!list) return;
+  /* plain group names, keyed by the registration names */
+  const RENAME = {
+    "Round C — build, chips, challenges & drills": "Build your own — sandbox, chips & challenges",
+    "Round B — sequential, OS pack & instruments": "Sequential logic, OS tools & instruments",
+    "Course track — Operating Systems labs": "Course labs — Operating Systems",
+    "Course track — OS in C (hands-on code)": "Course labs — OS in C",
+    "Course track — Computer Architecture labs": "Course labs — Computer Architecture",
+    "Course track — Computer Organization labs": "Course labs — Computer Organization",
+    "Extra projects — Round E": "More projects"
+  };
+  list.querySelectorAll(".menu-group").forEach(h => {
+    const old = h.textContent.trim();
+    if (RENAME[old]) { h.textContent = RENAME[old]; h.dataset.group = RENAME[old]; }
+  });
+  if (window.LAB_MENU && window.LAB_MENU.groups) window.LAB_MENU.groups.forEach(g => { if (RENAME[g.name]) g.name = RENAME[g.name]; });
+  const ORDER = ["Circuits", "Breadboard", "Build your own — sandbox, chips & challenges", "Systems",
+    "Sequential logic, OS tools & instruments", "Advanced — hardware, projects, tools",
+    "Course labs — Operating Systems", "Course labs — OS in C", "Course labs — Computer Architecture",
+    "Course labs — Computer Organization", "More projects", "Concepts"];
+  const rankOf = name => { const i = ORDER.indexOf(name); return i >= 0 ? i : ORDER.length - 1; };
+  /* collect blocks: header + its items, in current order */
+  function collectBlocks() {
+    const blocks = []; let cur = null;
+    Array.prototype.slice.call(list.children).forEach(el => {
+      if (el.classList.contains("menu-group")) { cur = { header: el, name: el.textContent.replace(/\s*\d+\s*$/, "").trim(), items: [] }; blocks.push(cur); }
+      else if (el.classList.contains("menu-item") && cur) cur.items.push(el);
+    });
+    return blocks;
+  }
+  const blocks = collectBlocks();
+  blocks.forEach((b, i) => b.orig = i);
+  const sorted = blocks.slice().sort((a, b) => (rankOf(a.name) - rankOf(b.name)) || (a.orig - b.orig));
+  sorted.forEach(b => { list.appendChild(b.header); b.items.forEach(it => list.appendChild(it)); });
+  if (window.LAB_MENU && window.LAB_MENU.groups) {
+    const gs = window.LAB_MENU.groups.map((g, i) => ({ g, i }));
+    gs.sort((a, b) => (rankOf(a.g.name) - rankOf(b.g.name)) || (a.i - b.i));
+    window.LAB_MENU.groups = gs.map(x => x.g);
+  }
+  /* folding */
+  function setFold(block, folded) {
+    block.header.dataset.folded = folded ? "true" : "false";
+    block.header.setAttribute("aria-expanded", folded ? "false" : "true");
+    block.items.forEach(it => it.classList.toggle("menu-folded", folded));
+  }
+  const fresh = collectBlocks();
+  fresh.forEach(b => {
+    if (!b.header.querySelector(".mi-count")) {
+      const c = document.createElement("span"); c.className = "mi-count"; c.textContent = b.items.length;
+      b.header.appendChild(c);
+    }
+    b.header.setAttribute("role", "button");
+    b.header.setAttribute("tabindex", "0");
+    b.header.title = "Fold / unfold this group";
+    const toggle = () => setFold(b, b.header.dataset.folded !== "true");
+    b.header.addEventListener("click", toggle);
+    b.header.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } });
+    /* default: every long group folded, except Circuits — the home area */
+    setFold(b, b.items.length > 8 && b.name !== "Circuits");
+  });
+  function unfoldAll() { fresh.forEach(b => setFold(b, false)); }
+  function refoldLong() { fresh.forEach(b => setFold(b, b.items.length > 8 && b.name !== "Circuits")); }
+  /* expand / fold row under the filter */
+  const panel = $F("menuPanel");
+  if (panel && !panel.querySelector(".menu-fold-row")) {
+    const row = document.createElement("div");
+    row.className = "menu-fold-row";
+    row.innerHTML = '<button type="button" id="menuExpandAll">Expand all groups</button><button type="button" id="menuFoldLong">Fold long groups</button>';
+    const filterRow = panel.querySelector(".menu-filter-row");
+    if (filterRow && filterRow.nextSibling) panel.insertBefore(row, filterRow.nextSibling); else panel.appendChild(row);
+    row.querySelector("#menuExpandAll").addEventListener("click", unfoldAll);
+    row.querySelector("#menuFoldLong").addEventListener("click", refoldLong);
+  }
+  /* filtering needs every match visible: unfold while a query is typed */
+  const filter = $F("menuFilter");
+  if (filter) filter.addEventListener("input", () => { if (filter.value.trim()) unfoldAll(); else refoldLong(); });
+  /* on open, the group holding the current location is expanded and centred */
+  $F("menuBtn").addEventListener("click", () => {
+    setTimeout(() => {
+      if ($F("menuPanel").hidden) return;
+      const cur = list.querySelector('[aria-current="true"]');
+      if (!cur) return;
+      fresh.forEach(b => { if (b.items.indexOf(cur) >= 0) setFold(b, false); });
+      setTimeout(() => { if (cur.scrollIntoView) cur.scrollIntoView({ block: "nearest" }); }, 40);
+    }, 70);
+  });
+  window.LAB_MENU_F = { blocks: fresh.map(b => ({ name: b.name, count: b.items.length, folded: b.header.dataset.folded === "true" })),
+    total: fresh.reduce((s, b) => s + b.items.length, 0) };
+})();
+</script>
+<style>
+/* ===== Phone top bar stays reachable (revised fix) =====
+   Root cause: the header sat in normal flow, so on a phone the
+   whole header — title, Level, Menu, Theme — scrolled away with
+   the page (the header is ~245px tall there because the controls
+   wrap). A first fix made the head row position:sticky through a
+   display:contents header; that held in desktop Chromium but not
+   on the phone this was reported from, where the bar still
+   scrolled off. The bar is therefore position:fixed at phone
+   widths — no sticky range or wrapper behaviour involved — and
+   the page gets a matching top offset measured from the bar
+   itself (the script after this block keeps --headbar-h equal to
+   the bar's real wrapped height). Desktop layout is untouched,
+   and no header control is removed: the small caps captions
+   beside the controls are hidden at this width only, to keep
+   the bar compact. The menu filter also gets a larger target so
+   it reads as the panel's primary control. */
+.menu-filter-row input{font-size:15px;padding:11px 12px}
+@media (max-width:720px){
+  .site-head-row{position:fixed;top:0;left:0;right:0;z-index:55;background:var(--bg);
+    padding:calc(8px + env(safe-area-inset-top,0px)) 16px 8px;
+    border-bottom:1px solid var(--line);box-shadow:var(--shadow)}
+  body{padding-top:var(--headbar-h,150px)}
+  .site-head-row .lt-label{display:none}
+  header.site .legend{margin-top:12px}
+  [id]{scroll-margin-top:calc(var(--headbar-h,150px) + 12px)}
+}
+</style>
+<script>
+"use strict";
+/* Keep the phone top offset equal to the fixed bar's real height:
+   the bar wraps differently at 320px and at 430px, so a hard-coded
+   offset would either overlap content or leave a gap. */
+(function phoneBarOffset() {
+  var row = document.querySelector(".site-head-row"); if (!row) return;
+  var mq = window.matchMedia("(max-width: 720px)");
+  function measure() {
+    if (!mq.matches) { document.documentElement.style.removeProperty("--headbar-h"); return; }
+    var h = row.getBoundingClientRect().height;
+    if (h > 0) document.documentElement.style.setProperty("--headbar-h", Math.ceil(h) + "px");
+  }
+  measure();
+  window.addEventListener("resize", measure);
+  window.addEventListener("orientationchange", measure);
+  window.addEventListener("load", measure);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(measure);
+})();
+</script>
