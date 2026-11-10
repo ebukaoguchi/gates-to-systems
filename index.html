@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en" data-theme="paper">
 <head>
-<script>try{var t=window.localStorage.getItem("lbl-theme");if(["paper","slate","scope","blueprint"].indexOf(t)>=0)document.documentElement.dataset.theme=t;}catch(e){}window.__uxInteracted=false;["pointerdown","keydown","wheel","touchstart"].forEach(function(ev){window.addEventListener(ev,function(){window.__uxInteracted=true;},{passive:true});});try{history.scrollRestoration="manual";}catch(e){}</script>
+<script>try{var t=window.localStorage.getItem("lbl-theme");if(["paper","slate","scope","blueprint"].indexOf(t)>=0)document.documentElement.dataset.theme=t;}catch(e){}try{if(window.localStorage.getItem("lbl-textsize")==="large")document.documentElement.classList.add("text-large");}catch(e){}window.__uxInteracted=false;["pointerdown","keydown","wheel","touchstart"].forEach(function(ev){window.addEventListener(ev,function(){window.__uxInteracted=true;},{passive:true});});try{history.scrollRestoration="manual";}catch(e){}</script>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="color-scheme" content="light dark" />
@@ -519,6 +519,133 @@ html[data-theme="blueprint"] body{background-image:linear-gradient(rgba(157,189,
 .owner-line{margin:5px 0 0;font-size:13px;color:var(--muted)}
 .owner-line b{color:var(--ink)}
 
+/* text-size control — same pattern as the theme control beside it */
+.text-control{position:relative;display:flex;align-items:center;gap:8px;flex:none}
+.text-btn{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line2);background:var(--panel);border-radius:9px;padding:7px 11px;font-size:12.5px;font-weight:600;cursor:pointer;box-shadow:var(--shadow)}
+.text-btn[aria-pressed="true"]{background:var(--amber-soft);border-color:var(--amber)}
+@media (max-width:720px){
+  .ux-sticky .head-controls{gap:4px}
+  .text-btn{padding:6px 5px;font-size:11px;min-height:40px}
+  /* Large on a phone: the bar's own title eases down half a step so
+     its longest line still clears the controls sharing its row —
+     the row height itself is set by the Search toggle and does
+     not change. */
+  html.text-large .ux-sticky .site-head-row h1{font-size:14.5px}
+}
+
+/* ===== Larger text (reading comfort) =====
+   html.text-large scales the site's HTML reading text by ~1.2x.
+   Every sticky-bar control keeps its own explicit compact size
+   (none of the selectors below reach inside .ux-sticky), so the
+   bar's height is identical with Large on or off. SVG circuit and
+   breadboard drawings, canvas traces, and fixed-size data tiles
+   (bits, lamps, seven-segment, gantt, membar) are deliberately not
+   scaled: diagrams stay exactly as drawn. */
+html.text-large body{font-size:18px;line-height:1.55}
+html.text-large header.site p.sub{font-size:17.5px}
+html.text-large .legend{font-size:15px}
+html.text-large .stage-head h2{font-size:23px}
+html.text-large .what{font-size:16.5px}
+html.text-large .demo-card h2{font-size:22px}
+html.text-large .adv-subhead{font-size:23px}
+html.text-large .proj-head h2{font-size:20px}
+html.text-large .comp-card h3{font-size:18.5px}
+html.text-large .concept-card h3{font-size:18.5px}
+html.text-large .cp-head h3{font-size:23px}
+html.text-large .ux-hero h2{font-size:25px}
+html.text-large .ux-ghead h2{font-size:22px}
+html.text-large .module-head{font-size:19px}
+html.text-large .module-banner{font-size:18.5px}
+html.text-large .feedback-panel h2{font-size:20.5px}
+html.text-large .feedback-panel p{font-size:17px}
+html.text-large .track-intro,html.text-large .lab-aim{font-size:17.5px}
+html.text-large .ux-hero .ux-promise{font-size:17.5px}
+html.text-large .side h3{font-size:14.5px}
+html.text-large .ctrl-label{font-size:13px}
+html.text-large .expr{font-size:15.5px}
+html.text-large .decimal-line{font-size:17px}
+html.text-large .bool-expr,html.text-large .netlist-panel,html.text-large .cp-formal{font-size:15px}
+html.text-large .bool-words{font-size:15.5px}
+html.text-large table.tt{font-size:15px}
+html.text-large .tt-note{font-size:14.5px}
+html.text-large .narration,html.text-large .div-result,html.text-large .div-warn{font-size:16.5px}
+html.text-large .parts-list{font-size:16.5px}
+html.text-large .parts-list .contrib,html.text-large .bench-note{font-size:15px}
+html.text-large .feedback-line{font-size:16.5px}
+html.text-large .flow-status,html.text-large .check-line{font-size:15px}
+html.text-large .btn{font-size:15.5px}
+html.text-large .layout .seg button{font-size:15.5px}
+html.text-large .view-toggle button{font-size:15px}
+html.text-large .toggle .tname{font-size:15.5px}
+html.text-large .toggle .tval{font-size:17px}
+html.text-large .gate-chooser button,html.text-large .chipx-seg button{font-size:15px}
+html.text-large .part-list button,html.text-large .presets button{font-size:14.5px}
+html.text-large nav.picker button{font-size:16px}
+html.text-large nav.picker button small{font-size:13px}
+html.text-large .area-card b{font-size:17.5px}
+html.text-large .area-card span{font-size:15px}
+html.text-large .jump-chips button{font-size:14.5px}
+html.text-large .concept-card .cdef{font-size:15.5px}
+html.text-large .cp-def{font-size:17.5px}
+html.text-large #cpWrong{font-size:15.5px}
+html.text-large .chip{font-size:16px}
+html.text-large .comp-card p{font-size:15.5px}
+html.text-large #partCard h4{font-size:19px}
+html.text-large #partCard p{font-size:16.5px}
+html.text-large .proj-teaches,html.text-large .proj-parts{font-size:15.5px}
+html.text-large .proj-controls label{font-size:15px}
+html.text-large .fld{font-size:14.5px}
+html.text-large .band-selects select,html.text-large .proj-controls select,html.text-large .fld input,html.text-large .fld select,html.text-large select#asmStarter{font-size:16px}
+html.text-large .mod-note,html.text-large .pin-groups{font-size:16.5px}
+html.text-large .chain-block{font-size:16.5px}
+html.text-large .chain-block span{font-size:15px}
+html.text-large .isa-note{font-size:15px}
+html.text-large .isa-col h4{font-size:17px}
+html.text-large .isa-code{font-size:14px}
+html.text-large .ac-code,html.text-large .serial-pane{font-size:14.5px}
+html.text-large .sketch{font-size:14.5px}
+html.text-large .asm-editor,html.text-large .asm-listing{font-size:15px}
+html.text-large .code-pane{font-size:15px}
+html.text-large .c-out{font-size:15.5px}
+html.text-large .ux-act .ux-title{font-size:17px}
+html.text-large .ux-act .ux-out{font-size:15px}
+html.text-large .ux-group h3{font-size:19px}
+html.text-large .ux-group .ux-gblurb,html.text-large .ux-ghead .ux-gcount{font-size:15.5px}
+html.text-large .ux-modrow .mr-blurb,html.text-large .module-row .mr-blurb{font-size:15.5px}
+html.text-large .ux-step span{font-size:17px}
+html.text-large .ux-note{font-size:15.5px}
+html.text-large .ux-continue{font-size:16.5px}
+html.text-large .ux-demo .ux-try{font-size:15.5px}
+html.text-large .start-step{font-size:16.5px}
+html.text-large .picker-toggle{font-size:16.5px}
+html.text-large .picker-hint{font-size:15px}
+html.text-large .lab-tasks{font-size:17px}
+html.text-large .lab-check-q,html.text-large .lab-check-fb{font-size:16.5px}
+html.text-large .timing-note{font-size:15px}
+html.text-large .timing-read,html.text-large .timing-deep{font-size:15.5px}
+html.text-large .trainer-q{font-size:23px}
+html.text-large .score-line{font-size:15.5px}
+html.text-large .drill-q{font-size:17px}
+html.text-large .save-list{font-size:15.5px}
+html.text-large .progress-line{font-size:15px}
+html.text-large .share-row input[type="text"]{font-size:15.5px}
+html.text-large .fgs-in{font-size:16.5px}
+html.text-large .fgs-ta{font-size:14px}
+html.text-large .fgs-ticklist li{font-size:16.5px}
+html.text-large .levels-scale h4{font-size:15.5px}
+html.text-large .mod-slider-label{font-size:15.5px}
+html.text-large footer.site{font-size:15px}
+html.text-large .owner-line{font-size:15.5px}
+html.text-large .testme-bar{font-size:17px}
+html.text-large .dbg-status{font-size:15.5px}
+html.text-large .ux-noresults,html.text-large .ux-verdict{font-size:17px}
+html.text-large .trainer-row input{font-size:18px}
+html.text-large .tool-num{font-size:16px}
+html.text-large .matrix-inp{font-size:15px}
+html.text-large .addr-row{font-size:16.5px}
+html.text-large .addr-hex{font-size:18px}
+html.text-large .bnc-btn{font-size:19px}
+
 /* ===== Declutter: area rail, jump chips, details, tidy grids ===== */
 .topnav{display:none}
 .area-rail{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin:14px 0 4px}
@@ -746,6 +873,10 @@ body.lvl-advanced #startHere{display:none}
             <button type="button" role="menuitemradio" data-theme-opt="scope" aria-pressed="false"><span class="tsw" style="background:linear-gradient(135deg,#0a1f11 55%,#2eff7b 55%)"></span><span>Oscilloscope<small>Near-black green, phosphor traces</small></span></button>
             <button type="button" role="menuitemradio" data-theme-opt="blueprint" aria-pressed="false"><span class="tsw" style="background:linear-gradient(135deg,#0e3266 55%,#fbbf24 55%)"></span><span>Blueprint<small>Deep blue grid, pale lines, amber signals</small></span></button>
           </div>
+        </div>
+        <div class="text-control">
+          <span class="lt-label" id="textLabel">Text</span>
+          <button type="button" class="text-btn" id="textSizeBtn" aria-pressed="false" aria-labelledby="textLabel textSizeName"><span id="textSizeName">Normal</span></button>
         </div>
       </div>
   </div>
@@ -8876,6 +9007,28 @@ document.querySelectorAll("[data-theme-opt]").forEach(b => b.addEventListener("c
   themeMenu.hidden = true; themeBtn.setAttribute("aria-expanded", "false");
 }));
 setTheme(document.documentElement.dataset.theme || "paper", true);
+
+/* ================= TEXT SIZE (Larger text) =================
+   A display preference only (like theme and level): remembered
+   on the device under lbl-textsize, applied before first paint
+   by the head script, switching is instant and never touches
+   state. The class lives on <html>; the scale rules reach only
+   HTML reading text — diagrams and the sticky bar keep their
+   own sizes, so the bar height never changes. */
+function setTextSize(large, skipSave) {
+  document.documentElement.classList.toggle("text-large", !!large);
+  const b = $("textSizeBtn"), n = $("textSizeName");
+  if (b) b.setAttribute("aria-pressed", large ? "true" : "false");
+  if (n) n.textContent = large ? "Large" : "Normal";
+  if (!skipSave) { try { window.localStorage.setItem("lbl-textsize", large ? "large" : "normal"); } catch (e) { /* session-only */ } }
+  window.dispatchEvent(new Event("resize"));
+}
+(function initTextSize() {
+  const b = $("textSizeBtn"); if (!b) return;
+  setTextSize(document.documentElement.classList.contains("text-large"), true);
+  b.addEventListener("click", () => setTextSize(!document.documentElement.classList.contains("text-large")));
+  window.__textSize = { set: setTextSize, isLarge: () => document.documentElement.classList.contains("text-large") };
+})();
 
 /* area rail — the five areas, same destinations as the tabs */
 function syncRail(key) {
