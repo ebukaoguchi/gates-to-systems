@@ -1882,6 +1882,40 @@ const GATE_META = {
   XNOR: { arity: 2, expr: v => "Y = ¬(" + v[0] + " ⊕ " + v[1] + ")" }
 };
 
+/* ---------- gate delays & timing (74-series TTL, typical) ----------
+   Delays are data on the engine, by gate type — never per circuit.
+   A net's arrival time is the longest chain of gate delays feeding
+   it; the circuit's total propagation delay is the slowest output's
+   arrival, and the chain achieving it is the critical path. */
+const GATE_DELAYS = { NOT: 10, AND: 10, OR: 10, NAND: 10, NOR: 10, XOR: 15, XNOR: 15 };
+function gateDelay(type) { return GATE_DELAYS[type] || 10; }
+function computeTiming(def) {
+  const arrival = {}, pred = {};
+  def.inputs.forEach(n => { arrival[n] = 0; });
+  arrival.ZERO = 0; arrival.ONE = 0;
+  def.gates.forEach(g => { g.delay = gateDelay(g.type); });
+  const ordered = def.gates.slice().sort((a, b) => (a.level || 1) - (b.level || 1));
+  ordered.forEach(g => {
+    let best = 0, from = null;
+    g.ins.forEach(n => { const a = arrival[n] || 0; if (from === null || a > best) { best = a; from = n; } });
+    g.arrival = best + g.delay;
+    arrival[g.out] = g.arrival;
+    pred[g.out] = { gate: g.id, from };
+  });
+  let total = 0, outNet = null;
+  def.outputs.forEach(o => { if (outNet === null || (arrival[o] || 0) > total) { total = arrival[o] || 0; outNet = o; } });
+  const critGates = [], critNets = [], seen = {};
+  let net = outNet;
+  while (net && pred[net] && !seen[net]) { seen[net] = true; critNets.push(net); critGates.push(pred[net].gate); net = pred[net].from; }
+  if (net) critNets.push(net);
+  critGates.reverse(); critNets.reverse();
+  const byTime = {};
+  def.gates.forEach(g => { (byTime[g.arrival] = byTime[g.arrival] || []).push(g); });
+  const events = Object.keys(byTime).map(Number).sort((a, b) => a - b).map(t => ({ t, gates: byTime[t] }));
+  def.timing = { arrival, total, events, critGates, critNets, critOutput: outNet, pathGates: critGates.length };
+  return def.timing;
+}
+
 function computeLevels(def) {
   const level = {};
   def.inputs.forEach(n => level[n] = 0);
@@ -1899,6 +1933,7 @@ function computeLevels(def) {
     }
   }
   def.maxLevel = def.gates.reduce((m, g) => Math.max(m, g.level || 1), 1);
+  computeTiming(def);
   return def;
 }
 function evaluateAll(def, inputVals) {
@@ -2113,7 +2148,7 @@ function divSimulate(dividend, divisor) {
   }
   return { q: Q, r: A };
 }
-window.LAB = { GATE_FNS, computeLevels, evaluateAll, enumerateTruth, defHalfAdder, defFullAdder, defRipple, defMultiplier, defGateLab, verifyAll, divSimulate,
+window.LAB = { GATE_FNS, GATE_DELAYS, gateDelay, computeTiming, computeLevels, evaluateAll, enumerateTruth, defHalfAdder, defFullAdder, defRipple, defMultiplier, defGateLab, verifyAll, divSimulate,
   defHalfSub, defFullSub, defMux2, defMux4, defDemux, defDecoder, defEncoder, defComp1, defComp4, defAlu };
 
 /* ---------- SVG helpers ---------- */
@@ -14780,6 +14815,569 @@ renderStage = function () {
 .fgs-pick label{display:flex;gap:8px;align-items:baseline;padding:3px 0;font-size:13px;cursor:pointer}
 .fgs-pick input{flex:none}
 </style>
+<style>
+/* ===== Timing view + bounce lab + address-decoding lab ===== */
+html[data-theme="paper"]{--crit:#be185d}
+html[data-theme="slate"]{--crit:#f472b6}
+html[data-theme="scope"]{--crit:#ff71ce}
+html[data-theme="blueprint"]{--crit:#fda4af}
+.gate-delay{font-family:"IBM Plex Mono",monospace;font-size:10px;font-weight:700;fill:var(--teal);text-anchor:middle}
+.wire.crit{stroke:var(--crit);stroke-width:3.6}
+.branch-dot.crit{fill:var(--crit)}
+.gate-group.crit .gate-body{stroke:var(--crit);stroke-width:2.8}
+.out-lamp.crit{stroke:var(--crit);stroke-width:3}
+.fa-box.crit,.block-box.crit{stroke:var(--crit);stroke-width:2.6}
+.timing-read{font-family:"IBM Plex Mono",monospace;font-size:13px;margin-top:9px;line-height:1.6}
+.timing-note{font-size:12.5px;color:var(--muted);margin:8px 0 0;line-height:1.5;max-width:62ch}
+.timing-deep{font-size:13px;margin-top:6px;line-height:1.6}
+.bnc-btn{min-height:56px;border:2px solid var(--amber);background:var(--amber-soft);color:var(--ink);border-radius:14px;padding:12px 22px;font:inherit;font-size:16px;font-weight:800;cursor:pointer;box-shadow:0 3px 0 var(--amber)}
+.bnc-btn:active{transform:translateY(2px);box-shadow:0 1px 0 var(--amber)}
+.bnc-tr{fill:none;stroke-width:2.4;stroke-linejoin:round}
+.bnc-tr.raw{stroke:var(--amber-wire)}
+.bnc-tr.deb{stroke:var(--teal)}
+.bnc-lab{font-family:"IBM Plex Mono",monospace;font-size:11.5px;font-weight:700;fill:var(--ink)}
+.bnc-grid{stroke:var(--line);stroke-width:1}
+.bnc-tick{font-family:"IBM Plex Mono",monospace;font-size:10px;fill:var(--muted);text-anchor:middle}
+.bnc-sweep{stroke:var(--crit);stroke-width:1.8;stroke-dasharray:5 4}
+.bnc-thr{stroke:var(--crit);stroke-width:1.4;stroke-dasharray:5 4;fill:none}
+.bnc-rc{fill:none;stroke:var(--teal);stroke-width:2.4;stroke-linejoin:round}
+.bnc-rcout{fill:none;stroke:var(--amber-wire);stroke-width:2.4;stroke-linejoin:round}
+.addr-map{display:flex;flex-direction:column;gap:4px;margin-top:10px}
+.addr-row{display:flex;gap:10px;align-items:baseline;width:100%;text-align:left;border:1.6px solid var(--line2);background:var(--panel2);border-radius:9px;padding:8px 12px;font:inherit;font-size:13.5px;color:var(--ink);cursor:pointer;flex-wrap:wrap;min-height:44px}
+.addr-row.active{border-color:var(--amber);background:var(--amber-soft)}
+.addr-row.unmapped{opacity:.72}
+.addr-range{font-family:"IBM Plex Mono",monospace;font-weight:700;flex:none}
+.addr-dev{flex:1 1 180px}
+.addr-bits{font-family:"IBM Plex Mono",monospace;color:var(--muted);font-size:12px;flex:none}
+.addr-hex{font:inherit;font-family:"IBM Plex Mono",monospace;font-size:15px;padding:8px 10px;border:1px solid var(--line2);border-radius:8px;background:var(--panel);color:var(--ink);width:130px;max-width:100%}
+</style>
+<script>
+"use strict";
+/* ================================================================
+   TIMING VIEW (gate delays & critical path) + SWITCH BOUNCE LAB +
+   ADDRESS DECODING LAB. All additive: the Timing layer wraps the
+   stage's render/propagation only while its toggle is on; with it
+   off the original functions run untouched. Both labs compute
+   everything they show — the bounce pattern from a seeded generator
+   fed through a simulated cross-coupled NOR latch, the address
+   selection from a decoder netlist run by the site engine.
+   ================================================================ */
+(function roundTimingBounceAddr() {
+  const $T = id => document.getElementById(id);
+  const SVGNS_T = "http://www.w3.org/2000/svg";
+  const jumpT = id => { const el = $T(id); if (el) setTimeout(() => el.scrollIntoView({ behavior: "smooth", block: "start" }), 60); };
+  const reducedMotion = () => !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  function mulberry(seed) { let a = seed >>> 0; return function () { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+
+  /* ================= TIMING VIEW ================= */
+  const TM = { on: false, crit: false, evtIdx: 0 };
+  const tmGroup = document.createElement("div");
+  tmGroup.className = "ctrl-group"; tmGroup.id = "timingControls";
+  tmGroup.innerHTML =
+    '<div class="ctrl-label">Timing — gate delays &amp; critical path</div>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">' +
+    '<button type="button" class="btn" id="timingToggle" aria-pressed="false">Timing: off</button>' +
+    '<button type="button" class="btn" id="critPathBtn" aria-pressed="false" disabled>Highlight critical path</button></div>' +
+    '<div class="timing-read" id="timingRead" hidden></div>' +
+    '<p class="timing-note">Delays are typical 74-series TTL values: NOT 10 ns · AND, OR, NAND, NOR 10 ns · XOR, XNOR 15 ns. A net\'s arrival time is the sum of delays along the longest gate chain feeding it — with Timing on, gates fire at their arrival times instead of level by level.</p>' +
+    '<div class="adv-only timing-deep" id="timingDeep"></div>';
+  const flowGrp = $T("flowControls");
+  if (flowGrp && flowGrp.parentNode) flowGrp.parentNode.insertBefore(tmGroup, flowGrp.nextSibling);
+
+  function tmApplicable() { return state.circuitId !== "divider" && !(state.circuitId === "full" && state.view === "breadboard") && !!state.def && !!state.def.timing; }
+  function tmActive() { return TM.on && tmApplicable(); }
+  function refreshTimingUI() {
+    tmGroup.style.display = state.circuitId === "divider" ? "none" : "";
+    const tg = $T("timingToggle"); if (tg) { tg.setAttribute("aria-pressed", TM.on ? "true" : "false"); tg.textContent = TM.on ? "Timing: on" : "Timing: off"; }
+    const cb = $T("critPathBtn"); if (cb) { cb.disabled = !TM.on; cb.setAttribute("aria-pressed", TM.crit ? "true" : "false"); }
+    const read = $T("timingRead"), deep = $T("timingDeep");
+    if (!read || !deep) return;
+    if (TM.on && tmApplicable()) {
+      const t = state.def.timing;
+      read.hidden = false;
+      read.innerHTML = "Total propagation delay: <b>" + t.total + " ns</b> · longest path: <b>" + t.pathGates + " gate" + (t.pathGates === 1 ? "" : "s") + "</b>" +
+        (TM.crit ? "<br>Critical path: " + t.critNets.join(" → ") : "");
+      deep.innerHTML = '<div class="ctrl-label" style="margin-top:8px">Arrival times — when each output becomes valid</div>' +
+        state.def.outputs.map(o => "<div>" + o + " ready at <b>" + (t.arrival[o] || 0) + " ns</b></div>").join("") +
+        '<div style="margin-top:4px">Every gate waits for the slowest of its inputs, then adds its own delay. The chain that finishes last is the critical path: shorten that chain and the whole circuit speeds up — speeding up any other gate changes nothing.</div>';
+    } else { read.hidden = true; deep.innerHTML = ""; }
+  }
+  function tmDecorate() {
+    if (!tmActive()) { refreshTimingUI(); return; }
+    const box = $T("stageBox"), def = state.def, t = def.timing;
+    box.querySelectorAll(".gate-group").forEach(gr => {
+      const g = def.gates.find(x => x.id === gr.dataset.gate);
+      if (!g) return;
+      const lbl = gr.querySelector(".gate-label");
+      const x = lbl ? +lbl.getAttribute("x") : 0, y = lbl ? +lbl.getAttribute("y") : 0;
+      const tx = document.createElementNS(SVGNS_T, "text");
+      tx.setAttribute("class", "gate-delay"); tx.setAttribute("x", x); tx.setAttribute("y", y + 13);
+      tx.textContent = g.delay + " ns";
+      gr.appendChild(tx);
+      if (TM.crit && t.critGates.indexOf(g.id) >= 0) gr.classList.add("crit");
+    });
+    if (TM.crit) {
+      const nets = {}; t.critNets.forEach(n => nets[n] = 1);
+      box.querySelectorAll("[data-net]").forEach(el => { if (nets[el.dataset.net]) el.classList.add("crit"); });
+      box.querySelectorAll("[data-lamp]").forEach(el => { if (nets[el.dataset.lamp]) el.classList.add("crit"); });
+      const cg = {}; t.critGates.forEach(id => cg[id] = 1);
+      box.querySelectorAll("[data-fa]").forEach(el => {
+        const k = el.dataset.fa;
+        const hit = k === "mult" ? t.critGates.some(id => id.indexOf("m_") === 0) : t.critGates.some(id => id.indexOf("f" + k + "_") === 0);
+        if (hit) el.classList.add("crit");
+      });
+      box.querySelectorAll("[data-block]").forEach(el => {
+        const ids = el.dataset.block === "ha1" ? ["x1", "a1"] : ["x2", "a2", "o1"];
+        if (ids.some(id => cg[id])) el.classList.add("crit");
+      });
+    }
+    refreshTimingUI();
+  }
+  const _rsTM = renderStage;
+  renderStage = function () { _rsTM(); tmDecorate(); };
+  function tmEvtSummary(i) {
+    const evts = state.def.timing.events;
+    if (i >= evts.length) return "";
+    const e = evts[i];
+    return "Next event at " + e.t + " ns: " + e.gates.map(g => g.type + " → " + g.out).join(", ") + ".";
+  }
+  function tmApplyEvent(i) {
+    const def = state.def, evts = def.timing.events, e = evts[i];
+    const full = evaluateAll(def, curInputs());
+    e.gates.forEach(g => { state.displayed[g.out] = full[g.out]; });
+    TM.evtIdx = i + 1;
+    const last = TM.evtIdx >= evts.length;
+    if (last) state.settled = true;
+    paintState(null);
+    const box = $T("stageBox");
+    e.gates.forEach(g => {
+      const gr = box.querySelector('.gate-group[data-gate="' + g.id + '"]');
+      if (gr) gr.classList.add("flash");
+      box.querySelectorAll('.wire[data-net="' + g.out + '"]').forEach(w => w.classList.add("pulse"));
+    });
+    if (last) { $T("flowStatus").innerHTML = "Settled at <b>" + def.timing.total + " ns</b> — the critical path set the pace. Outputs match the highlighted truth-table row."; $T("stepBtn").disabled = true; }
+    else if (state.flow === "step") $T("flowStatus").innerHTML = "Fired at " + e.t + " ns: " + e.gates.map(g => g.type + " → " + g.out).join(", ") + ". " + tmEvtSummary(TM.evtIdx);
+    else $T("flowStatus").textContent = "Timing: " + e.t + " ns of " + def.timing.total + " ns…";
+  }
+  const _spTM = startPropagation;
+  startPropagation = function () {
+    if (!tmActive()) { _spTM(); refreshTimingUI(); return; }
+    clearTimers();
+    const def = state.def;
+    TM.evtIdx = 0; state.settled = false;
+    state.displayed = Object.assign({ ZERO: 0, ONE: 1 }, curInputs());
+    paintState(null);
+    $T("stepBtn").disabled = state.flow !== "step";
+    if (reducedMotion() && state.flow !== "step") { def.timing.events.forEach((e, i) => tmApplyEvent(i)); refreshTimingUI(); return; }
+    if (state.flow === "step") {
+      $T("flowStatus").innerHTML = "Timing step mode: <b>Step flow</b> advances to the next arrival event. " + tmEvtSummary(0);
+    } else {
+      $T("flowStatus").textContent = "Flowing — each gate fires at its arrival time…";
+      const total = def.timing.total || 1, span = Math.max(1, def.maxLevel) * delayPerLevel();
+      def.timing.events.forEach((e, i) => { state.timers.push(setTimeout(() => tmApplyEvent(i), 120 + (e.t / total) * span)); });
+    }
+    refreshTimingUI();
+  };
+  $T("stepBtn").addEventListener("click", e => {
+    if (!tmActive() || state.flow !== "step") return;
+    e.stopPropagation(); e.stopImmediatePropagation(); e.preventDefault();
+    if (TM.evtIdx < state.def.timing.events.length) tmApplyEvent(TM.evtIdx);
+  }, true);
+  $T("timingToggle").addEventListener("click", () => {
+    TM.on = !TM.on; if (!TM.on) TM.crit = false;
+    refreshTimingUI();
+    if (state.circuitId !== "divider") startPropagation();
+  });
+  $T("critPathBtn").addEventListener("click", () => {
+    TM.crit = !TM.crit;
+    renderStage(); paintState(null); refreshTimingUI();
+  });
+  const _scTM = selectCircuit;
+  selectCircuit = function (id) { _scTM(id); refreshTimingUI(); };
+  refreshTimingUI();
+  window.__timingCheck = {
+    gateAND: computeLevels(defGateLab("AND")).timing.total,
+    gateXOR: computeLevels(defGateLab("XOR")).timing.total,
+    half: computeLevels(defHalfAdder()).timing.total,
+    full: computeLevels(defFullAdder()).timing.total,
+    ripple: computeLevels(defRipple()).timing.total,
+    mult: computeLevels(defMultiplier()).timing.total,
+    rippleCritNets: computeLevels(defRipple()).timing.critNets.join(">"),
+    rippleCritGates: computeLevels(defRipple()).timing.critGates.join(",")
+  };
+
+  /* ================= SWITCH BOUNCE & DEBOUNCE ================= */
+  const BNC = (() => {
+    const rng = mulberry(20261109);
+    function burst(t0, dur, startV) {
+      const tr = [{ t: t0, v: startV }]; let t = t0, v = startV;
+      for (let guard = 0; guard < 40; guard++) {
+        const dt = 0.25 + rng() * 0.65;
+        if (t + dt >= t0 + dur) break;
+        t += dt; v = v ? 0 : 1; tr.push({ t: Math.round(t * 100) / 100, v });
+      }
+      if (v !== startV) tr.push({ t: t0 + dur, v: startV });
+      return tr;
+    }
+    /* a changeover contact bounces on one terminal at a time: on
+       release it rattles off the pressed contact first, flies across,
+       then rattles onto the rest contact — the two bursts never overlap */
+    const P = burst(0, 4.2, 1).concat(burst(8, 2.1, 0));
+    const U = [{ t: 0, v: 0 }].concat(burst(10.25, 2.05, 1));
+    const TOTAL = 14;
+    const valAt = (tr, init, t) => { let v = init; for (const e of tr) { if (e.t <= t) v = e.v; else break; } return v; };
+    const NOR = a => a.some(v => v) ? 0 : 1;
+    const samples = []; let Q = 0, Qb = 1;
+    for (let t = 0; t <= TOTAL; t += 0.02) {
+      const S = valAt(P, 0, t), R = valAt(U, 1, t);
+      for (let k = 0; k < 6; k++) { const nQ = NOR([R, Qb]), nQb = NOR([S, Q]); Q = nQ; Qb = nQb; }
+      samples.push({ t: Math.round(t * 100) / 100, S, R, Q });
+    }
+    const rawRising = P.filter(e => e.v === 1).length;
+    let debRising = 0, prevQ = 0;
+    samples.forEach(s => { if (s.Q === 1 && prevQ === 0) debRising++; prevQ = s.Q; });
+    return { P, U, samples, valAt, rawRising, debRising, TOTAL, pressMs: 4.2 };
+  })();
+  window.__bncCheck = { rawRising: BNC.rawRising, debRising: BNC.debRising, pressMs: BNC.pressMs };
+
+  const bncSec = document.createElement("section");
+  bncSec.className = "card stage-card"; bncSec.id = "bounceCard"; bncSec.style.marginBottom = "16px";
+  bncSec.innerHTML =
+    "<h2>Switch bounce &amp; debounce</h2>" +
+    '<p class="what">A real mechanical contact does not close cleanly: it bounces — making and breaking for a few milliseconds before it settles. This switch\'s seeded bounce burst lasts about <b>' + BNC.pressMs + ' ms</b> (typical of real switches: roughly 1–10 ms), and it is the same burst on every load. Press the button and watch one press become many edges on the raw line — then clean it back to one.</p>' +
+    '<div class="share-row"><button type="button" class="bnc-btn" id="bncPress">Press &amp; release the switch ▸</button>' +
+    '<span class="mono" id="bncState" style="font-size:13px">At rest — the counter is watching.</span></div>' +
+    '<div class="schematic-box" style="margin-top:10px"><svg id="bncSvg" viewBox="0 0 900 196" role="img" aria-label="Raw bouncing waveform and debounced waveform over 14 milliseconds" style="display:block;width:100%;height:auto"></svg></div>' +
+    '<div class="seq-state">' +
+    '<div class="seq-cell"><b id="bncRawCount">0</b>rising edges — raw</div>' +
+    '<div class="seq-cell"><b id="bncDebCount">0</b>rising edges — debounced</div>' +
+    '<div class="seq-cell one"><b id="bncMainCount">0</b><span id="bncMainLabel">the counter (fed by: raw)</span></div></div>' +
+    '<div class="share-row"><span class="ctrl-label" style="margin:0">Counter input</span>' +
+    '<div class="seg" role="group" aria-label="Counter input source">' +
+    '<button type="button" id="bncSrcRaw" aria-pressed="true">Raw</button>' +
+    '<button type="button" id="bncSrcDeb" aria-pressed="false">Debounced</button></div>' +
+    '<span style="font-size:13px;color:var(--muted)">Feed the same press to the counter raw, and it counts every bounce. Feed it debounced, and it counts the press once.</span></div>' +
+    '<h3 style="margin:16px 0 4px">The debouncer — an SR latch that cannot be re-triggered</h3>' +
+    '<p class="what" style="font-size:14px">The switch is a changeover contact: at rest it touches R, pressed it touches S, and mid-bounce it touches neither. Two cross-coupled NOR gates form the latch. The first touch of S sets Q = 1; while the contact bounces, S pulses again but Q is already 1 — the latch holds through the gaps (S = R = 0) and cannot change until the contact comes back to R at release. That is the whole trick: a latch remembers, so repeated edges on one side do nothing.</p>' +
+    '<div class="schematic-box"><svg id="bncLatchSvg" viewBox="0 0 500 252" role="img" aria-label="SR latch debouncer built from two NOR gates" style="display:block;width:100%;height:auto"></svg></div>' +
+    '<div class="lab-check"><span class="lab-check-q" id="bncQ"></span><span id="bncOpts" style="display:flex;gap:6px;flex-wrap:wrap"></span><span class="lab-check-fb" id="bncFb" aria-live="polite"></span></div>' +
+    '<details class="details-disclosure"><summary>Details — the other classic fix: RC + Schmitt trigger</summary>' +
+    '<p class="proj-teaches">Instead of a latch, let the bouncing contact charge a capacitor through a resistor. The capacitor voltage cannot jump: each bounce only nudges it, so the voltage creeps smoothly across the range instead of slamming rail to rail. A Schmitt-trigger input then snaps cleanly at its upper threshold on the way up and ignores everything until the voltage falls below its lower threshold on release — the gap between the two thresholds (hysteresis) is what swallows the bounce.</p>' +
+    '<div class="schematic-box"><svg id="bncRcSvg" viewBox="0 0 460 150" role="img" aria-label="RC smoothing with Schmitt thresholds" style="display:block;width:100%;height:auto"></svg></div>' +
+    '<p class="proj-teaches">Dashed lines are the Schmitt thresholds. The smoothed voltage (teal) crosses the upper threshold once per press; the Schmitt output (amber) is a single clean edge — same press, one count.</p></details>';
+  const advTools = $T("advTools");
+  if (advTools) advTools.appendChild(bncSec);
+
+  /* bounce traces */
+  (function bncDrawStatic() {
+    const X = t => 46 + (t / BNC.TOTAL) * 824;
+    function path(tr, init, base) {
+      const Y = v => v ? base : base + 36;
+      let d = "M " + X(0) + " " + Y(init), cur = init;
+      tr.forEach(e => { if (e.v !== cur) { d += " L " + X(e.t).toFixed(1) + " " + Y(cur) + " L " + X(e.t).toFixed(1) + " " + Y(e.v); cur = e.v; } });
+      return d + " L " + X(BNC.TOTAL) + " " + Y(cur);
+    }
+    const qTr = []; let pq = 0;
+    BNC.samples.forEach(s => { if (s.Q !== pq) { qTr.push({ t: s.t, v: s.Q }); pq = s.Q; } });
+    let s = "";
+    for (let ms = 0; ms <= 14; ms += 2) s += '<line class="bnc-grid" x1="' + X(ms) + '" y1="8" x2="' + X(ms) + '" y2="168"/><text class="bnc-tick" x="' + X(ms) + '" y="184">' + ms + " ms</text>";
+    s += '<text class="bnc-lab" x="2" y="30">RAW</text>' + '<path class="bnc-tr raw" d="' + path(BNC.P, 0, 22) + '"/>';
+    s += '<text class="bnc-lab" x="2" y="118">DEB.</text>' + '<path class="bnc-tr deb" d="' + path(qTr, 0, 110) + '"/>';
+    s += '<line class="bnc-sweep" id="bncSweep" x1="' + X(0) + '" y1="6" x2="' + X(0) + '" y2="168" style="display:none"/>';
+    bncSec.querySelector("#bncSvg").innerHTML = s;
+    /* RC + Schmitt diagram */
+    const RX = t => 30 + (t / 14) * 400, RY = v => 118 - v * 92;
+    let vc = 0, cp = "", op = "", out = 0;
+    for (let t = 0; t <= 14; t += 0.1) {
+      const target = (t >= 0 && t < 8) ? 1 : 0;
+      vc += (target - vc) * 0.055;
+      cp += (t === 0 ? "M " : " L ") + RX(t).toFixed(1) + " " + RY(vc).toFixed(1);
+      const no = out === 0 && vc > 0.68 ? 1 : out === 1 && vc < 0.32 ? 0 : out;
+      if (no !== out) { op += " L " + RX(t).toFixed(1) + " " + RY(out) + " L " + RX(t).toFixed(1) + " " + RY(no); out = no; }
+      if (t === 0) op = "M " + RX(0) + " " + RY(0);
+    }
+    op += " L " + RX(14) + " " + RY(out);
+    bncSec.querySelector("#bncRcSvg").innerHTML =
+      '<line class="bnc-thr" x1="' + RX(0) + '" y1="' + RY(0.68) + '" x2="' + RX(14) + '" y2="' + RY(0.68) + '"/>' +
+      '<line class="bnc-thr" x1="' + RX(0) + '" y1="' + RY(0.32) + '" x2="' + RX(14) + '" y2="' + RY(0.32) + '"/>' +
+      '<text class="bnc-tick" x="' + (RX(14) - 4) + '" y="' + (RY(0.68) - 5) + '" style="text-anchor:end">upper threshold</text>' +
+      '<text class="bnc-tick" x="' + (RX(14) - 4) + '" y="' + (RY(0.32) + 13) + '" style="text-anchor:end">lower threshold</text>' +
+      '<path class="bnc-rc" d="' + cp + '"/><path class="bnc-rcout" d="' + op + '"/>';
+    /* SR latch diagram in the site's gate style */
+    const gT = gateMarkup({ id: "bncN1", type: "NOR", ins: ["S", "Qb"], level: 1 }, 300, 80);
+    const gB = gateMarkup({ id: "bncN2", type: "NOR", ins: ["Q", "R"], level: 1 }, 300, 190);
+    let ls = inNodeMarkup("S", 55, 68, 0) + inNodeMarkup("R", 55, 202, 1);
+    ls += wireMarkup("S", 81, 68, 267, 68);
+    ls += wireMarkup("R", 81, 202, 267, 202);
+    ls += wireMarkup("Qb", 341, 190, 267, 92, 388);
+    ls += wireMarkup("Q", 341, 80, 428, 80);
+    ls += '<path class="wire is-zero" data-net="Q" d="M 388 80 V 178 H 267"/>' + dotMarkup("Q", 388, 80);
+    ls += gT.markup + gB.markup + outLampMarkup("Q", 452, 80, "Q");
+    ls += '<text class="net-label" x="55" y="36" text-anchor="middle">pressed contact</text>';
+    ls += '<text class="net-label" x="55" y="240" text-anchor="middle">rest contact</text>';
+    bncSec.querySelector("#bncLatchSvg").innerHTML = ls;
+  })();
+  function bncPaintLatch(S, R, Q) {
+    const vals = { S, R, Q, Qb: Q ? 0 : 1 };
+    bncSec.querySelectorAll("[data-net]").forEach(el => {
+      const v = vals[el.dataset.net];
+      el.classList.remove("is-one", "is-zero", "pending");
+      el.classList.add(v ? "is-one" : "is-zero");
+    });
+    bncSec.querySelectorAll("[data-lamp]").forEach(el => { el.classList.toggle("on", !!vals[el.dataset.lamp]); });
+    bncSec.querySelectorAll("[data-lampval]").forEach(el => { el.textContent = vals[el.dataset.lampval]; });
+    bncSec.querySelectorAll("[data-input]").forEach(el => {
+      const v = vals[el.dataset.input];
+      el.classList.toggle("on", !!v);
+      const t = el.querySelector(".in-val"); if (t) t.textContent = v;
+    });
+  }
+  let bncSource = "raw", bncRaf = null;
+  function bncShow(t) {
+    const S = BNC.valAt(BNC.P, 0, t), R = BNC.valAt(BNC.U, 1, t);
+    const smp = BNC.samples[Math.max(0, Math.min(BNC.samples.length - 1, Math.round(t / 0.02)))];
+    const Q = t < 0 ? 0 : smp.Q;
+    bncPaintLatch(t < 0 ? 0 : S, t < 0 ? 1 : R, Q);
+    const raw = t < 0 ? 0 : BNC.P.filter(e => e.v === 1 && e.t <= t).length;
+    let deb = 0, pq = 0;
+    if (t >= 0) BNC.samples.forEach(sm => { if (sm.t > t) return; if (sm.Q === 1 && pq === 0) deb++; pq = sm.Q; });
+    bncSec.querySelector("#bncRawCount").textContent = raw;
+    bncSec.querySelector("#bncDebCount").textContent = deb;
+    bncSec.querySelector("#bncMainCount").textContent = bncSource === "raw" ? raw : deb;
+    const sweep = bncSec.querySelector("#bncSweep");
+    if (sweep) { const x = 46 + (Math.max(0, t) / BNC.TOTAL) * 824; sweep.setAttribute("x1", x); sweep.setAttribute("x2", x); sweep.style.display = t < 0 ? "none" : ""; }
+    const st = bncSec.querySelector("#bncState");
+    if (t < 0) st.textContent = "At rest — the counter is watching.";
+    else if (t < 4.2) st.textContent = "Pressing — the contacts are bouncing; the raw line cannot make up its mind.";
+    else if (t < 8) st.textContent = "Pressed and settled. The latch set on the first touch and ignored every bounce after it.";
+    else if (t < 12.3) st.textContent = "Releasing — bouncing again on the way out; the latch waits for the rest contact.";
+    else st.textContent = "Done: one press-and-release gave " + BNC.rawRising + " raw rising edges but " + BNC.debRising + " debounced edge. " + (bncSource === "raw" ? "The counter, fed raw, counted them all." : "The counter, fed debounced, counted the press once.");
+  }
+  bncSec.querySelector("#bncPress").addEventListener("click", () => {
+    if (bncRaf) cancelAnimationFrame(bncRaf);
+    if (reducedMotion()) { bncShow(BNC.TOTAL); return; }
+    const t0 = performance.now(), DUR = 3000;
+    const tick = now => {
+      const t = Math.min(BNC.TOTAL, (now - t0) / DUR * BNC.TOTAL);
+      bncShow(t);
+      if (t < BNC.TOTAL) bncRaf = requestAnimationFrame(tick);
+    };
+    bncRaf = requestAnimationFrame(tick);
+  });
+  const bncSetSource = src => {
+    bncSource = src;
+    bncSec.querySelector("#bncSrcRaw").setAttribute("aria-pressed", src === "raw" ? "true" : "false");
+    bncSec.querySelector("#bncSrcDeb").setAttribute("aria-pressed", src === "debounced" ? "true" : "false");
+    bncSec.querySelector("#bncMainLabel").textContent = "the counter (fed by: " + src + ")";
+    bncSec.querySelector("#bncMainCount").textContent = src === "raw" ? bncSec.querySelector("#bncRawCount").textContent : bncSec.querySelector("#bncDebCount").textContent;
+  };
+  bncSec.querySelector("#bncSrcRaw").addEventListener("click", () => bncSetSource("raw"));
+  bncSec.querySelector("#bncSrcDeb").addEventListener("click", () => bncSetSource("debounced"));
+  (function bncQuestion() {
+    bncSec.querySelector("#bncQ").textContent = "Check: for that one press-and-release, how many rising edges did the raw contact signal produce?";
+    const rng = mulberry(777);
+    const opts = [BNC.rawRising, 1, BNC.rawRising + 3, Math.max(2, BNC.rawRising - 2)];
+    for (let i = opts.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); const tmp = opts[i]; opts[i] = opts[j]; opts[j] = tmp; }
+    const host = bncSec.querySelector("#bncOpts"), fb = bncSec.querySelector("#bncFb");
+    opts.forEach(v => {
+      const b = document.createElement("button");
+      b.type = "button"; b.className = "btn"; b.textContent = v;
+      b.addEventListener("click", () => {
+        if (v === BNC.rawRising) { fb.textContent = "✓ Exactly — count the 0→1 jumps in the raw burst: " + BNC.rawRising + " edges for one press. The debounced line produced " + BNC.debRising + "."; fb.style.color = "var(--green)"; }
+        else { fb.textContent = "✗ Not quite — replay the press and count only the 0→1 jumps on the RAW trace (the bounces on release count too)."; fb.style.color = "var(--red)"; }
+      });
+      host.appendChild(b);
+    });
+  })();
+  bncShow(-1);
+
+  /* ================= ADDRESS DECODING & MEMORY-MAPPED I/O ================= */
+  const AD = {
+    def: computeLevels({ inputs: ["A15", "A14", "A13"], outputs: ["ROM", "RAM", "IO"], gates: [
+      { id: "n15", type: "NOT", ins: ["A15"], out: "nA15" },
+      { id: "n14", type: "NOT", ins: ["A14"], out: "nA14" },
+      { id: "n13", type: "NOT", ins: ["A13"], out: "nA13" },
+      { id: "csrom", type: "AND", ins: ["nA15", "nA14", "nA13"], out: "ROM" },
+      { id: "csram", type: "AND", ins: ["nA15", "nA14", "A13"], out: "RAM" },
+      { id: "csio", type: "AND", ins: ["A15", "A14", "A13"], out: "IO" } ] }),
+    cur: 0x2000, qn: 0
+  };
+  const AD_NAMES = { ROM: "ROM", RAM: "RAM", IO: "the I/O port" };
+  function adBits() { return { A15: (AD.cur >> 15) & 1, A14: (AD.cur >> 14) & 1, A13: (AD.cur >> 13) & 1 }; }
+  function adVals() { return evaluateAll(AD.def, adBits()); }
+  function adDevice() { const v = adVals(); return v.ROM ? "ROM" : v.RAM ? "RAM" : v.IO ? "IO" : null; }
+  function adHex(a) { return "0x" + a.toString(16).toUpperCase().padStart(4, "0"); }
+  window.__addrCheck = { deviceAt: a => { const save = AD.cur; AD.cur = a; const d = adDevice(); AD.cur = save; return d; } };
+
+  const adSec = document.createElement("section");
+  adSec.className = "card stage-card"; adSec.id = "addrCard"; adSec.style.marginBottom = "16px";
+  adSec.innerHTML =
+    "<h2>Address decoding &amp; memory-mapped I/O</h2>" +
+    '<p class="what">One 16-bit address bus, three devices. The top three address bits, A15–A13, split the 64 KiB space into eight 8 KiB slots, and a decoder built from the same gates as the circuit stage turns those bits into one chip-select (CS) per device. ROM sits at the bottom, RAM above it, and an LED output port is memory-mapped at the very top — the CPU writes to it exactly as if it were memory. Five slots are deliberately left unmapped. Enter an address, step slot by slot, or click a row of the map.</p>' +
+    '<div class="tool-controls">' +
+    '<label>Address (hex)<span style="display:flex;gap:6px"><input type="text" class="addr-hex" id="addrHex" value="0x2000" spellcheck="false" autocomplete="off" /><button type="button" class="btn primary" id="addrGo">Go</button></span></label>' +
+    '<label>Step by slot<span style="display:flex;gap:6px"><button type="button" class="btn" id="addrPrev">◂ Prev range</button><button type="button" class="btn" id="addrNext">Next range ▸</button></span></label>' +
+    '<span class="mono" id="addrRead" style="font-size:14px"></span></div>' +
+    '<div class="decimal-line" id="addrWhy" aria-live="polite"></div>' +
+    '<div class="addr-map" id="addrMap"></div>' +
+    '<h3 style="margin:16px 0 4px">The decoder — gates on the high address lines</h3>' +
+    '<p class="what" style="font-size:14px">Each chip-select is one AND of the three high bits, true and inverted: CS(ROM) = ¬A15·¬A14·¬A13, CS(RAM) = ¬A15·¬A14·A13, CS(I/O) = A15·A14·A13. No other combination is decoded, which is exactly why the other five slots answer nothing. The low thirteen bits, A12–A0, travel on to the selected device to pick the byte or register inside it.</p>' +
+    '<div class="schematic-box"><svg id="addrSvg" viewBox="0 0 660 285" role="img" aria-label="Address decoder: three NOT gates and three AND gates driving ROM, RAM and IO chip-selects" style="display:block;width:100%;height:auto"></svg></div>' +
+    '<div class="lab-check"><span class="lab-check-q" id="addrQ"></span><span id="addrOpts" style="display:flex;gap:6px;flex-wrap:wrap"></span><span class="lab-check-fb" id="addrFb" aria-live="polite"></span></div>' +
+    '<div class="share-row"><button type="button" class="btn" id="addrNewQ">New question</button></div>' +
+    '<div class="adv-only" style="margin-top:10px"><div class="ctrl-label">Partial decoding — when some bits are ignored</div>' +
+    '<p style="font-size:13px;margin:4px 0">This decoder uses all three high bits, so each device answers at exactly one range (full decoding). Leave a bit out of a chip-select — say CS(I/O) = A15·A14, ignoring A13 — and the port answers at two ranges, 0xC000–0xDFFF as well as 0xE000–0xFFFF: the ignored bit makes mirror images (aliases) of the device across the map. Partial decoding saves gates and was common in early machines, at the price of a map full of ghosts that later expansion collides with.</p></div>';
+  const sysArch = $T("sysArch");
+  if (sysArch) sysArch.appendChild(adSec);
+  /* memory map rows, top slot first as maps are drawn */
+  (function adMap() {
+    const host = adSec.querySelector("#addrMap");
+    const devLabel = { ROM: "ROM — program memory", RAM: "RAM — read/write memory", IO: "I/O port — LED output register" };
+    for (let s = 7; s >= 0; s--) {
+      const save = AD.cur; AD.cur = s * 0x2000; const dev = adDevice(); AD.cur = save;
+      const b = document.createElement("button");
+      b.type = "button"; b.className = "addr-row" + (dev ? "" : " unmapped"); b.dataset.slot = s;
+      b.innerHTML = '<span class="addr-range">' + adHex(s * 0x2000) + "–" + adHex(s * 0x2000 + 0x1FFF) + '</span>' +
+        '<span class="addr-dev">' + (dev ? devLabel[dev] : "— unmapped —") + '</span>' +
+        '<span class="addr-bits">A15–A13 = ' + ((s >> 2) & 1) + ((s >> 1) & 1) + (s & 1) + "</span>";
+      b.addEventListener("click", () => adSet(s * 0x2000));
+      host.appendChild(b);
+    }
+  })();
+  (function adDrawDecoder() {
+    const n15 = gateMarkup({ id: "n15", type: "NOT", ins: ["A15"], level: 1 }, 185, 50);
+    const n14 = gateMarkup({ id: "n14", type: "NOT", ins: ["A14"], level: 1 }, 185, 140);
+    const n13 = gateMarkup({ id: "n13", type: "NOT", ins: ["A13"], level: 1 }, 185, 230);
+    const aR = gateMarkup({ id: "csrom", type: "AND", ins: ["nA15", "nA14", "nA13"], level: 2 }, 470, 50);
+    const aM = gateMarkup({ id: "csram", type: "AND", ins: ["nA15", "nA14", "A13"], level: 2 }, 470, 140);
+    const aI = gateMarkup({ id: "csio", type: "AND", ins: ["A15", "A14", "A13"], level: 2 }, 470, 230);
+    let s = inNodeMarkup("A15", 52, 50, 0) + inNodeMarkup("A14", 52, 140, 0) + inNodeMarkup("A13", 52, 230, 0);
+    s += wireMarkup("A15", 78, 50, 152, 50) + wireMarkup("A14", 78, 140, 152, 140) + wireMarkup("A13", 78, 230, 152, 230);
+    s += wireMarkup("A15", 78, 50, 437, 212, 128) + wireMarkup("A14", 78, 140, 437, 230, 112) + wireMarkup("A13", 78, 230, 437, 248, 92);
+    s += wireMarkup("A13", 78, 230, 437, 158, 100);
+    s += wireMarkup("nA15", 226, 50, 437, 32, 330) + wireMarkup("nA15", 226, 50, 437, 122, 300);
+    s += wireMarkup("nA14", 226, 140, 437, 50, 355) + wireMarkup("nA14", 226, 140, 437, 140);
+    s += wireMarkup("nA13", 226, 230, 437, 68, 385);
+    s += n15.markup + n14.markup + n13.markup + aR.markup + aM.markup + aI.markup;
+    s += wireMarkup("ROM", 503, 50, 584, 50) + wireMarkup("RAM", 503, 140, 584, 140) + wireMarkup("IO", 503, 230, 584, 230);
+    s += outLampMarkup("ROM", 600, 50, "CS · ROM") + outLampMarkup("RAM", 600, 140, "CS · RAM") + outLampMarkup("IO", 600, 230, "CS · I/O");
+    adSec.querySelector("#addrSvg").innerHTML = s;
+  })();
+  function adPaint() {
+    const bits = adBits(), vals = adVals(), dev = adDevice();
+    adSec.querySelectorAll("[data-net]").forEach(el => {
+      const v = vals[el.dataset.net];
+      el.classList.remove("is-one", "is-zero", "pending");
+      el.classList.add(v ? "is-one" : "is-zero");
+    });
+    adSec.querySelectorAll("[data-lamp]").forEach(el => { el.classList.toggle("on", !!vals[el.dataset.lamp]); });
+    adSec.querySelectorAll("[data-lampval]").forEach(el => { el.textContent = vals[el.dataset.lampval]; });
+    adSec.querySelectorAll("[data-input]").forEach(el => {
+      const v = bits[el.dataset.input];
+      el.classList.toggle("on", !!v);
+      const t = el.querySelector(".in-val"); if (t) t.textContent = v;
+    });
+    adSec.querySelectorAll(".addr-row").forEach(r => r.classList.toggle("active", +r.dataset.slot === (AD.cur >> 13)));
+    adSec.querySelector("#addrRead").textContent = adHex(AD.cur) + " · A15–A13 = " + bits.A15 + bits.A14 + bits.A13;
+    adSec.querySelector("#addrWhy").textContent = dev
+      ? "A15–A13 = " + bits.A15 + bits.A14 + bits.A13 + ", so the " + AD_NAMES[dev] + " chip-select is the only one active — " + AD_NAMES[dev] + " answers at " + adHex(AD.cur) + ", at offset " + adHex(AD.cur & 0x1FFF).replace("0x", "0x") + " inside the device."
+      : "A15–A13 = " + bits.A15 + bits.A14 + bits.A13 + " matches no device: every chip-select stays inactive and nothing answers at " + adHex(AD.cur) + " — on real hardware the bus floats and a read returns garbage.";
+  }
+  function adSet(a) { AD.cur = a & 0xFFFF; adSec.querySelector("#addrHex").value = adHex(AD.cur); adPaint(); }
+  adSec.querySelector("#addrGo").addEventListener("click", () => {
+    const raw = adSec.querySelector("#addrHex").value.trim().replace(/^0x/i, "");
+    const v = parseInt(raw, 16);
+    if (isNaN(v)) { adSec.querySelector("#addrWhy").textContent = "That is not a hex address — use digits 0–9 and A–F, e.g. 0x3F00."; return; }
+    adSet(v);
+  });
+  adSec.querySelector("#addrPrev").addEventListener("click", () => adSet(Math.max(0, (AD.cur >> 13) - 1) * 0x2000));
+  adSec.querySelector("#addrNext").addEventListener("click", () => adSet(Math.min(7, (AD.cur >> 13) + 1) * 0x2000));
+  function adQuestion() {
+    const rng = mulberry(4242 + AD.qn * 131);
+    const slot = Math.floor(rng() * 8), off = Math.floor(rng() * 0x2000);
+    const target = slot * 0x2000 + off;
+    const save = AD.cur; AD.cur = target; const dev = adDevice(); AD.cur = save;
+    const correct = dev ? AD_NAMES[dev] : "No device";
+    adSec.querySelector("#addrQ").textContent = "Check: which device, if any, answers at address " + adHex(target) + "?";
+    const host = adSec.querySelector("#addrOpts"), fb = adSec.querySelector("#addrFb");
+    host.innerHTML = ""; fb.textContent = "";
+    ["ROM", "RAM", "the I/O port", "No device"].forEach(name => {
+      const b = document.createElement("button");
+      b.type = "button"; b.className = "btn"; b.textContent = name;
+      b.addEventListener("click", () => {
+        const bits = ((target >> 15) & 1) + "" + ((target >> 14) & 1) + ((target >> 13) & 1);
+        if (name === correct) { fb.textContent = "✓ Right — A15–A13 = " + bits + " at " + adHex(target) + (dev ? " selects " + AD_NAMES[dev] + "." : " is an unmapped slot: no chip-select fires."); fb.style.color = "var(--green)"; }
+        else { fb.textContent = "✗ Not that one — decode the top three bits of " + adHex(target) + " (A15–A13 = " + bits + ") and match them against the three chip-select equations."; fb.style.color = "var(--red)"; }
+      });
+      host.appendChild(b);
+    });
+  }
+  adSec.querySelector("#addrNewQ").addEventListener("click", () => { AD.qn++; adQuestion(); });
+  adPaint(); adQuestion();
+
+  /* ================= MENU REGISTRATION + COUNT REBUILD ================= */
+  function addMenuItem(groupName, afterKey, spec) {
+    const list = $T("menuList"); if (!list) return false;
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "menu-item"; b.dataset.key = spec.key;
+    b.dataset.search = (spec.label + " " + spec.hint + " " + spec.search).toLowerCase();
+    if (spec.level) b.dataset.uxlevel = spec.level;
+    b.innerHTML = '<span class="mi-dot" aria-hidden="true"></span><span class="mi-label"></span><small></small>';
+    b.querySelector(".mi-label").textContent = spec.label;
+    b.querySelector("small").textContent = spec.hint;
+    b.addEventListener("click", () => { $T("menuPanel").hidden = true; $T("menuBtn").setAttribute("aria-expanded", "false"); spec.go(); });
+    if (afterKey) {
+      const anchor = list.querySelector('[data-key="' + afterKey + '"]');
+      if (anchor) { anchor.parentNode.insertBefore(b, anchor.nextSibling); return true; }
+    }
+    let sib = null, inGroup = false;
+    Array.prototype.slice.call(list.children).forEach(el => {
+      if (el.classList.contains("menu-group")) inGroup = (el.dataset.group || "").trim() === groupName;
+      else if (inGroup && el.classList.contains("menu-item")) sib = el;
+    });
+    if (sib) sib.parentNode.insertBefore(b, sib.nextSibling); else list.appendChild(b);
+    return true;
+  }
+  addMenuItem("Boards, Modulation & Projects", null, {
+    key: "bounce-debounce", label: "Switch bounce & debounce",
+    hint: "See one button press become many edges, then clean it to one",
+    search: "switch bounce debounce button contacts breadboard bench sr latch edge counter schmitt",
+    level: "beginner",
+    go: () => { setTopArea("advanced"); syncRail("advanced"); const pb = document.querySelector('#advPicker [data-adv="tools"]'); if (pb) pb.click(); jumpT("bounceCard"); }
+  });
+  addMenuItem("Computer Architecture", "lab-arch-9", {
+    key: "addr-decode", label: "Address decoding & memory-mapped I/O",
+    hint: "Pick an address and watch the decoder choose RAM, ROM, or the I/O port",
+    search: "address decoding memory map chip select memory-mapped i/o ram rom decoder bus",
+    level: "beginner",
+    go: () => { setTopArea("systems"); syncRail("systems"); const pb = document.querySelector('#sysPicker [data-sys="arch"]'); if (pb) pb.click(); jumpT("addrCard"); }
+  });
+  (function rebuildCounts() {
+    const RJ = window.__uxRoundJ; if (!RJ) return;
+    const groups = RJ.menuGroups(); const counts = {}; let total = 0;
+    groups.forEach(g => {
+      counts[g.name] = g.items.length; total += g.items.length;
+      const c = g.header.querySelector(".mi-count"); if (c) c.textContent = g.items.length;
+    });
+    window.LAB_MENU = { groups: groups.map(g => ({ name: g.name, items: g.items.map(b => { const l = b.querySelector(".mi-label"); return l ? l.textContent : ""; }) })), count: total };
+    window.LAB_MODULES = { modules: groups.map(g => ({ name: g.name, count: g.items.length })), total };
+    RJ.buildRailAndList(counts);
+    RJ.buildGallery();
+    const bh = document.querySelector("#module-boards .mh-count");
+    if (bh && counts["Boards, Modulation & Projects"]) bh.textContent = counts["Boards, Modulation & Projects"] + " items";
+    const ah = document.querySelector("#module-arch .mh-count");
+    if (ah && counts["Computer Architecture"]) ah.textContent = counts["Computer Architecture"] + " items";
+    document.querySelectorAll(".module-banner").forEach(bn => {
+      const bb = bn.querySelector("b"), sp = bn.querySelector("span");
+      if (!bb || !sp) return;
+      const g = groups.find(x => ("Module · " + x.name) === bb.textContent.trim());
+      if (g) sp.textContent = g.items.length + " items in the Menu";
+    });
+    window.__countsCheck = { total, boards: counts["Boards, Modulation & Projects"], arch: counts["Computer Architecture"],
+      archOrder: (groups.find(g => g.name === "Computer Architecture") || { items: [] }).items.map(b => b.dataset.key) };
+  })();
+})();
+</script>
 <script>
 "use strict";
 /* ================================================================
