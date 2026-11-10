@@ -433,6 +433,11 @@ body.lvl-advanced .beg-summary{display:none}
 .fsm-lab{font-size:12px;font-weight:700;fill:var(--ink);text-anchor:middle}
 
 footer.site{margin-top:22px;color:var(--muted);font-size:12.5px;text-align:center}
+.feedback-panel{margin-top:28px;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:18px 20px;text-align:left}
+.feedback-panel h2{margin:0 0 6px;font-size:17px;font-weight:700;letter-spacing:-.01em;color:var(--ink)}
+.feedback-panel p{margin:0 0 14px;color:var(--muted);font-size:14px;line-height:1.55;max-width:68ch}
+.feedback-panel .feedback-link{display:inline-block;text-decoration:none}
+@media (max-width:520px){.feedback-panel{padding:16px}}
 @media (max-width:520px){
   header.site h1{font-size:23px}
   .stage-card{padding:12px}
@@ -1851,6 +1856,12 @@ GPIO.output(17, GPIO.LOW)</pre>
     <p class="pc-wrong" id="cpWrong"></p>
     <button type="button" class="btn primary" id="cpJump" style="margin-top:12px"></button>
   </div>
+
+  <section class="feedback-panel" aria-labelledby="feedbackHeading">
+    <h2 id="feedbackHeading">Feedback</h2>
+    <p>From Gates to Systems is a personal project, built and maintained by one person. If something worked, confused you, or is missing, tell me here. It takes about a minute and it is anonymous.</p>
+    <a class="btn primary feedback-link" href="https://docs.google.com/forms/d/e/1FAIpQLSdzhUaqIo4sETPXgwitwxqZrOQW1xq2MHIku6izn-HagQpUEw/viewform" target="_blank" rel="noopener">Leave feedback</a>
+  </section>
 
   <footer class="site"><span class="owner-credit">From Gates to Systems — designed and built by Ebuka Philip Oguchi.</span><br />Built gate by gate — every output and every truth-table row on this page is computed live by the same netlist engine that lights the wires.</footer>
 </div>

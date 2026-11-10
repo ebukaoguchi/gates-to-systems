@@ -11,6 +11,7 @@ An interactive site for digital logic, computer architecture, and operating syst
 - **Advanced** — labelled motherboard and CPU explorers, a components library, applied projects (traffic-light controller, soil monitoring, and more), Arduino C projects with line-stepped sketches and a serial monitor, a digital modulation studio, a switch-bounce and debounce lab, and a tools bench (number trainer, voltage divider, RC and 555 calculators, ADC visualiser).
 - **Systems** — a MIPS assembly lab with a debugger, an x86-64 / MIPS / ARM comparison in lockstep, datapath, cache, and pipeline explorers, an address-decoding and memory-mapped I/O lab, and operating-systems simulators (scheduling including MLFQ, page replacement, Banker's algorithm, memory allocation, address translation with TLB, disk scheduling).
 - **Course labs** — full guided lab tracks for Operating Systems (11 labs, plus an OS-in-C series: fork, pthreads, semaphores, pipes), Computer Architecture (10 labs, ending in a simple 8-bit CPU), and Computer Organization (7 design labs), each with auto-checked tasks.
+- **Feedback** — a quiet panel at the foot of the page links to a short anonymous form where visitors can say what worked, what confused them, and what is missing.
 
 A Beginner / Advanced toggle changes depth, not content: Beginner is guided and plain, Advanced adds netlists, expressions, registers, and datasheet detail. Four colour themes. Progress and saves live only on the visitor's device; there are no accounts.
 
