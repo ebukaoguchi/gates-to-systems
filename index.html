@@ -2155,6 +2155,43 @@ function defRipple() {
   return { inputs: ["A3","A2","A1","A0","B3","B2","B1","B0","Cin"],
     outputs: ["Cout","S3","S2","S1","S0"], gates };
 }
+function defCLA() {
+  /* Carry-lookahead adder, 4-bit. Per bit: generate G_i = A_i·B_i and
+     propagate P_i = A_i ⊕ B_i are computed in parallel; every carry is
+     then formed directly from the G/P terms and Cin by its lookahead
+     equation — no carry waits for the previous bit's carry:
+       C1 = G0 + P0·Cin
+       C2 = G1 + P1·G0 + P1·P0·Cin
+       C3 = G2 + P2·G1 + P2·P1·G0 + P2·P1·P0·Cin
+       Cout = G3 + P3·G2 + P3·P2·G1 + P3·P2·P1·G0 + P3·P2·P1·P0·Cin
+     Sums reuse the propagate: S_i = P_i ⊕ C_i (with C_0 = Cin).
+     All of it is an ordinary netlist — the engine computes every net. */
+  const gates = [];
+  for (let i = 0; i < 4; i++) {
+    gates.push({ id: "g" + i, type: "AND", ins: ["A" + i, "B" + i], out: "G" + i });
+    gates.push({ id: "p" + i, type: "XOR", ins: ["A" + i, "B" + i], out: "P" + i });
+  }
+  gates.push({ id: "t10", type: "AND", ins: ["P0", "Cin"], out: "t10" });
+  gates.push({ id: "c1", type: "OR", ins: ["G0", "t10"], out: "C1" });
+  gates.push({ id: "t21", type: "AND", ins: ["P1", "G0"], out: "t21" });
+  gates.push({ id: "t20", type: "AND", ins: ["P1", "P0", "Cin"], out: "t20" });
+  gates.push({ id: "c2", type: "OR", ins: ["G1", "t21", "t20"], out: "C2" });
+  gates.push({ id: "t32", type: "AND", ins: ["P2", "G1"], out: "t32" });
+  gates.push({ id: "t31", type: "AND", ins: ["P2", "P1", "G0"], out: "t31" });
+  gates.push({ id: "t30", type: "AND", ins: ["P2", "P1", "P0", "Cin"], out: "t30" });
+  gates.push({ id: "c3", type: "OR", ins: ["G2", "t32", "t31", "t30"], out: "C3" });
+  gates.push({ id: "t43", type: "AND", ins: ["P3", "G2"], out: "t43" });
+  gates.push({ id: "t42", type: "AND", ins: ["P3", "P2", "G1"], out: "t42" });
+  gates.push({ id: "t41", type: "AND", ins: ["P3", "P2", "P1", "G0"], out: "t41" });
+  gates.push({ id: "t40", type: "AND", ins: ["P3", "P2", "P1", "P0", "Cin"], out: "t40" });
+  gates.push({ id: "c4", type: "OR", ins: ["G3", "t43", "t42", "t41", "t40"], out: "Cout" });
+  gates.push({ id: "s0", type: "XOR", ins: ["P0", "Cin"], out: "S0" });
+  gates.push({ id: "s1", type: "XOR", ins: ["P1", "C1"], out: "S1" });
+  gates.push({ id: "s2", type: "XOR", ins: ["P2", "C2"], out: "S2" });
+  gates.push({ id: "s3", type: "XOR", ins: ["P3", "C3"], out: "S3" });
+  return { inputs: ["A3","A2","A1","A0","B3","B2","B1","B0","Cin"],
+    outputs: ["Cout","S3","S2","S1","S0"], gates };
+}
 function defMultiplier() {
   const gates = [
     { id: "pp00", type: "AND", ins: ["A0", "B0"], out: "P0" },
@@ -2292,6 +2329,12 @@ function verifyAll() {
     out.rippleAll512 = enumerateTruth(d).every(r => {
       const a = r.ins.A3*8 + r.ins.A2*4 + r.ins.A1*2 + r.ins.A0, b = r.ins.B3*8 + r.ins.B2*4 + r.ins.B1*2 + r.ins.B0;
       const s = a + b + r.ins.Cin; return r.outs[0] === ((s >> 4) & 1) && (r.outs[1]*8 + r.outs[2]*4 + r.outs[3]*2 + r.outs[4]) === (s & 15); }); }
+  { const d = computeLevels(defCLA());
+    out.claAll512 = enumerateTruth(d).every(r => {
+      const a = r.ins.A3*8 + r.ins.A2*4 + r.ins.A1*2 + r.ins.A0, b = r.ins.B3*8 + r.ins.B2*4 + r.ins.B1*2 + r.ins.B0;
+      const s = a + b + r.ins.Cin; return r.outs[0] === ((s >> 4) & 1) && (r.outs[1]*8 + r.outs[2]*4 + r.outs[3]*2 + r.outs[4]) === (s & 15); });
+    out.claDelay = d.timing.total; out.rippleDelay = computeLevels(defRipple()).timing.total;
+    out.claFaster = out.claDelay < out.rippleDelay; }
   { const d = computeLevels(defMultiplier());
     const t33 = evaluateAll(d, {A1:1, A0:1, B1:1, B0:1});
     out.mult3x3 = (t33.P3*8 + t33.P2*4 + t33.P1*2 + t33.P0) === 9;
@@ -2312,7 +2355,7 @@ function divSimulate(dividend, divisor) {
   }
   return { q: Q, r: A };
 }
-window.LAB = { GATE_FNS, GATE_DELAYS, gateDelay, computeTiming, computeLevels, evaluateAll, enumerateTruth, defHalfAdder, defFullAdder, defRipple, defMultiplier, defGateLab, verifyAll, divSimulate,
+window.LAB = { GATE_FNS, GATE_DELAYS, gateDelay, computeTiming, computeLevels, evaluateAll, enumerateTruth, defHalfAdder, defFullAdder, defRipple, defCLA, defMultiplier, defGateLab, verifyAll, divSimulate,
   defHalfSub, defFullSub, defMux2, defMux4, defDemux, defDecoder, defEncoder, defComp1, defComp4, defAlu };
 
 /* ---------- SVG helpers ---------- */
@@ -2855,6 +2898,9 @@ const CIRCUITS = [
   { id: "ripple", name: "4-bit Ripple Adder", sub: "A + B + Cin, chained carries",
     title: "4-bit Ripple Adder", what: "Four full adders chained carry-to-carry. Bit 0 must finish before bit 1 can — flip Cin or A0 and watch the carry ripple stage by stage.",
     expr: () => "{Cout, S} = A + B + Cin" },
+  { id: "cla", name: "Carry-Lookahead Adder", sub: "Generate / propagate — carries in parallel",
+    title: "Carry-Lookahead Adder — 4 bit", what: "The ripple adder's carry crawls bit by bit. This adder pays gates up front: each bit first makes a generate signal G = A·B (\"I make a carry myself\") and a propagate signal P = A ⊕ B (\"I pass a carry through\"), and then every carry is computed directly from those signals and Cin — all at once, in parallel. Turn Timing on and compare its total delay with the ripple adder's: the win is a measured number, not a slogan.",
+    expr: () => "Gᵢ = Aᵢ·Bᵢ · Pᵢ = Aᵢ ⊕ Bᵢ · Cᵢ₊₁ = Gᵢ + Pᵢ·Gᵢ₋₁ + Pᵢ·Pᵢ₋₁·Gᵢ₋₂ + … · Sᵢ = Pᵢ ⊕ Cᵢ" },
   { id: "mult", name: "2-bit Multiplier", sub: "Partial products, HA + FA",
     title: "2-bit Multiplier", what: "Four AND gates make the partial products, exactly where pencil-and-paper multiplication puts them. A half adder and a full adder then sum the columns into P3–P0.",
     expr: () => "P = A × B" },
@@ -2896,6 +2942,7 @@ const state = {
   circuitId: "half", gateType: "AND", view: "schematic", flow: "slow",
   inputs: { gatelab: { A: 1, B: 0 }, half: { A: 1, B: 1 }, full: { A: 1, B: 0, Cin: 1 },
     ripple: { A3: 0, A2: 1, A1: 1, A0: 1, B3: 0, B2: 1, B1: 0, B0: 1, Cin: 0 },
+    cla: { A3: 0, A2: 1, A1: 1, A0: 1, B3: 0, B2: 1, B1: 0, B0: 1, Cin: 0 },
     mult: { A1: 1, A0: 1, B1: 1, B0: 1 },
     halfsub: { A: 1, B: 1 }, fullsub: { A: 1, B: 0, Bin: 1 },
     mux2: { D0: 1, D1: 0, S: 0 }, mux4: { D0: 1, D1: 0, D2: 1, D3: 0, S1: 0, S0: 1 },
@@ -2911,6 +2958,7 @@ function currentDef() {
     case "half": return computeLevels(defHalfAdder());
     case "full": return computeLevels(defFullAdder());
     case "ripple": return computeLevels(defRipple());
+    case "cla": return computeLevels(defCLA());
     case "mult": return computeLevels(defMultiplier());
     case "halfsub": return computeLevels(defHalfSub());
     case "fullsub": return computeLevels(defFullSub());
@@ -3051,6 +3099,32 @@ function updateExtraPanel() {
       '<div class="adv-only" style="margin-top:10px"><div class="ctrl-label">Datasheet notes (74-series TTL)</div>' +
       '<p style="font-size:12.5px;margin:4px 0">Supply Vcc = 5 V ± 0.25 V (4.75–5.25 V) on pin 14, GND pin 7. A HIGH output delivers ≥ 2.4 V; a LOW ≤ 0.4 V; inputs read HIGH from 2.0 V, LOW up to 0.8 V — the same thresholds as the modulation logic-levels panel. Typical gate delay ≈ 10 ns (74LS: ~9–15 ns).</p>' +
       '<p style="font-size:12.5px;margin:4px 0" class="mono">7486 fn: Y = A ⊕ B · 7408 fn: Y = A·B · 7432 fn: Y = A + B (per gate, all four gates in each package identical)</p></div>';
+  } else if (state.circuitId === "cla") {
+    p.hidden = false; $("extraTitle").textContent = "Generate, propagate, carries — live";
+    const v = evaluateAll(state.def, curInputs());
+    const claT = state.def.timing ? state.def.timing.total : computeLevels(defCLA()).timing.total;
+    const ripT = computeLevels(defRipple()).timing.total;
+    const diff = ripT - claT;
+    const bitRow = i => '<div class="pp-row"><span>bit ' + i + ': G' + i + ' = A' + i + '·B' + i + ' = <b>' + v["G" + i] + '</b></span><span>P' + i + ' = A' + i + ' ⊕ B' + i + ' = <b>' + v["P" + i] + "</b></span></div>";
+    body.innerHTML = '<div class="pp-grid">' + [3, 2, 1, 0].map(bitRow).join("") +
+      '<div class="pp-row"><span>carries from the lookahead equations:</span><span>C1 = <b>' + v.C1 + '</b> · C2 = <b>' + v.C2 + '</b> · C3 = <b>' + v.C3 + '</b> · Cout = <b>' + v.Cout + "</b></span></div></div>" +
+      '<p style="font-size:13px;margin:10px 0 0">C1 = G0 + P0·Cin · C2 = G1 + P1·G0 + P1·P0·Cin · C3 = G2 + P2·G1 + P2·P1·G0 + P2·P1·P0·Cin · Cout adds one more term of the same shape. Every value above is read off the netlist on stage, not worked out separately.</p>' +
+      '<div class="decimal-line" id="claCompare" style="margin-top:10px">Speed, measured by the same gate-delay model (Timing view):<br>Carry-lookahead adder: <b>' + claT + ' ns</b> total propagation delay · 4-bit ripple adder: <b>' + ripT + ' ns</b>.<br>' +
+      (diff > 0 ? "The lookahead is <b>" + diff + " ns faster</b> — it pays " + state.def.gates.length + " gates up front so no carry has to ripple bit by bit." : "The two totals are equal for this model.") + "</div>" +
+      '<div style="margin-top:10px"><div class="ctrl-label">Check — answered from the two engine-computed delays above</div>' +
+      '<p style="font-size:13px;margin:4px 0">Which adder is faster, and by how many ns?</p>' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap" id="claCheckBtns">' +
+      '<button type="button" class="btn" data-claans="cla">Carry-lookahead, by ' + diff + ' ns</button>' +
+      '<button type="button" class="btn" data-claans="ripple">Ripple, by ' + diff + ' ns</button>' +
+      '<button type="button" class="btn" data-claans="tie">They tie</button></div>' +
+      '<p class="progress-line" id="claCheckOut" style="margin-top:6px">' + (window.__claCheckMsg || "") + "</p></div>";
+    body.querySelectorAll("[data-claans]").forEach(b => b.addEventListener("click", () => {
+      const ok = (b.dataset.claans === "cla" && diff > 0) || (b.dataset.claans === "tie" && diff === 0);
+      window.__claCheckMsg = ok
+        ? "✓ Correct — the lookahead total is " + claT + " ns against the ripple adder's " + ripT + " ns, a " + diff + " ns win, both read live from the Timing model."
+        : "✗ Not quite — read the two totals above: lookahead " + claT + " ns, ripple " + ripT + " ns. The smaller number wins, and the gap is the difference.";
+      const out = $("claCheckOut"); if (out) out.textContent = window.__claCheckMsg;
+    }));
   } else if (state.circuitId === "mult") {
     p.hidden = false; $("extraTitle").textContent = "Partial products — live";
     const v = evaluateAll(state.def, curInputs());
@@ -3065,6 +3139,11 @@ function renderPresets() {
   const w = $("presets"); w.innerHTML = "";
   const add = (label, fn) => { const b = document.createElement("button"); b.type = "button"; b.textContent = label; b.addEventListener("click", fn); w.appendChild(b); };
   if (state.circuitId === "ripple") {
+    add("try 7 + 5", () => setInputs({ A3:0,A2:1,A1:1,A0:1, B3:0,B2:1,B1:0,B0:1, Cin:0 }));
+    add("try 15 + 1 (carry out)", () => setInputs({ A3:1,A2:1,A1:1,A0:1, B3:0,B2:0,B1:0,B0:1, Cin:0 }));
+    add("try 9 + 8 + Cin", () => setInputs({ A3:1,A2:0,A1:0,A0:1, B3:1,B2:0,B1:0,B0:0, Cin:1 }));
+  }
+  if (state.circuitId === "cla") {
     add("try 7 + 5", () => setInputs({ A3:0,A2:1,A1:1,A0:1, B3:0,B2:1,B1:0,B0:1, Cin:0 }));
     add("try 15 + 1 (carry out)", () => setInputs({ A3:1,A2:1,A1:1,A0:1, B3:0,B2:0,B1:0,B0:1, Cin:0 }));
     add("try 9 + 8 + Cin", () => setInputs({ A3:1,A2:0,A1:0,A0:1, B3:1,B2:0,B1:0,B0:0, Cin:1 }));
@@ -3212,6 +3291,10 @@ function paintDecimal() {
     const a = bitsToInt(ins, ["A3","A2","A1","A0"]), b = bitsToInt(ins, ["B3","B2","B1","B0"]);
     txt = "A " + bitsOf(ins, ["A3","A2","A1","A0"]) + " (" + a + ") + B " + bitsOf(ins, ["B3","B2","B1","B0"]) + " (" + b + ") + Cin " + ins.Cin +
       "  =  " + (settled ? "Cout " + d.Cout + ", S " + bitsOf(d, ["S3","S2","S1","S0"]) + " → total " + (a + b + ins.Cin) : "flowing…");
+  } else if (state.circuitId === "cla") {
+    const a = bitsToInt(ins, ["A3","A2","A1","A0"]), b = bitsToInt(ins, ["B3","B2","B1","B0"]);
+    txt = "A " + bitsOf(ins, ["A3","A2","A1","A0"]) + " (" + a + ") + B " + bitsOf(ins, ["B3","B2","B1","B0"]) + " (" + b + ") + Cin " + ins.Cin +
+      "  =  " + (settled ? "Cout " + d.Cout + ", S " + bitsOf(d, ["S3","S2","S1","S0"]) + " → total " + (a + b + ins.Cin) + " — same sum as the ripple adder, reached without waiting for the carry to ripple" : "flowing…");
   } else if (state.circuitId === "mult") {
     const a = bitsToInt(ins, ["A1","A0"]), b = bitsToInt(ins, ["B1","B0"]);
     txt = a + " × " + b + "  =  " + (settled ? "P " + bitsOf(d, ["P3","P2","P1","P0"]) + " = " + (a * b) : "flowing…");
@@ -3255,7 +3338,7 @@ function paintDecimal() {
   if (state.circuitId === "ripple" && settled) chk = "✓ Engine-verified against arithmetic for all 512 input combinations.";
   if (state.circuitId === "mult" && settled) chk = "✓ Engine-verified against arithmetic for all 16 input combinations.";
   if (state.circuitId === "full" && settled) chk = "✓ All 8 truth-table rows computed by the netlist engine.";
-  if (["halfsub", "fullsub", "mux2", "mux4", "demux", "decoder", "encoder", "comp1", "comp4", "alu"].indexOf(state.circuitId) >= 0 && settled && state.def)
+  if (["halfsub", "fullsub", "mux2", "mux4", "demux", "decoder", "encoder", "comp1", "comp4", "alu", "cla"].indexOf(state.circuitId) >= 0 && settled && state.def)
     chk = "✓ Engine-verified against the defining arithmetic/logic for all " + (1 << state.def.inputs.length) + " input combinations.";
   $("checkLine").textContent = chk;
   if (typeof updateDepthPanels === "function") updateDepthPanels();
@@ -7897,41 +7980,118 @@ RE_WIDGETS.sap = function (root) {
     count: { name: "P2 · Count down with a loop", mem: [0x09, 0x30, 0x2A, 0x65, 0x51, 0x40, 0, 0, 0, 3, 1, 0, 0, 0, 0, 0], src: "LDA 9 · OUT · SUB 10 · JZ 5 · JMP 1 · HLT — data: mem[9]=3, mem[10]=1" },
     sta: { name: "P3 · Store and reload (STA)", mem: [0x09, 0x1A, 0x7B, 0x0C, 0x1B, 0x30, 0x40, 0, 0, 17, 25, 0, 0, 0, 0, 0], src: "LDA 9 · ADD 10 · STA 11 · LDA 12 (=0) · ADD 11 · OUT · HLT — data: mem[9]=17, mem[10]=25" }
   };
+  /* Interrupt extension: a fixed handler lives at address 13 — OUT
+     (0x30) followed by RETI (0x80, opcode 8, the one instruction the
+     base machine lacks). Addresses 13 and 14 are unused by all three
+     programs. The stepper below executes the same eight base opcodes
+     with the same semantics and narration as reSAP1, plus the
+     interrupt divert and RETI; reSAP1 itself is untouched and still
+     provides the uninterrupted baseline every comparison reads. */
+  const HANDLER_ADDR = 13, RETI_BYTE = 0x80;
+  const OPNAMES = ["LDA", "ADD", "SUB", "OUT", "HLT", "JMP", "JZ", "STA", "RETI"];
   root.innerHTML = '<p class="what">A SAP-1-style 8-bit CPU: 16 bytes of RAM shared by program and data, an accumulator A, a program counter, and 8 opcodes — <span class="mono">LDA, ADD, SUB, OUT, HLT, JMP, JZ, STA</span> — each encoded as one byte (opcode in the high nibble, address in the low). Step the fetch–execute cycle and watch A, PC and the output. The three programs were hand-assembled and hand-traced; the stepper executes them for real.</p>' +
     '<div class="tool-controls"><label>Program <select id="sapProg" class="tool-num" style="width:auto"><option value="add">' + PROGS.add.name + '</option><option value="count">' + PROGS.count.name + '</option><option value="sta">' + PROGS.sta.name + "</option></select></label>" +
-    '<button type="button" class="btn primary" id="sapStep">Step ▸</button><button type="button" class="btn" id="sapRun">Run to HLT</button><button type="button" class="btn" id="sapReset">Reset</button></div>' +
+    '<button type="button" class="btn primary" id="sapStep">Step ▸</button><button type="button" class="btn" id="sapRun">Run to HLT</button><button type="button" class="btn" id="sapReset">Reset</button>' +
+    '<button type="button" class="btn" id="sapInt" aria-pressed="false">⚡ Interrupt</button></div>' +
     '<div class="decimal-line" id="sapSrc"></div>' +
-    '<div class="seq-state" id="sapState"></div><div class="decimal-line" id="sapOut">Pick a program and step it.</div>';
-  let run = null, ptr = 0;
+    '<div class="seq-state" id="sapState"></div>' +
+    '<div class="seq-state" id="sapMem" style="margin-top:6px"></div>' +
+    '<div class="decimal-line" id="sapOut">Pick a program and step it.</div>' +
+    '<p class="what" style="margin-top:8px"><b>Interrupts — how an operating system gets control back.</b> Press <b>⚡ Interrupt</b> while a program runs (it models a key press, a timer tick, a finished disk read). The CPU finishes the instruction it is on, saves the next PC into the <b>saved-PC register</b>, and jumps to the handler at address <b>13</b> — two instructions installed in otherwise-unused memory: <span class="mono">OUT</span> (the handler shows the current A, its “I was here” signal) and <span class="mono">RETI</span> (return from interrupt), which restores the saved PC so the main program resumes exactly where it left off. The handler never touches A or the program’s data, so the run still produces the same final result. That save–jump–return cycle, run millions of times a second, is how an OS stays in charge without the running program ever asking.</p>' +
+    '<div class="tool-controls"><span style="font-size:13px">Guided task: Reset, press <b>Step</b> twice, press <b>⚡ Interrupt</b>, Step through the handler, then <b>Run to HLT</b>. What value of A does the program still finish with?</span>' +
+    '<label>Your answer <input type="number" id="sapTaskAns" class="tool-num" style="width:80px" /></label>' +
+    '<button type="button" class="btn" id="sapTaskCheck">Check</button></div>' +
+    '<div class="decimal-line" id="sapTaskOut"></div>';
+  /* live CPU state */
+  let S = null, base = null;
+  const freshState = () => {
+    const p = PROGS[root.querySelector("#sapProg").value];
+    const mem = p.mem.slice(0, 16); while (mem.length < 16) mem.push(0);
+    mem[HANDLER_ADDR] = 0x30; mem[HANDLER_ADDR + 1] = RETI_BYTE;
+    return { mem, A: 0, PC: 0, IR: null, lastFetch: 0, out: [], steps: 0, halted: false,
+      savedPC: null, inHandler: false, pending: false, ints: 0 };
+  };
   const load = () => {
     const p = PROGS[root.querySelector("#sapProg").value];
-    run = reSAP1(p.mem); ptr = 0;
-    root.querySelector("#sapSrc").textContent = p.src;
-    RE_WIDGETS.sap.run = run;
+    base = reSAP1(p.mem);
+    S = freshState();
+    root.querySelector("#sapSrc").textContent = p.src + " · interrupt handler at 13: OUT · RETI (installed in unused mem[13..14])";
+    RE_WIDGETS.sap.run = base;
+    RE_WIDGETS.sap.state = S; RE_WIDGETS.sap.handlerAddr = HANDLER_ADDR;
+    const ib = root.querySelector("#sapInt"); if (ib) { ib.setAttribute("aria-pressed", "false"); ib.textContent = "⚡ Interrupt"; }
+    const to = root.querySelector("#sapTaskOut"); if (to) to.textContent = "";
     draw("Loaded. PC = 0, A = 0. Each Step is one full fetch–execute: fetch mem[PC], decode the nibbles, execute, advance.");
   };
   const draw = msg => {
-    const t = ptr > 0 ? run.trace[ptr - 1] : null;
-    const outsSoFar = run.trace.slice(0, ptr).filter(x => x.op === "OUT").length;
     root.querySelector("#sapState").innerHTML =
-      '<div class="seq-cell"><b>' + (t ? t.pc : 0) + "</b>PC (last fetch)</div>" +
-      '<div class="seq-cell one"><b>' + (t ? t.A : 0) + "</b>accumulator A</div>" +
-      '<div class="seq-cell"><b>' + (t ? "0x" + t.ir.toString(16).toUpperCase().padStart(2, "0") : "—") + "</b>instruction reg</div>" +
-      '<div class="seq-cell"><b>' + run.out.slice(0, outsSoFar).join(", ") + "</b>output so far</div>" +
-      '<div class="seq-cell"><b>' + ptr + " / " + run.trace.length + "</b>steps</div>";
+      '<div class="seq-cell"><b>' + S.lastFetch + "</b>PC (last fetch)</div>" +
+      '<div class="seq-cell one"><b>' + S.A + "</b>accumulator A</div>" +
+      '<div class="seq-cell"><b>' + (S.IR === null ? "—" : "0x" + S.IR.toString(16).toUpperCase().padStart(2, "0")) + "</b>instruction reg</div>" +
+      '<div class="seq-cell"><b>' + S.out.join(", ") + "</b>output so far</div>" +
+      '<div class="seq-cell"><b>' + S.steps + (S.ints === 0 ? " / " + base.trace.length : "") + "</b>steps</div>" +
+      '<div class="seq-cell' + (S.savedPC !== null ? " one" : "") + '"><b>' + (S.savedPC === null ? "—" : S.savedPC) + "</b>saved PC (interrupt)</div>" +
+      '<div class="seq-cell"><b>' + HANDLER_ADDR + "</b>handler address</div>" +
+      '<div class="seq-cell"><b>' + (S.inHandler ? "in handler" : S.pending ? "requested" : S.ints) + "</b>" + (S.inHandler ? "CPU now" : S.pending ? "interrupt pending" : "interrupts handled") + "</div>" +
+      '<div class="seq-cell"><b>' + (S.halted ? "halted" : S.PC) + "</b>next PC</div>";
+    root.querySelector("#sapMem").innerHTML = S.mem.map((b, i) =>
+      '<div class="seq-cell' + (i === S.PC && !S.halted ? " one" : "") + '" style="min-width:0;padding:4px 2px"><b style="font-size:12px">' + b.toString(16).toUpperCase().padStart(2, "0") + '</b><span style="font-size:10px">mem[' + i + "]" + (i === HANDLER_ADDR ? " · OUT" : i === HANDLER_ADDR + 1 ? " · RETI" : (i === S.savedPC && S.inHandler) ? " · resume→" : "") + "</span></div>").join("");
     root.querySelector("#sapOut").textContent = msg;
   };
+  const finishMsg = prefix => {
+    let m = prefix + " Final output: [" + S.out.join(", ") + "], A = " + S.A + ".";
+    if (S.ints > 0) m += " Interrupt" + (S.ints === 1 ? "" : "s") + " handled: " + S.ints + " — and the final A still matches the uninterrupted run (A = " + base.A + ") " + (S.A === base.A ? "✓" : "— MISMATCH") + ". The handler’s own OUT added " + S.ints + " extra entr" + (S.ints === 1 ? "y" : "ies") + " to the output along the way.";
+    if (root.querySelector("#sapProg").value === "sta") m += " mem[11] now holds " + S.mem[11] + " (written by STA, read back by the second ADD).";
+    return m;
+  };
   const stepOnce = () => {
-    if (ptr >= run.trace.length) { draw("Halted — the trace is complete. Final output: [" + run.out.join(", ") + "], A = " + run.A + "."); return; }
-    const t = run.trace[ptr]; ptr++;
-    draw("Fetch mem[" + t.pc + "] = 0x" + t.ir.toString(16).toUpperCase().padStart(2, "0") + " → " + t.op + (t.op === "OUT" || t.op === "HLT" ? "" : " " + t.ad) + " · execute: " + t.note + ".");
+    if (S.halted) { draw(finishMsg("Halted — the run is complete.")); return; }
+    const here = S.PC, ir = S.mem[here] & 0xff, op = ir >> 4, ad = ir & 15;
+    S.lastFetch = here; S.IR = ir; S.PC = (S.PC + 1) & 15; S.steps++;
+    let note = "";
+    if (op === 0) { S.A = S.mem[ad]; note = "A <- mem[" + ad + "] = " + S.A; }
+    else if (op === 1) { S.A = (S.A + S.mem[ad]) & 0xff; note = "A <- A + mem[" + ad + "] = " + S.A; }
+    else if (op === 2) { S.A = (S.A - S.mem[ad]) & 0xff; note = "A <- A - mem[" + ad + "] = " + S.A; }
+    else if (op === 3) { S.out.push(S.A); note = "OUT <- A = " + S.A + (S.inHandler ? " (the handler’s signal — A itself is untouched)" : ""); }
+    else if (op === 4) { S.halted = true; note = "halt"; }
+    else if (op === 5) { S.PC = ad; note = "PC <- " + ad; }
+    else if (op === 6) { if (S.A === 0) { S.PC = ad; note = "A = 0, PC <- " + ad; } else note = "A != 0, no jump"; }
+    else if (op === 7) { S.mem[ad] = S.A; note = "mem[" + ad + "] <- A = " + S.A; }
+    else if (op === 8) { const back = S.savedPC; S.PC = back === null ? S.PC : back; S.savedPC = null; S.inHandler = false; note = "RETI: PC <- saved PC = " + back + " — the main program resumes exactly where it left off"; }
+    else { note = "unknown opcode " + op + " — treated as no-op"; }
+    let msg = "Fetch mem[" + here + "] = 0x" + ir.toString(16).toUpperCase().padStart(2, "0") + " → " + (OPNAMES[op] || "?") + (op === 3 || op === 4 || op === 8 ? "" : " " + ad) + " · execute: " + note + ".";
+    if (S.halted) { draw(finishMsg(msg)); return; }
+    /* the divert: only between instructions, never mid-instruction */
+    if (S.pending && !S.inHandler) {
+      S.pending = false; S.savedPC = S.PC; S.PC = HANDLER_ADDR; S.inHandler = true; S.ints++;
+      const ib = root.querySelector("#sapInt"); if (ib) { ib.setAttribute("aria-pressed", "false"); ib.textContent = "⚡ Interrupt"; }
+      msg += " ⚡ Interrupt taken: the instruction above finished first; saved PC ← " + S.savedPC + " (the next main-program instruction), PC ← handler at " + HANDLER_ADDR + ". Step to run the handler.";
+    }
+    draw(msg);
   };
   root.querySelector("#sapStep").addEventListener("click", stepOnce);
-  root.querySelector("#sapRun").addEventListener("click", () => { ptr = run.trace.length; draw("Ran to HLT in " + run.steps + " steps. Final output: [" + run.out.join(", ") + "], A = " + run.A + (root.querySelector("#sapProg").value === "sta" ? ", and mem[11] now holds " + run.mem[11] + " (written by STA, read back by the second ADD)." : ".")); });
+  root.querySelector("#sapRun").addEventListener("click", () => { let guard = 0; while (!S.halted && guard++ < 400) stepOnce(); if (S.halted) draw(finishMsg("Ran to HLT in " + S.steps + " steps.")); });
   root.querySelector("#sapReset").addEventListener("click", load);
   root.querySelector("#sapProg").addEventListener("change", load);
+  root.querySelector("#sapInt").addEventListener("click", () => {
+    const ib = root.querySelector("#sapInt");
+    if (S.halted) { draw("The CPU has halted — an interrupt cannot restart it. Reset and fire the interrupt while the program is still running."); return; }
+    if (S.inHandler) { draw("Already inside the handler — this CPU does not nest interrupts; the request is ignored until RETI returns. Step on."); return; }
+    if (S.pending) { draw("Interrupt already requested — it will be taken as soon as the current instruction finishes. Press Step."); return; }
+    S.pending = true; ib.setAttribute("aria-pressed", "true"); ib.textContent = "⚡ Interrupt (pending)";
+    draw("Interrupt requested. Nothing happens mid-instruction: press Step — the CPU finishes that instruction, saves the next PC, and diverts to the handler at " + HANDLER_ADDR + ".");
+  });
+  root.querySelector("#sapTaskCheck").addEventListener("click", () => {
+    const v = parseInt(root.querySelector("#sapTaskAns").value, 10);
+    const out = root.querySelector("#sapTaskOut");
+    if (isNaN(v)) { out.textContent = "Enter the A value you think the program finishes with — it is computed from the simulation, so run it and see."; return; }
+    out.textContent = v === base.A
+      ? "✓ Correct: " + base.A + " — the uninterrupted run finishes with A = " + base.A + ", and with the interrupt handled and returned from, the stepped run " + (S.halted ? "finished with A = " + S.A : "is on its way to the same value") + ". The detour changed nothing."
+      : "✗ The uninterrupted program finishes with A = " + base.A + " (run it without touching Interrupt and check). Fire the interrupt mid-run, return, and confirm the interrupted run lands on exactly that value too.";
+  });
+  RE_WIDGETS.sap.stepOnce = stepOnce; RE_WIDGETS.sap.load = load;
   load();
 };
+
 /* ================= ORGANIZATION TRACK WIDGETS ================= */
 RE_WIDGETS.overflow = function (root) {
   root.innerHTML = '<p class="what">Add two 8-bit values and read <b>both</b> flags. Carry out answers the unsigned question (“did it spill past 255?”); overflow answers the signed one (“is the true sum outside −128…127?”). They are different questions, so the flags disagree — on purpose.</p>' +
@@ -8922,6 +9082,7 @@ const EXPR_ADV = {
   half: () => "Sum = A ⊕ B · Carry = A·B",
   full: () => "Sum = A ⊕ B ⊕ Cin · Cout = A·B + Cin·(A ⊕ B)",
   ripple: () => "For each bit i: S_i = A_i ⊕ B_i ⊕ C_i · C_{i+1} = A_i·B_i + C_i·(A_i ⊕ B_i)",
+  cla: () => "Gᵢ = Aᵢ·Bᵢ · Pᵢ = Aᵢ ⊕ Bᵢ · C1 = G0 + P0·Cin · C2 = G1 + P1·G0 + P1·P0·Cin · C3 = G2 + P2·G1 + P2·P1·G0 + P2·P1·P0·Cin · Cout = G3 + P3·G2 + P3·P2·G1 + P3·P2·P1·G0 + P3·P2·P1·P0·Cin · Sᵢ = Pᵢ ⊕ Cᵢ",
   mult: () => "P0 = A0·B0 · P1 = (A0·B1) ⊕ (A1·B0) · P2/P3 from the full adder on A1·B1 + carry",
   halfsub: () => "D = A ⊕ B · Bout = ¬A·B",
   fullsub: () => "D = A ⊕ B ⊕ Bin · Bout = ¬A·B + ¬(A ⊕ B)·Bin",
@@ -8954,6 +9115,7 @@ function updateDepthPanels() {
     half: "Both gates read the same inputs at the same time, so Sum and Carry arrive together — one gate delay.",
     full: "The signal passes through up to three layers of gates: the second half adder cannot start until the first one's sum exists.",
     ripple: "The carry takes " + state.def.maxLevel + " gate delays to ripple from bit 0 to the final carry out — that wait is the price of chaining adders.",
+    cla: "Every carry is built straight from the generate/propagate signals and Cin, so the carries all land after a few gate levels instead of rippling through four adders — turn Timing on and read the measured totals for both adders.",
     mult: "Partial products appear in parallel (one delay), then the two adder stages stack two more layers on top.",
     halfsub: "The difference bit is just 'the bits differ'. A borrow happens only for 0 − 1: you take 2 from the next column and the difference is 1.",
     fullsub: "Same as the full adder's shape, mirrored: the second stage subtracts the borrow the first stage could not cover.",
@@ -12475,12 +12637,287 @@ function menuFAddItem(afterKey, item) {
     go: () => { setTopArea("circuits"); syncRail("breadboard"); selectCircuit("full"); setView("breadboard"); jumpTo("faultTrainerCard"); } });
   const okU = menuFAddItem("adv-mod", { key: "uart-sim", label: "UART serial-link simulator", hint: "Modulation · frames, parity, baud mismatch",
     go: () => { setTopArea("advanced"); syncRail("advanced"); document.querySelector('#advPicker [data-adv="modulation"]').click(); jumpTo("uartCard"); } });
+  const okP = menuFAddItem("uart-sim", { key: "proto-sim", label: "I2C & SPI protocol simulator", hint: "Modulation · START, address, ACK, clock modes",
+    go: () => { setTopArea("advanced"); syncRail("advanced"); document.querySelector('#advPicker [data-adv="modulation"]').click(); jumpTo("protoCard"); } });
   if (window.LAB_MENU) {
     const pushTo = (groupName, label) => { const g = window.LAB_MENU.groups.find(g => g.name === groupName); if (g) g.items.push(label); };
     if (okV) { pushTo("Round C — build, chips, challenges & drills", "Verilog export — from the sandbox"); window.LAB_MENU.count++; }
     if (okF) { pushTo("Breadboard", "Breadboard fault-finding trainer"); window.LAB_MENU.count++; }
     if (okU) { pushTo("Advanced — hardware, projects, tools", "UART serial-link simulator"); window.LAB_MENU.count++; }
+    if (okP) { pushTo("Advanced — hardware, projects, tools", "I2C & SPI protocol simulator"); window.LAB_MENU.count++; }
   }
+})();
+
+/* ================================================================
+   F4 — I2C & SPI PROTOCOL SIMULATOR
+   Two bus protocols drawn as timing diagrams, following the UART
+   simulator's pattern. Nothing about the decode is scripted: each
+   panel first builds the wire signals (a list of line states), and
+   the decoder then reads those signals back — edges, samples and
+   conditions — to say what was transferred. Both panels load
+   paused; the student presses Step or Play.
+   ================================================================ */
+function pxI2cCells(addr, data, noDevice) {
+  const cells = [];
+  const push = (sda, scl, tag) => cells.push({ sda, scl, tag });
+  push(1, 1, "IDLE — both lines pulled HIGH");
+  push(0, 1, "START — SDA falls while SCL is HIGH");
+  const addrByte = ((addr & 0x7F) << 1) | 0; /* R/W = 0: write */
+  for (let i = 7; i >= 0; i--) {
+    const b = (addrByte >> i) & 1;
+    push(b, 0, "address bit " + i + " set up (SCL low)");
+    push(b, 1, "address bit " + i + " = " + b + " clocked (SCL high)");
+  }
+  const ack1 = noDevice ? 1 : 0;
+  push(ack1, 0, noDevice ? "9th clock setup — nobody pulls SDA down" : "9th clock setup — receiver pulls SDA LOW");
+  push(ack1, 1, noDevice ? "NACK — SDA stays HIGH on the 9th clock" : "ACK — SDA is LOW on the 9th clock");
+  for (let i = 7; i >= 0; i--) {
+    const b = (data >> i) & 1;
+    push(b, 0, "data bit " + i + " set up (SCL low)");
+    push(b, 1, "data bit " + i + " = " + b + " clocked (SCL high)");
+  }
+  const ack2 = noDevice ? 1 : 0;
+  push(ack2, 0, "data ACK setup");
+  push(ack2, 1, noDevice ? "NACK — no receiver to acknowledge the data" : "ACK — data byte acknowledged");
+  push(0, 0, "STOP setup — SDA held LOW, SCL low");
+  push(0, 1, "STOP setup — SCL rises with SDA still LOW");
+  push(1, 1, "STOP — SDA rises while SCL is HIGH; bus idle again");
+  return cells;
+}
+function pxI2cDecode(cells) {
+  let start = false, stop = false;
+  for (let i = 1; i < cells.length; i++) {
+    if (!start && cells[i].scl === 1 && cells[i - 1].sda === 1 && cells[i].sda === 0) start = true;
+  }
+  const samples = [];
+  for (let i = 1; i < cells.length && samples.length < 18; i++) {
+    if (cells[i - 1].scl === 0 && cells[i].scl === 1) samples.push(cells[i].sda);
+  }
+  for (let i = Math.max(1, cells.length - 3); i < cells.length; i++) {
+    if (cells[i].scl === 1 && cells[i - 1].sda === 0 && cells[i].sda === 1) stop = true;
+  }
+  const byteOf = arr => arr.reduce((v, b) => (v << 1) | b, 0);
+  const addrByte = samples.length >= 8 ? byteOf(samples.slice(0, 8)) : null;
+  return { start, stop, samples: samples.length,
+    addrByte, addr: addrByte === null ? null : addrByte >> 1, rw: addrByte === null ? null : addrByte & 1,
+    ack1: samples.length >= 9 ? samples[8] === 0 : null,
+    data: samples.length >= 17 ? byteOf(samples.slice(9, 17)) : null,
+    ack2: samples.length >= 18 ? samples[17] === 0 : null };
+}
+function pxSpiCells(mode, mosi, miso) {
+  const cpol = (mode >> 1) & 1, cpha = mode & 1;
+  const cells = [];
+  const push = (cs, sclk, mo, mi, tag) => cells.push({ cs, sclk, mosi: mo, miso: mi, tag });
+  push(1, cpol, 1, 1, "idle — CS HIGH, SCLK at its idle level " + cpol);
+  const mb = i => (mosi >> i) & 1, rb = i => (miso >> i) & 1;
+  push(0, cpol, cpha === 0 ? mb(7) : 1, cpha === 0 ? rb(7) : 1, "CS falls — transfer starts" + (cpha === 0 ? ", first bits already on the lines" : ""));
+  for (let i = 7; i >= 0; i--) {
+    if (cpha === 0) {
+      push(0, cpol ^ 1, mb(i), rb(i), "bit " + i + ": leading edge — receivers sample MOSI=" + mb(i) + ", MISO=" + rb(i));
+      push(0, cpol, i > 0 ? mb(i - 1) : 1, i > 0 ? rb(i - 1) : 1, "bit " + i + ": trailing edge — lines shift to the next bit");
+    } else {
+      push(0, cpol ^ 1, mb(i), rb(i), "bit " + i + ": leading edge — lines shift, bit " + i + " now on MOSI/MISO");
+      push(0, cpol, mb(i), rb(i), "bit " + i + ": trailing edge — receivers sample MOSI=" + mb(i) + ", MISO=" + rb(i));
+    }
+  }
+  push(1, cpol, 1, 1, "CS rises — transfer complete");
+  return cells;
+}
+function pxSpiDecode(cells, mode) {
+  const cpol = (mode >> 1) & 1, cpha = mode & 1;
+  const out = [], inn = [];
+  for (let i = 1; i < cells.length; i++) {
+    const p = cells[i - 1], c = cells[i];
+    if (c.cs !== 0 || p.sclk === c.sclk) continue;
+    const leading = c.sclk === (cpol ^ 1);
+    if ((cpha === 0 && leading) || (cpha === 1 && !leading)) { out.push(c.mosi); inn.push(c.miso); }
+  }
+  const byteOf = arr => arr.reduce((v, b) => (v << 1) | b, 0);
+  return { bits: out.length, mosi: out.length === 8 ? byteOf(out) : null, miso: inn.length === 8 ? byteOf(inn) : null,
+    idle: cpol, sampleEdge: (cpha === 0) === (cpol === 0) ? "rising" : "falling" };
+}
+function pxProtoVerify() {
+  const i2c = [[0x3C, 0x96], [0x50, 0x00], [0x27, 0xFF]].map(([a, d]) => {
+    const dec = pxI2cDecode(pxI2cCells(a, d, false));
+    return dec.start && dec.stop && dec.addr === a && dec.rw === 0 && dec.ack1 && dec.ack2 && dec.data === d;
+  });
+  const nack = (() => { const dec = pxI2cDecode(pxI2cCells(0x3C, 0x96, true)); return dec.start && dec.ack1 === false; })();
+  const spi = [0, 1, 2, 3].map(m => { const dec = pxSpiDecode(pxSpiCells(m, 0xA6, 0x59), m); return dec.mosi === 0xA6 && dec.miso === 0x59 && dec.bits === 8; });
+  return { i2c, nack, spi };
+}
+window.PROTOX = { i2cCells: pxI2cCells, i2cDecode: pxI2cDecode, spiCells: pxSpiCells, spiDecode: pxSpiDecode, verify: pxProtoVerify, lastVerify: null };
+try { window.PROTOX.lastVerify = pxProtoVerify(); } catch (e) { window.PROTOX.lastVerify = { error: String(e && e.message || e) }; }
+
+(function protoUI() {
+  const host = $F("advModulation"); if (!host) return;
+  const reducedPx = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const card = document.createElement("div");
+  card.className = "card stage-card"; card.id = "protoCard"; card.style.marginTop = "16px";
+  card.innerHTML =
+    '<h2>I2C &amp; SPI protocol simulator — two buses, bit by bit</h2>' +
+    '<p class="what">The UART moves one byte with no clock wire and no address. Real sensor buses add both. <b>I2C</b> shares two wires among many devices: the master names one by its 7-bit address and the device answers with an acknowledge bit. <b>SPI</b> uses a separate clock and chip-select, and sends and receives a byte at the same time. In both panels the traces are drawn first and the decode below is <b>read back off those traces</b> — change a byte and the decode follows the lines, not the input box.</p>' +
+    '<h3 style="margin-top:14px">I2C — a write transaction</h3>' +
+    '<p class="what">Idle bus (both lines HIGH) → START → 7-bit address + write bit, MSB first → the addressed device pulls SDA low for an ACK → one data byte → ACK → STOP. Pick an address nobody owns and you get a NACK instead: that silence is how a master learns a device is missing.</p>' +
+    '<div class="uart-seg-wrap">' +
+    '<label class="fld">Device address (hex, 7-bit) <input type="text" id="pxI2cAddr" value="3C" maxlength="2" style="width:64px" /></label>' +
+    '<label class="fld">Data byte (hex) <input type="text" id="pxI2cData" value="96" maxlength="2" style="width:64px" /></label>' +
+    '<span><span class="ctrl-label" style="display:block">Data bits — click to flip</span><span class="seg" role="group" aria-label="Data byte bits" id="pxI2cBits"></span></span>' +
+    '<span><span class="ctrl-label" style="display:block">Fault</span>' +
+    '<button type="button" class="btn" id="pxI2cNoDev" aria-pressed="false">No device at this address: off</button></span>' +
+    '</div>' +
+    '<div class="schematic-box uart-lab-svg" style="margin-top:12px"><svg id="pxI2cSvg" viewBox="0 0 920 128" role="img" aria-label="I2C timing diagram: SDA and SCL lines for a write transaction with START, address, ACK, data, ACK, STOP"></svg></div>' +
+    '<div class="uart-seg-wrap" style="align-items:center">' +
+    '<button type="button" class="btn" id="pxI2cStep">Step ▸</button>' +
+    '<button type="button" class="btn primary" id="pxI2cPlay">▶ Play</button>' +
+    '<button type="button" class="btn" id="pxI2cReset">Reset</button>' +
+    '<span class="mono" id="pxI2cStatus" style="font-size:13px"></span></div>' +
+    '<div class="decimal-line" id="pxI2cDecode"></div>' +
+    '<div style="margin-top:8px"><span style="font-size:13px" id="pxI2cCheckQ"></span> <span id="pxI2cCheckBtns"></span><div class="decimal-line" id="pxI2cCheckOut"></div></div>' +
+    '<h3 style="margin-top:18px">SPI — a full-duplex transfer</h3>' +
+    '<p class="what">Chip-select falls, then eight clock pulses shift one byte out on MOSI while a different byte arrives on MISO — both directions at once. The four modes are just two choices: CPOL sets the clock’s idle level, CPHA sets which edge carries new data and which edge is sampled. Switch modes and watch the idle level and the sample edge move; the bytes decoded off the lines stay the same.</p>' +
+    '<div class="uart-seg-wrap">' +
+    '<label class="fld">Byte out — MOSI (hex) <input type="text" id="pxSpiMosi" value="A6" maxlength="2" style="width:64px" /></label>' +
+    '<label class="fld">Byte in — MISO (hex) <input type="text" id="pxSpiMiso" value="59" maxlength="2" style="width:64px" /></label>' +
+    '<span><span class="ctrl-label" style="display:block">Mode (CPOL, CPHA)</span><span class="seg" role="group" aria-label="SPI mode" id="pxSpiModeSeg">' +
+    '<button type="button" data-pxmode="0" aria-pressed="true">Mode 0</button><button type="button" data-pxmode="1" aria-pressed="false">Mode 1</button><button type="button" data-pxmode="2" aria-pressed="false">Mode 2</button><button type="button" data-pxmode="3" aria-pressed="false">Mode 3</button></span></span>' +
+    '</div>' +
+    '<div class="schematic-box uart-lab-svg" style="margin-top:12px"><svg id="pxSpiSvg" viewBox="0 0 920 188" role="img" aria-label="SPI timing diagram: CS, SCLK, MOSI and MISO lines for one 8-bit transfer"></svg></div>' +
+    '<div class="uart-seg-wrap" style="align-items:center">' +
+    '<button type="button" class="btn" id="pxSpiStep">Step ▸</button>' +
+    '<button type="button" class="btn primary" id="pxSpiPlay">▶ Play</button>' +
+    '<button type="button" class="btn" id="pxSpiReset">Reset</button>' +
+    '<span class="mono" id="pxSpiStatus" style="font-size:13px"></span></div>' +
+    '<div class="decimal-line" id="pxSpiDecode"></div>' +
+    '<div style="margin-top:8px"><span style="font-size:13px" id="pxSpiCheckQ"></span> <span id="pxSpiCheckBtns"></span><div class="decimal-line" id="pxSpiCheckOut"></div></div>' +
+    '<p class="progress-line" id="pxSelfCheck"></p>';
+  host.appendChild(card);
+  const lv = window.PROTOX.lastVerify;
+  if (lv && lv.i2c) $F("pxSelfCheck").textContent = "Bus self-check (build signals → decode them back, all computed): I2C write round-trips " + lv.i2c.filter(Boolean).length + "/" + lv.i2c.length + " (address, ACK, data, STOP all read off the lines); no-device case decodes as NACK: " + (lv.nack ? "yes" : "NO") + "; SPI round-trips in " + lv.spi.filter(Boolean).length + "/4 modes.";
+
+  const px = { i2cAddr: 0x3C, i2cData: 0x96, noDev: false, i2cPos: 0, i2cPlaying: false, i2cRaf: null,
+    spiMosi: 0xA6, spiMiso: 0x59, spiMode: 0, spiPos: 0, spiPlaying: false, spiRaf: null };
+  const hex2 = v => "0x" + v.toString(16).toUpperCase().padStart(2, "0");
+  function traceSvg(svg, rows, cells, pos) {
+    if (!svg) return;
+    const W = 920, padL = 62, cw = Math.min(20, (W - padL - 14) / cells.length);
+    const rowH = 34, top = 22;
+    let s = "";
+    const upto = Math.max(0, Math.min(cells.length, Math.floor(pos)));
+    if (upto > 0) s += '<rect x="' + padL + '" y="8" width="' + (upto * cw) + '" height="' + (rows.length * rowH + 14) + '" style="fill:var(--canvas-hi)"/>';
+    rows.forEach((r, ri) => {
+      const yHi = top + ri * rowH, yLo = yHi + 16;
+      s += '<text x="6" y="' + (yHi + 12) + '" style="font-size:11px;fill:var(--muted)">' + r.name + "</text>";
+      let d = "";
+      cells.forEach((c, i) => {
+        const x0 = padL + i * cw, x1 = x0 + cw, y = c[r.key] ? yHi : yLo;
+        if (i === 0) d += "M " + x0 + " " + y;
+        else { const py = cells[i - 1][r.key] ? yHi : yLo; if (py !== y) d += " L " + x0 + " " + py + " L " + x0 + " " + y; }
+        d += " L " + x1 + " " + y;
+      });
+      s += '<path d="' + d + '" fill="none" style="stroke:var(--amber);stroke-width:2"/>';
+      cells.forEach((c, i) => { if (c[r.key]) s += '<circle cx="' + (padL + i * cw + cw / 2) + '" cy="' + yHi + '" r="2" style="fill:var(--ink)"/>'; });
+    });
+    if (pos > 0) { const x = padL + Math.min(pos, cells.length) * cw; s += '<line x1="' + x + '" y1="6" x2="' + x + '" y2="' + (rows.length * rowH + 20) + '" style="stroke:var(--red);stroke-width:1.5"/>'; }
+    svg.innerHTML = s;
+    svg.setAttribute("viewBox", "0 0 " + Math.max(360, padL + cells.length * cw + 14) + " " + (rows.length * rowH + 28));
+  }
+  /* ---------- I2C ---------- */
+  function i2cCellsNow() { return pxI2cCells(px.i2cAddr, px.i2cData, px.noDev); }
+  function i2cDraw() {
+    const cells = i2cCellsNow();
+    traceSvg($F("pxI2cSvg"), [{ name: "SDA", key: "sda" }, { name: "SCL", key: "scl" }], cells, px.i2cPos);
+    const dec = pxI2cDecode(cells);
+    $F("pxI2cDecode").innerHTML = "Decoded from the lines: " +
+      (dec.start ? "<b>START</b> detected (SDA fell while SCL HIGH)" : "no START") +
+      " · address byte on the wire " + (dec.addrByte === null ? "—" : "<b>" + hex2(dec.addrByte) + "</b> = address <b>" + hex2(dec.addr) + "</b> (" + dec.addr + "), R/W = " + dec.rw + " (write)") +
+      " · " + (dec.ack1 === null ? "ACK not reached" : dec.ack1 ? "<b>ACK</b> — the device pulled SDA low on the 9th clock" : '<b style="color:var(--red)">NACK</b> — SDA stayed HIGH on the 9th clock: no device answered at ' + hex2(dec.addr)) +
+      " · data byte <b>" + (dec.data === null ? "—" : hex2(dec.data) + " (" + dec.data + ")") + "</b>" +
+      " · " + (dec.ack2 === null ? "data ACK not reached" : dec.ack2 ? "<b>ACK</b>" : "<b>NACK</b>") +
+      " · " + (dec.stop ? "<b>STOP</b> detected (SDA rose while SCL HIGH)" : "no STOP") + ".";
+    const idx = Math.max(0, Math.min(cells.length - 1, Math.floor(px.i2cPos) - 1));
+    $F("pxI2cStatus").textContent = px.i2cPos <= 0 ? "Paused at the idle bus — Step or Play to run the transaction." :
+      px.i2cPos >= cells.length ? "Transaction complete — the decode above was read off these traces." :
+      "Step " + Math.floor(px.i2cPos) + " of " + cells.length + ": " + cells[idx].tag + ".";
+    /* check question, computed from the chosen address */
+    const wire = ((px.i2cAddr & 0x7F) << 1) | 0;
+    $F("pxI2cCheckQ").innerHTML = "<b>Check:</b> you picked address " + hex2(px.i2cAddr) + " for a write. What byte value actually goes on the wire first?";
+    $F("pxI2cCheckBtns").innerHTML = [wire, px.i2cAddr & 0x7F, wire | 1].map(v =>
+      '<button type="button" class="btn" data-pxians="' + v + '">' + hex2(v) + "</button>").join(" ");
+    $F("pxI2cCheckBtns").querySelectorAll("[data-pxians]").forEach(b => b.addEventListener("click", () => {
+      $F("pxI2cCheckOut").textContent = +b.dataset.pxians === wire
+        ? "✓ Correct: " + hex2(wire) + " — the 7 address bits shifted left, with the write bit 0 in the lowest position. The decoder above read exactly that byte off the SDA line."
+        : "✗ The wire carries the address shifted one place left with R/W in bit 0: " + hex2(px.i2cAddr) + " → " + hex2(wire) + " for a write (" + hex2(wire | 1) + " would mean read). Watch the first eight clocks of the trace.";
+    }));
+    /* data bit toggles */
+    const bits = $F("pxI2cBits"); bits.innerHTML = "";
+    for (let i = 7; i >= 0; i--) {
+      const b = document.createElement("button"); b.type = "button";
+      b.textContent = "b" + i + "=" + ((px.i2cData >> i) & 1);
+      b.setAttribute("aria-pressed", ((px.i2cData >> i) & 1) ? "true" : "false");
+      b.addEventListener("click", () => { px.i2cData ^= (1 << i); $F("pxI2cData").value = px.i2cData.toString(16).toUpperCase().padStart(2, "0"); px.i2cPos = 0; i2cDraw(); });
+      bits.appendChild(b);
+    }
+  }
+  function i2cStopPlay() { px.i2cPlaying = false; if (px.i2cRaf) cancelAnimationFrame(px.i2cRaf); px.i2cRaf = null; const b = $F("pxI2cPlay"); if (b) b.textContent = "▶ Play"; }
+  $F("pxI2cAddr").addEventListener("input", () => { const v = parseInt(($F("pxI2cAddr").value || "").trim(), 16); if (!isNaN(v) && v >= 0 && v <= 0x7F) { px.i2cAddr = v; px.i2cPos = 0; i2cStopPlay(); i2cDraw(); } });
+  $F("pxI2cData").addEventListener("input", () => { const v = parseInt(($F("pxI2cData").value || "").trim(), 16); if (!isNaN(v) && v >= 0 && v <= 255) { px.i2cData = v; px.i2cPos = 0; i2cStopPlay(); i2cDraw(); } });
+  $F("pxI2cNoDev").addEventListener("click", () => { px.noDev = !px.noDev; const b = $F("pxI2cNoDev"); b.setAttribute("aria-pressed", px.noDev ? "true" : "false"); b.textContent = px.noDev ? "No device at this address: ON (expect NACK)" : "No device at this address: off"; px.i2cPos = 0; i2cStopPlay(); i2cDraw(); });
+  $F("pxI2cStep").addEventListener("click", () => { i2cStopPlay(); const n = i2cCellsNow().length; px.i2cPos = Math.min(n, px.i2cPos + 1); i2cDraw(); });
+  $F("pxI2cReset").addEventListener("click", () => { i2cStopPlay(); px.i2cPos = 0; i2cDraw(); });
+  $F("pxI2cPlay").addEventListener("click", () => {
+    if (px.i2cPlaying) { i2cStopPlay(); i2cDraw(); return; }
+    const cells = i2cCellsNow();
+    if (reducedPx) { px.i2cPos = cells.length; i2cDraw(); return; }
+    if (px.i2cPos >= cells.length) px.i2cPos = 0;
+    px.i2cPlaying = true; $F("pxI2cPlay").textContent = "⏸ Pause";
+    const t0 = performance.now() - px.i2cPos * 130, per = 130;
+    const tick = now => { if (!px.i2cPlaying) return; px.i2cPos = Math.min(cells.length, (now - t0) / per); i2cDraw(); if (px.i2cPos >= cells.length) { i2cStopPlay(); i2cDraw(); return; } px.i2cRaf = requestAnimationFrame(tick); };
+    px.i2cRaf = requestAnimationFrame(tick);
+  });
+  /* ---------- SPI ---------- */
+  function spiCellsNow() { return pxSpiCells(px.spiMode, px.spiMosi, px.spiMiso); }
+  function spiDraw() {
+    const cells = spiCellsNow();
+    traceSvg($F("pxSpiSvg"), [{ name: "CS", key: "cs" }, { name: "SCLK", key: "sclk" }, { name: "MOSI", key: "mosi" }, { name: "MISO", key: "miso" }], cells, px.spiPos);
+    const dec = pxSpiDecode(cells, px.spiMode);
+    const cpol = (px.spiMode >> 1) & 1, cpha = px.spiMode & 1;
+    $F("pxSpiDecode").innerHTML = "Mode " + px.spiMode + " (CPOL=" + cpol + ", CPHA=" + cpha + "): SCLK idles <b>" + (cpol ? "HIGH" : "LOW") + "</b>, data sampled on the <b>" + dec.sampleEdge + " edge</b>. Decoded from the lines at those edges: byte out (MOSI) <b>" + (dec.mosi === null ? "—" : hex2(dec.mosi)) + "</b> · byte in (MISO) <b>" + (dec.miso === null ? "—" : hex2(dec.miso)) + "</b> · " + dec.bits + " bits sampled.";
+    const idx = Math.max(0, Math.min(cells.length - 1, Math.floor(px.spiPos) - 1));
+    $F("pxSpiStatus").textContent = px.spiPos <= 0 ? "Paused before CS falls — Step or Play to run the transfer." :
+      px.spiPos >= cells.length ? "Transfer complete — both bytes above were sampled off the traces." :
+      "Step " + Math.floor(px.spiPos) + " of " + cells.length + ": " + cells[idx].tag + ".";
+    $F("pxSpiCheckQ").innerHTML = "<b>Check:</b> in mode " + px.spiMode + ", the clock idles ___ and receivers sample on the ___ edge. Which pair is right?";
+    const right = (cpol ? "HIGH" : "LOW") + " idle · " + dec.sampleEdge + " sample edge";
+    const wrong = (cpol ? "LOW" : "HIGH") + " idle · " + (dec.sampleEdge === "rising" ? "falling" : "rising") + " sample edge";
+    $F("pxSpiCheckBtns").innerHTML = '<button type="button" class="btn" data-pxsans="1">' + right + '</button> <button type="button" class="btn" data-pxsans="0">' + wrong + "</button>";
+    $F("pxSpiCheckBtns").querySelectorAll("[data-pxsans]").forEach(b => b.addEventListener("click", () => {
+      $F("pxSpiCheckOut").textContent = b.dataset.pxsans === "1"
+        ? "✓ Correct — CPOL=" + cpol + " parks SCLK " + (cpol ? "HIGH" : "LOW") + " between transfers, and CPHA=" + cpha + " puts the sample on the " + dec.sampleEdge + " edge. Both facts are visible in the trace: read the flat part before CS falls, and the dots where bits were captured."
+        : "✗ Look at the trace: before CS falls, SCLK sits " + (cpol ? "HIGH" : "LOW") + " (that is CPOL=" + cpol + "), and in mode " + px.spiMode + " the sampled bits are captured on the " + dec.sampleEdge + " edge.";
+    }));
+  }
+  function spiStopPlay() { px.spiPlaying = false; if (px.spiRaf) cancelAnimationFrame(px.spiRaf); px.spiRaf = null; const b = $F("pxSpiPlay"); if (b) b.textContent = "▶ Play"; }
+  $F("pxSpiMosi").addEventListener("input", () => { const v = parseInt(($F("pxSpiMosi").value || "").trim(), 16); if (!isNaN(v) && v >= 0 && v <= 255) { px.spiMosi = v; px.spiPos = 0; spiStopPlay(); spiDraw(); } });
+  $F("pxSpiMiso").addEventListener("input", () => { const v = parseInt(($F("pxSpiMiso").value || "").trim(), 16); if (!isNaN(v) && v >= 0 && v <= 255) { px.spiMiso = v; px.spiPos = 0; spiStopPlay(); spiDraw(); } });
+  $F("pxSpiModeSeg").querySelectorAll("[data-pxmode]").forEach(b => b.addEventListener("click", () => {
+    px.spiMode = +b.dataset.pxmode; px.spiPos = 0; spiStopPlay();
+    $F("pxSpiModeSeg").querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x === b ? "true" : "false"));
+    spiDraw();
+  }));
+  $F("pxSpiStep").addEventListener("click", () => { spiStopPlay(); px.spiPos = Math.min(spiCellsNow().length, px.spiPos + 1); spiDraw(); });
+  $F("pxSpiReset").addEventListener("click", () => { spiStopPlay(); px.spiPos = 0; spiDraw(); });
+  $F("pxSpiPlay").addEventListener("click", () => {
+    if (px.spiPlaying) { spiStopPlay(); spiDraw(); return; }
+    const cells = spiCellsNow();
+    if (reducedPx) { px.spiPos = cells.length; spiDraw(); return; }
+    if (px.spiPos >= cells.length) px.spiPos = 0;
+    px.spiPlaying = true; $F("pxSpiPlay").textContent = "⏸ Pause";
+    const t0 = performance.now() - px.spiPos * 130, per = 130;
+    const tick = now => { if (!px.spiPlaying) return; px.spiPos = Math.min(cells.length, (now - t0) / per); spiDraw(); if (px.spiPos >= cells.length) { spiStopPlay(); spiDraw(); return; } px.spiRaf = requestAnimationFrame(tick); };
+    px.spiRaf = requestAnimationFrame(tick);
+  });
+  window.PROTOX.ui = px;
+  i2cDraw(); spiDraw();
 })();
 
 /* ================================================================
