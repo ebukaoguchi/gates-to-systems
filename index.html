@@ -16453,3 +16453,27 @@ html[data-theme="blueprint"]{--crit:#fda4af}
   }, false);
 })();
 </script>
+<style>
+/* ===== Desktop chrome compression — three rows to two =====
+   Desktop only (min-width:721px): the sticky bar becomes a wrapping
+   flex row. Row 1 is the title row, full width, unchanged. Row 2 is
+   the merge: the search cluster (input, level facet, type facet,
+   Labs button, in their existing order) followed by the module chip
+   rail filling the remaining width as one horizontally scrollable
+   row. The progress line and the filtering chip each take their own
+   full-width line under row 2, exactly where they sat before
+   relative to the bar. The phone form (max-width:720px) is not
+   touched by any rule here. No hiding, no animation: the bar stays
+   sticky, in flow, and always visible. */
+@media (min-width:721px){
+  .ux-sticky{display:flex;flex-wrap:wrap;align-items:center;column-gap:12px}
+  .ux-sticky .site-head-row{flex:1 1 100%;min-width:0}
+  .ux-sticky .ux-search{flex:0 1 560px;min-width:0;margin-top:6px;flex-wrap:nowrap}
+  .ux-sticky .ux-search input[type="text"]{flex:1 1 140px;min-width:96px}
+  .ux-sticky .ux-search select{flex:0 1 auto;min-width:0}
+  .ux-sticky .ux-labs-btn{flex:none}
+  .ux-sticky .ux-rail{flex:1 1 220px;min-width:0;padding:4px 2px 0}
+  .ux-sticky .ux-progress{flex:1 1 100%;min-width:0}
+  .ux-sticky .ux-filterchip{flex:1 1 100%;min-width:0}
+}
+</style>
