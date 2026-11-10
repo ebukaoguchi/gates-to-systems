@@ -16449,9 +16449,22 @@ html[data-theme="blueprint"]{--crit:#fda4af}
 .ux-filterchip{display:none;position:relative;z-index:75;background:var(--bg);margin-top:6px;padding:2px 0;align-items:center;gap:8px;font-size:12.5px;font-weight:600;color:var(--amber)}
 .ux-filterchip.on{display:flex}
 .ux-filterchip button{border:1px solid var(--line2);background:var(--panel);color:var(--ink);border-radius:999px;padding:2px 9px;font:inherit;font-size:12px;cursor:pointer}
-/* F7: rail edge fade + arrow while more modules sit off-screen */
+/* F7: rail edge fade + arrow while more modules sit off-screen.
+   The arrows are real buttons with a full 44x44 press target (the
+   old arrow was a pointer-events:none decoration that could not be
+   pressed at all); one press scrolls the rail a useful step, and on
+   a fine pointer the rail itself can be dragged to scroll. */
 .ux-rail.ux-more{mask-image:linear-gradient(to right,#000 88%,transparent 99%);-webkit-mask-image:linear-gradient(to right,#000 88%,transparent 99%)}
-.ux-rail-arrow{position:absolute;right:2px;z-index:5;pointer-events:none;font-size:26px;font-weight:800;line-height:1;color:var(--amber);text-shadow:0 0 6px var(--panel),0 0 3px var(--panel)}
+.ux-rail.ux-more-left{mask-image:linear-gradient(to left,#000 88%,transparent 99%);-webkit-mask-image:linear-gradient(to left,#000 88%,transparent 99%)}
+.ux-rail.ux-more.ux-more-left{mask-image:linear-gradient(to right,transparent 1%,#000 12%,#000 88%,transparent 99%);-webkit-mask-image:linear-gradient(to right,transparent 1%,#000 12%,#000 88%,transparent 99%)}
+.ux-rail-row{display:flex;align-items:center;gap:6px;min-width:0}
+.ux-rail-row .ux-rail{flex:1 1 auto;min-width:0}
+@media (min-width:721px){.ux-sticky .ux-rail-row{flex:1 1 220px;min-width:0}}
+.ux-rail-arrow{position:static;flex:none;width:44px;height:44px;min-width:44px;min-height:44px;display:flex;align-items:center;justify-content:center;padding:0;font:inherit;font-size:28px;font-weight:800;line-height:1;color:var(--amber);background:var(--panel);border:1px solid var(--line2);border-radius:999px;box-shadow:0 2px 10px rgba(0,0,0,.16);cursor:pointer;-webkit-tap-highlight-color:transparent}
+.ux-rail-arrow:hover{border-color:var(--amber);background:var(--panel2)}
+.ux-rail-arrow:active{transform:translateY(1px)}
+.ux-rail-arrow:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+@media (hover:hover) and (pointer:fine){.ux-rail{cursor:grab}.ux-rail.ux-dragging{cursor:grabbing;user-select:none}.ux-rail.ux-dragging *{pointer-events:none}}
 /* F1: Start Here step ticks */
 .ux-step-tick{margin-left:auto;flex:none;color:var(--green);font-weight:800;font-size:16px}
 /* F4: course-labs jumps */
@@ -16841,22 +16854,77 @@ html[data-theme="blueprint"]{--crit:#fda4af}
     updateFilterChip();
   })();
 
-  /* ---------- F7: rail edge affordance ---------- */
+  /* ---------- F7: rail edge affordance — real scroll buttons + drag ---------- */
   (function railAffordance() {
     const rail = $L("uxRail"), sticky = $L("uxSticky");
     if (!rail || !sticky) return;
-    const arrow = document.createElement("div");
-    arrow.className = "ux-rail-arrow"; arrow.textContent = "›"; arrow.setAttribute("aria-hidden", "true");
-    sticky.appendChild(arrow);
+    /* The buttons sit IN FLOW beside the rail (a flex row), never
+       over it, so they cannot cover a chip they sit next to. */
+    const row = document.createElement("div");
+    row.className = "ux-rail-row";
+    rail.parentNode.insertBefore(row, rail);
+    row.appendChild(rail);
+    function makeArrow(dir) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "ux-rail-arrow" + (dir < 0 ? " prev" : " next");
+      b.textContent = dir < 0 ? "‹" : "›";
+      b.setAttribute("aria-label", dir < 0 ? "Scroll modules back" : "Scroll modules forward");
+      b.title = dir < 0 ? "Scroll modules back" : "Scroll modules forward";
+      b.addEventListener("click", () => {
+        const step = Math.max(220, Math.min(440, Math.round(rail.clientWidth * 0.75)));
+        try { rail.scrollBy({ left: dir * step, behavior: "smooth" }); }
+        catch (e) { rail.scrollLeft += dir * step; }
+        setTimeout(place, 350);
+      });
+      return b;
+    }
+    const prev = makeArrow(-1);
+    const next = makeArrow(1);
+    row.insertBefore(prev, rail);
+    row.appendChild(next);
     function place() {
       const more = rail.scrollWidth - rail.clientWidth - rail.scrollLeft > 8;
+      const back = rail.scrollLeft > 8;
       rail.classList.toggle("ux-more", more);
-      arrow.style.display = more ? "" : "none";
-      arrow.style.top = (rail.offsetTop + rail.offsetHeight / 2 - 14) + "px";
+      rail.classList.toggle("ux-more-left", back);
+      next.style.display = more ? "" : "none";
+      prev.style.display = back ? "" : "none";
     }
     rail.addEventListener("scroll", place, { passive: true });
     window.addEventListener("resize", place);
     setTimeout(place, 60); setTimeout(place, 600);
+    /* Drag-to-scroll with a mouse / pen, so the rail never depends on
+       the chevrons alone. Touch keeps its native swipe. A drag past
+       a few pixels suppresses the click it would otherwise fire on
+       the chip underneath, so dragging never navigates by accident. */
+    let dragging = false, dragMoved = false, startX = 0, startLeft = 0;
+    rail.addEventListener("pointerdown", e => {
+      if (e.pointerType === "touch" || e.button !== 0) return;
+      dragging = true; dragMoved = false;
+      startX = e.clientX; startLeft = rail.scrollLeft;
+    });
+    rail.addEventListener("pointermove", e => {
+      if (!dragging) return;
+      const dx = e.clientX - startX;
+      if (!dragMoved && Math.abs(dx) > 5) { dragMoved = true; rail.classList.add("ux-dragging"); }
+      if (dragMoved) rail.scrollLeft = startLeft - dx;
+    });
+    function endDrag() {
+      if (!dragging) return;
+      dragging = false;
+      rail.classList.remove("ux-dragging");
+      if (dragMoved) {
+        dragMoved = false;
+        const suppress = ev => { ev.stopPropagation(); ev.preventDefault(); };
+        document.addEventListener("click", suppress, true);
+        setTimeout(() => document.removeEventListener("click", suppress, true), 80);
+      }
+    }
+    rail.addEventListener("pointerup", endDrag);
+    rail.addEventListener("pointercancel", endDrag);
+    window.addEventListener("pointerup", endDrag);
+    window.addEventListener("pointercancel", endDrag);
   })();
 
   /* ---------- F4: Course labs jumps ---------- */
