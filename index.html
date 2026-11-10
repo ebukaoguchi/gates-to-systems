@@ -524,8 +524,13 @@ html[data-theme="blueprint"] body{background-image:linear-gradient(rgba(157,189,
 .text-btn{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line2);background:var(--panel);border-radius:9px;padding:7px 11px;font-size:12.5px;font-weight:600;cursor:pointer;box-shadow:var(--shadow)}
 .text-btn[aria-pressed="true"]{background:var(--amber-soft);border-color:var(--amber)}
 @media (max-width:720px){
-  .ux-sticky .head-controls{gap:4px}
-  .text-btn{padding:6px 5px;font-size:11px;min-height:40px}
+  /* Phone: the TEXT control leaves the top bar — the same toggle
+     lives at the top of the Menu panel instead (the
+     .menu-textsize-row below) — so the first row is back to
+     title / Level / Menu / Theme, and the tighter control spacing
+     this block once added to fit TEXT in the bar is undone. On
+     wider screens the control stays in the bar, unchanged. */
+  .text-control{display:none}
   /* Large on a phone: the bar's own title eases down half a step so
      its longest line still clears the controls sharing its row —
      the row height itself is set by the Search toggle and does
@@ -720,6 +725,19 @@ footer.site .owner-credit{font-size:13.5px;color:var(--ink);font-weight:600}
 .menu-item .mi-dot{width:7px;height:7px;border-radius:50%;background:var(--amber);flex:none;align-self:center;visibility:hidden}
 .menu-item[aria-current="true"] .mi-dot{visibility:visible}
 .menu-empty{font-size:13px;color:var(--muted);margin:10px 4px 4px}
+/* Text size settings strip — phone widths only. The bar's TEXT
+   toggle moves here, to the very top of the Menu panel, above the
+   accordion groups; above the phone breakpoint the row never shows
+   and the toggle stays in the bar. It is a settings strip, not a
+   menu group: it never folds, is not filtered, and is not counted
+   as an activity. The button reuses the bar toggle's .text-btn
+   styling and drives the same lbl-textsize setting. */
+.menu-textsize-row{display:none}
+.menu-textsize-label{font-size:13.5px;font-weight:600;color:var(--ink)}
+@media (max-width:720px){
+  .menu-textsize-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:2px 2px 10px;border-bottom:1px solid var(--line);margin-bottom:2px}
+  .menu-textsize-row .text-btn{min-height:40px}
+}
 @media (max-width:520px){header.site h1{font-size:21px}}
 
 /* ===== Round B: sequential, chronogram, OS pack, debugger, instruments ===== */
@@ -856,6 +874,10 @@ body.lvl-advanced #startHere{display:none}
           <span class="lt-label" id="menuLabel">Find</span>
           <button type="button" class="menu-btn" id="menuBtn" aria-haspopup="true" aria-expanded="false" aria-labelledby="menuLabel">☰ Menu</button>
           <div class="menu-panel" id="menuPanel" hidden role="menu" aria-label="Site menu">
+            <div class="menu-textsize-row">
+              <span class="menu-textsize-label" id="menuTextLabel">Text size</span>
+              <button type="button" class="text-btn" id="menuTextSizeBtn" aria-pressed="false" aria-labelledby="menuTextLabel menuTextSizeName"><span id="menuTextSizeName">Normal</span></button>
+            </div>
             <div class="menu-filter-row"><input type="text" id="menuFilter" placeholder="Find anything — try mux, cache, 555, carry…" aria-label="Filter menu items" /><button type="button" class="menu-close-btn" id="menuCloseBtn" aria-label="Close menu">✕</button></div>
             <div class="menu-list" id="menuList"></div>
             <p class="menu-empty" id="menuEmpty" hidden>No item matches — try a shorter word.</p>
@@ -9014,19 +9036,26 @@ setTheme(document.documentElement.dataset.theme || "paper", true);
    by the head script, switching is instant and never touches
    state. The class lives on <html>; the scale rules reach only
    HTML reading text — diagrams and the sticky bar keep their
-   own sizes, so the bar height never changes. */
+   own sizes, so the bar height never changes. Two controls drive
+   the one setting and are kept in sync by setTextSize: the bar
+   toggle (shown above the phone breakpoint) and the Text size
+   row at the top of the Menu panel (phone widths only). */
 function setTextSize(large, skipSave) {
   document.documentElement.classList.toggle("text-large", !!large);
-  const b = $("textSizeBtn"), n = $("textSizeName");
-  if (b) b.setAttribute("aria-pressed", large ? "true" : "false");
-  if (n) n.textContent = large ? "Large" : "Normal";
+  [["textSizeBtn", "textSizeName"], ["menuTextSizeBtn", "menuTextSizeName"]].forEach(pair => {
+    const b = $(pair[0]), n = $(pair[1]);
+    if (b) b.setAttribute("aria-pressed", large ? "true" : "false");
+    if (n) n.textContent = large ? "Large" : "Normal";
+  });
   if (!skipSave) { try { window.localStorage.setItem("lbl-textsize", large ? "large" : "normal"); } catch (e) { /* session-only */ } }
   window.dispatchEvent(new Event("resize"));
 }
 (function initTextSize() {
   const b = $("textSizeBtn"); if (!b) return;
   setTextSize(document.documentElement.classList.contains("text-large"), true);
-  b.addEventListener("click", () => setTextSize(!document.documentElement.classList.contains("text-large")));
+  const toggle = () => setTextSize(!document.documentElement.classList.contains("text-large"));
+  b.addEventListener("click", toggle);
+  const mb = $("menuTextSizeBtn"); if (mb) mb.addEventListener("click", toggle);
   window.__textSize = { set: setTextSize, isLarge: () => document.documentElement.classList.contains("text-large") };
 })();
 
