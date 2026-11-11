@@ -17380,3 +17380,623 @@ html[data-theme="blueprint"]{--crit:#fda4af}
   .ux-sticky .ux-filterchip{flex:1 1 100%;min-width:0}
 }
 </style>
+
+<style>
+/* ===== Round U — DMA · setup/hold · Hamming(7,4) ===== */
+button.seq-cell{font-family:"IBM Plex Mono",monospace;cursor:pointer;color:inherit}
+button.seq-cell:hover{border-color:var(--amber)}
+.seq-cell.meta{border-color:var(--red);border-style:dashed;color:var(--red);background:var(--panel)}
+.seq-cell.flipped{border-color:var(--red);background:var(--panel);box-shadow:inset 0 0 0 1.5px var(--red)}
+.seq-cell.fixed{border-color:var(--teal);background:var(--amber-soft)}
+.ham-role{display:block;font-size:9.5px;color:var(--muted);font-weight:600}
+.sh-win{fill:var(--red);opacity:.13}
+.sh-clk{stroke:var(--ink);stroke-width:2.2;fill:none}
+.sh-data{stroke:var(--amber-wire);stroke-width:2.4;fill:none}
+.sh-q{stroke:var(--teal);stroke-width:2.4;fill:none}
+.sh-qmeta{stroke:var(--red);stroke-width:2.4;fill:none;stroke-dasharray:5 4}
+.sh-grid{stroke:var(--line);stroke-width:1}
+.sh-lab{font-size:11px;font-weight:700;fill:var(--ink)}
+.sh-sub{font-size:10px;fill:var(--muted)}
+.sh-vlab{font-size:10.5px;font-weight:700;fill:var(--red)}
+.dma-bar{display:flex;height:22px;border:1px solid var(--line2);border-radius:7px;overflow:hidden;margin:4px 0 10px}
+.dma-bar i{display:block;height:100%}
+.dma-bar .b-busy{background:var(--amber)}
+.dma-bar .b-free{background:var(--teal);opacity:.55}
+.dma-words{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+.dma-words span{width:26px;height:26px;border:1.4px solid var(--line2);border-radius:6px;display:flex;align-items:center;justify-content:center;font-family:"IBM Plex Mono",monospace;font-size:10.5px;background:var(--panel2);color:var(--muted)}
+.dma-words span.moved{border-color:var(--teal);background:var(--amber-soft);color:var(--ink);font-weight:700}
+</style>
+<script>
+"use strict";
+/* ================================================================
+   ROUND U — three new labs, each driven by its own model and
+   graded from that model, never from a stored answer key:
+   1) Hamming(7,4) — encoder + syndrome/corrector built as real
+      netlists and evaluated by the site engine (window.LAB);
+      verified exhaustively below (all 16 data words × no error
+      and all 7 single-bit errors correct; all 21 double-error
+      pairs detected-but-miscorrected, stated plainly).
+   2) Setup-and-hold / metastability — a timing model with this
+      flip-flop's stated tsu / th / tcq; violations put Q into an
+      honestly indeterminate state that resolves after a modelled
+      resolution time (re-rolled each run); a second flip-flop
+      gives it a full period to resolve.
+   3) DMA controller — one transfer costed three ways by a single
+      cycle model (dmaSim); the stepper accumulates exactly the
+      increments dmaSim totals, so the table and the stepper can
+      never disagree.
+   All three start paused: nothing auto-runs.
+   ================================================================ */
+(function roundU() {
+  const $U = id => document.getElementById(id);
+  const escU = s => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+  function mulberryU(seed) { let a = seed >>> 0; return function () { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+  function jumpU(id) { const el = id && $U(id); if (el) setTimeout(() => el.scrollIntoView({ behavior: "smooth", block: "start" }), 60); }
+  function clickMenuKey(key) { const it = document.querySelector('#menuList .menu-item[data-key="' + key + '"]'); if (it) { it.click(); return true; } return false; }
+
+  /* ================================================================
+     1) HAMMING(7,4) — positions 1..7: P1 P2 D1 P3 D2 D3 D4
+     even parity: P1 covers 1,3,5,7 · P2 covers 2,3,6,7 · P3 covers 4,5,6,7
+     ================================================================ */
+  const LABE = window.LAB;
+  function hamEncoderDef() {
+    return { inputs: ["D1", "D2", "D3", "D4"], outputs: ["C1", "C2", "C3", "C4", "C5", "C6", "C7"], gates: [
+      { id: "e1", type: "XOR", ins: ["D1", "D2"], out: "et1" },
+      { id: "e2", type: "XOR", ins: ["et1", "D4"], out: "C1" },
+      { id: "e3", type: "XOR", ins: ["D1", "D3"], out: "et2" },
+      { id: "e4", type: "XOR", ins: ["et2", "D4"], out: "C2" },
+      { id: "e5", type: "XOR", ins: ["D1", "ZERO"], out: "C3" },
+      { id: "e6", type: "XOR", ins: ["D2", "D3"], out: "et3" },
+      { id: "e7", type: "XOR", ins: ["et3", "D4"], out: "C4" },
+      { id: "e8", type: "XOR", ins: ["D2", "ZERO"], out: "C5" },
+      { id: "e9", type: "XOR", ins: ["D3", "ZERO"], out: "C6" },
+      { id: "e10", type: "XOR", ins: ["D4", "ZERO"], out: "C7" } ] };
+  }
+  function hamDecoderDef() {
+    const gates = [
+      { id: "d1", type: "XOR", ins: ["R1", "R3"], out: "dt1" },
+      { id: "d2", type: "XOR", ins: ["dt1", "R5"], out: "dt2" },
+      { id: "d3", type: "XOR", ins: ["dt2", "R7"], out: "S1" },
+      { id: "d4", type: "XOR", ins: ["R2", "R3"], out: "dt3" },
+      { id: "d5", type: "XOR", ins: ["dt3", "R6"], out: "dt4" },
+      { id: "d6", type: "XOR", ins: ["dt4", "R7"], out: "S2" },
+      { id: "d7", type: "XOR", ins: ["R4", "R5"], out: "dt5" },
+      { id: "d8", type: "XOR", ins: ["dt5", "R6"], out: "dt6" },
+      { id: "d9", type: "XOR", ins: ["dt6", "R7"], out: "S3" },
+      { id: "n1", type: "NOT", ins: ["S1"], out: "nS1" },
+      { id: "n2", type: "NOT", ins: ["S2"], out: "nS2" },
+      { id: "n3", type: "NOT", ins: ["S3"], out: "nS3" },
+      { id: "x1", type: "AND", ins: ["nS3", "nS2", "S1"], out: "E1" },
+      { id: "x2", type: "AND", ins: ["nS3", "S2", "nS1"], out: "E2" },
+      { id: "x3", type: "AND", ins: ["nS3", "S2", "S1"], out: "E3" },
+      { id: "x4", type: "AND", ins: ["S3", "nS2", "nS1"], out: "E4" },
+      { id: "x5", type: "AND", ins: ["S3", "nS2", "S1"], out: "E5" },
+      { id: "x6", type: "AND", ins: ["S3", "S2", "nS1"], out: "E6" },
+      { id: "x7", type: "AND", ins: ["S3", "S2", "S1"], out: "E7" } ];
+    for (let i = 1; i <= 7; i++) gates.push({ id: "c" + i, type: "XOR", ins: ["R" + i, "E" + i], out: "C" + i });
+    return { inputs: ["R1", "R2", "R3", "R4", "R5", "R6", "R7"],
+      outputs: ["S1", "S2", "S3", "C1", "C2", "C3", "C4", "C5", "C6", "C7"], gates };
+  }
+  const hamEnc = LABE.computeLevels(hamEncoderDef());
+  const hamDec = LABE.computeLevels(hamDecoderDef());
+  function hamEncode(data) { /* data = [D1,D2,D3,D4] */
+    const v = LABE.evaluateAll(hamEnc, { D1: data[0], D2: data[1], D3: data[2], D4: data[3] });
+    return [v.C1, v.C2, v.C3, v.C4, v.C5, v.C6, v.C7];
+  }
+  function hamDecode(recv) { /* recv = 7 bits, positions 1..7 */
+    const ins = {}; recv.forEach((b, i) => ins["R" + (i + 1)] = b);
+    const v = LABE.evaluateAll(hamDec, ins);
+    return { syndrome: v.S1 + 2 * v.S2 + 4 * v.S3, sBits: [v.S3, v.S2, v.S1],
+      corrected: [v.C1, v.C2, v.C3, v.C4, v.C5, v.C6, v.C7],
+      data: [v.C3, v.C5, v.C6, v.C7] };
+  }
+  function hamVerify() {
+    let singleOk = 0, singleTotal = 0, doubleOk = 0, doubleTotal = 0;
+    for (let m = 0; m < 16; m++) {
+      const data = [(m >> 3) & 1, (m >> 2) & 1, (m >> 1) & 1, m & 1];
+      const cw = hamEncode(data);
+      for (let e = 0; e <= 7; e++) {
+        const recv = cw.slice(); if (e) recv[e - 1] ^= 1;
+        const d = hamDecode(recv);
+        singleTotal++;
+        if (d.syndrome === e && d.corrected.join("") === cw.join("") && d.data.join("") === data.join("")) singleOk++;
+      }
+      for (let i = 1; i <= 7; i++) for (let j = i + 1; j <= 7; j++) {
+        const recv = cw.slice(); recv[i - 1] ^= 1; recv[j - 1] ^= 1;
+        const d = hamDecode(recv);
+        doubleTotal++;
+        /* honest double-error behaviour: syndrome is non-zero (an error
+           IS flagged) but the "correction" flips a third, innocent bit,
+           so the recovered data is wrong — detected, not corrected. */
+        if (d.syndrome !== 0 && d.syndrome === (i ^ j) && d.data.join("") !== data.join("")) doubleOk++;
+      }
+    }
+    return { singleOk, singleTotal, doubleOk, doubleTotal, pass: singleOk === singleTotal && doubleOk === doubleTotal };
+  }
+
+  const ham = { data: [1, 0, 1, 1], flips: [] };
+  const hamSec = document.createElement("section");
+  hamSec.className = "card stage-card"; hamSec.id = "hammingCard"; hamSec.style.marginTop = "16px";
+  hamSec.innerHTML =
+    "<h2>Hamming(7,4) — error correction that locates the lie</h2>" +
+    '<p class="what">Four data bits buy three parity bits, and the seven travel together as one codeword: positions <b>1, 2, 4</b> hold parity, positions <b>3, 5, 6, 7</b> hold data (D1 D2 D3 D4). Each parity bit watches a different overlapping set of positions, so when one bit flips in transit, the pattern of failed parity checks — the <b>syndrome</b> — is the binary address of the damaged position. Parity generation and syndrome decoding below are real gate netlists evaluated by this site\'s own engine, the same trick the <b>odd-parity breadboard build</b> does with two XORs, extended until the checks can point. This is also the idea inside ECC memory: extra bits per word so a single-bit upset is repaired instead of crashing the machine.</p>' +
+    '<div class="ctrl-label">Data bits — click to set the message</div>' +
+    '<div class="seq-state" id="hamData" style="margin-top:4px"></div>' +
+    '<div class="ctrl-label" style="margin-top:14px">Sent codeword — computed by the encoder netlist</div>' +
+    '<div class="seq-state" id="hamSent" style="margin-top:4px"></div>' +
+    '<div class="ctrl-label" style="margin-top:14px">In transit — click a position to flip that bit (an error)</div>' +
+    '<div class="seq-state" id="hamRecv" style="margin-top:4px"></div>' +
+    '<div class="share-row"><button type="button" class="btn" id="hamOne">Flip one random bit</button>' +
+    '<button type="button" class="btn" id="hamTwo">Flip two bits — the failure mode</button>' +
+    '<button type="button" class="btn" id="hamClear">Clear errors</button></div>' +
+    '<div class="ctrl-label" style="margin-top:14px">At the receiver — syndrome &amp; correction, from the decoder netlist</div>' +
+    '<div class="seq-state" id="hamSyn" style="margin-top:4px"></div>' +
+    '<div class="seq-state" id="hamCorr" style="margin-top:4px"></div>' +
+    '<div class="decimal-line" id="hamMsg" aria-live="polite"></div>' +
+    '<div class="lab-check"><span class="lab-check-q" id="hamQ"></span><span id="hamOpts" style="display:flex;gap:6px;flex-wrap:wrap"></span><span class="lab-check-fb" id="hamFb" aria-live="polite"></span></div>' +
+    '<div class="share-row"><button type="button" class="btn" id="hamNewQ">New question</button>' +
+    '<button type="button" class="btn" data-hamlink="parity">Open the odd-parity breadboard build →</button>' +
+    '<button type="button" class="btn" data-hamlink="ecc">Where ECC sits: the cache &amp; memory story →</button></div>' +
+    '<p class="cp-formal adv-only">Even parity · P1 = D1⊕D2⊕D4 (positions 1,3,5,7) · P2 = D1⊕D3⊕D4 (2,3,6,7) · P3 = D2⊕D3⊕D4 (4,5,6,7) · syndrome S = S1 + 2·S2 + 4·S3 names the error position, 0 = no error · minimum distance 3: corrects 1, and a 2-bit error is misread as a different 1-bit error — true double-error detection needs an eighth, overall parity bit (SECDED), which this code does not have.</p>';
+  const seqViewEl = $U("seqView");
+  if (seqViewEl && seqViewEl.parentNode) seqViewEl.parentNode.insertBefore(hamSec, seqViewEl.nextSibling);
+  else { const cv = $U("circuitsView"); if (cv) cv.appendChild(hamSec); }
+
+  const HAM_ROLE = ["P1", "P2", "D1", "P3", "D2", "D3", "D4"];
+  function hamCells(el, bits, opts) {
+    opts = opts || {};
+    el.innerHTML = "";
+    bits.forEach((b, i) => {
+      const c = document.createElement(opts.button ? "button" : "div");
+      c.type = "button"; c.className = "seq-cell" + (b ? " one" : "") + (opts.cls ? opts.cls(i) : "");
+      c.innerHTML = "<b>" + b + '</b><span class="ham-role">pos ' + (i + 1) + " · " + HAM_ROLE[i] + "</span>";
+      if (opts.button) c.addEventListener("click", () => opts.button(i));
+      el.appendChild(c);
+    });
+  }
+  function hamReceived() { const cw = hamEncode(ham.data); const r = cw.slice(); ham.flips.forEach(p => r[p - 1] ^= 1); return { cw, recv: r }; }
+  function hamRender() {
+    const dataHost = hamSec.querySelector("#hamData"); dataHost.innerHTML = "";
+    ham.data.forEach((b, i) => {
+      const c = document.createElement("button"); c.type = "button"; c.className = "seq-cell" + (b ? " one" : "");
+      c.innerHTML = "<b>" + b + '</b><span class="ham-role">D' + (i + 1) + "</span>";
+      c.addEventListener("click", () => { ham.data[i] ^= 1; hamRender(); });
+      dataHost.appendChild(c);
+    });
+    const { cw, recv } = hamReceived();
+    hamCells(hamSec.querySelector("#hamSent"), cw, {});
+    hamCells(hamSec.querySelector("#hamRecv"), recv, {
+      button: p => { const i = ham.flips.indexOf(p + 1); if (i >= 0) ham.flips.splice(i, 1); else ham.flips.push(p + 1); hamRender(); },
+      cls: i => ham.flips.indexOf(i + 1) >= 0 ? " flipped" : ""
+    });
+    const d = hamDecode(recv);
+    const syn = hamSec.querySelector("#hamSyn"); syn.innerHTML = "";
+    [["S3", d.sBits[0]], ["S2", d.sBits[1]], ["S1", d.sBits[2]]].forEach(([n, b]) => {
+      const c = document.createElement("div"); c.className = "seq-cell" + (b ? " one" : "");
+      c.innerHTML = "<b>" + b + '</b><span class="ham-role">' + n + "</span>"; syn.appendChild(c);
+    });
+    const sc = document.createElement("div"); sc.className = "seq-cell" + (d.syndrome ? " flipped" : " one");
+    sc.innerHTML = "<b>" + d.syndrome + '</b><span class="ham-role">syndrome = error position</span>'; syn.appendChild(sc);
+    hamCells(hamSec.querySelector("#hamCorr"), d.corrected, {
+      cls: i => d.syndrome === i + 1 && ham.flips.length ? " fixed" : ""
+    });
+    const msg = hamSec.querySelector("#hamMsg");
+    const dataOk = d.data.join("") === ham.data.join("");
+    if (!ham.flips.length) msg.textContent = "No errors: the received word is the sent word, all three parity checks pass, syndrome = 0, and the data reads back " + d.data.join("") + " — exactly what was sent.";
+    else if (ham.flips.length === 1 && dataOk) msg.textContent = "One bit flipped at position " + ham.flips[0] + ". The failed checks give syndrome " + d.sBits.join("") + "₂ = " + d.syndrome + " — the address of the damaged bit. The decoder flips position " + d.syndrome + " back, and the data reads " + d.data.join("") + ": corrected, bit for bit.";
+    else msg.textContent = "TWO bits flipped (positions " + ham.flips.slice().sort((a, b) => a - b).join(" and ") + ") — and the code is fooled. The syndrome is " + d.syndrome + ", so the decoder confidently flips position " + d.syndrome + ", a bit that was never wrong, and hands back data " + d.data.join("") + " instead of " + ham.data.join("") + ". The error is detected (syndrome ≠ 0) but miscorrected: Hamming(7,4) cannot tell a double error from a single one. That is the honest limit — fixing it takes an extra overall parity bit (SECDED), which real ECC memory adds and this code does not have.";
+  }
+  hamSec.querySelector("#hamOne").addEventListener("click", () => {
+    ham.flips = [1 + Math.floor(Math.random() * 7)]; hamRender();
+  });
+  hamSec.querySelector("#hamTwo").addEventListener("click", () => {
+    const a = 1 + Math.floor(Math.random() * 7); let b = 1 + Math.floor(Math.random() * 7);
+    if (b === a) b = a % 7 + 1; ham.flips = [a, b]; hamRender();
+  });
+  hamSec.querySelector("#hamClear").addEventListener("click", () => { ham.flips = []; hamRender(); });
+  hamSec.querySelectorAll("[data-hamlink]").forEach(b => b.addEventListener("click", () => {
+    if (b.dataset.hamlink === "parity") { if (!clickMenuKey("bb-parity")) jumpU("hammingCard"); }
+    else { if (!clickMenuKey("lab-arch-7")) jumpU("hammingCard"); }
+  }));
+  let hamQn = 0;
+  function hamQuestion() {
+    const rng = mulberryU(777 + hamQn * 137);
+    const data = [0, 0, 0, 0].map(() => Math.floor(rng() * 2));
+    if (data.every(v => !v)) data[0] = 1;
+    const pos = 1 + Math.floor(rng() * 7);
+    const cw = hamEncode(data); const recv = cw.slice(); recv[pos - 1] ^= 1;
+    const expected = hamDecode(recv).syndrome;
+    hamSec.querySelector("#hamQ").textContent = "Check: the data " + data.join("") + " is encoded, and in transit exactly one bit flips — position " + pos + ". What position does the syndrome name at the receiver?";
+    const opts = Array.from(new Set([expected, 0, expected % 7 + 1, pos === expected ? (expected + 3) % 8 : pos]));
+    for (let i = opts.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); const t = opts[i]; opts[i] = opts[j]; opts[j] = t; }
+    const host = hamSec.querySelector("#hamOpts"), fb = hamSec.querySelector("#hamFb");
+    host.innerHTML = ""; fb.textContent = "";
+    opts.forEach(v => {
+      const b = document.createElement("button"); b.type = "button"; b.className = "btn"; b.textContent = v === 0 ? "0 — no error" : "Position " + v;
+      b.addEventListener("click", () => {
+        if (v === expected) { fb.textContent = "✓ Right — running that exact word through the decoder netlist gives syndrome " + expected + ": the failed parity checks spell the position in binary."; fb.style.color = "var(--green)"; }
+        else { fb.textContent = "✗ Not that one — set the data bits to " + data.join("") + " above, flip position " + pos + " in transit, and read the syndrome off the receiver row."; fb.style.color = "var(--red)"; }
+      });
+      host.appendChild(b);
+    });
+    window.__hamQuestion = { data, pos, expected };
+  }
+  hamSec.querySelector("#hamNewQ").addEventListener("click", () => { hamQn++; hamQuestion(); });
+  hamRender(); hamQuestion();
+
+  /* ================================================================
+     2) SETUP & HOLD / METASTABILITY
+     This flip-flop: tsu = 15 ns, th = 10 ns, tcq = 12 ns, clock
+     period 100 ns. dt = when D changes, relative to the rising
+     edge (negative = before). Resolution time after a violation
+     grows with how deep into the window the change lands.
+     ================================================================ */
+  const SH = { tsu: 15, th: 10, tcq: 12, period: 100 };
+  function shClassify(dt) {
+    if (dt <= -SH.tsu) return { kind: "clean-early", captured: 1 };
+    if (dt < 0) return { kind: "setup", captured: null, depth: dt + SH.tsu };
+    if (dt === 0) return { kind: "setup", captured: null, depth: SH.tsu };
+    if (dt < SH.th) return { kind: "hold", captured: null, depth: SH.th - dt };
+    return { kind: "clean-late", captured: 0 };
+  }
+  function shResolveTime(dt) {
+    const c = shClassify(dt);
+    if (c.captured !== null) return 0;
+    const span = c.kind === "setup" ? SH.tsu : SH.th;
+    const frac = Math.min(1, (c.depth || 0) / span);
+    return Math.round(10 + frac * frac * 70); /* 10–80 ns in this model: even the deepest violation resolves before the next edge at +100 ns, which is what gives the synchronizer its chance */
+  }
+  function shRun(dt, roll) {
+    const c = shClassify(dt);
+    if (c.captured !== null) return { kind: c.kind, captured: c.captured, tres: 0, resolved: c.captured };
+    const tres = shResolveTime(dt);
+    const resolved = roll < 0.5 ? 0 : 1;
+    return { kind: c.kind, captured: null, tres, resolved };
+  }
+  const sh = { dt: -30, sync: false, result: null };
+  const shSec = document.createElement("section");
+  shSec.className = "card stage-card"; shSec.id = "setupHoldCard"; shSec.style.marginTop = "16px";
+  shSec.innerHTML =
+    "<h2>Setup &amp; hold — the edge has a keep-out zone</h2>" +
+    '<p class="what">A flip-flop samples D at the rising clock edge — but only if D behaved around that instant. D must be stable for the <b>setup time</b> before the edge (here <b>15 ns</b>) and stay stable for the <b>hold time</b> after it (here <b>10 ns</b>). Change D inside that window and the flip-flop cannot decide: its output goes <b>metastable</b> — neither 0 nor 1, an in-between voltage that takes an unpredictable time to resolve. That is shown honestly below: no fake clean bit, just an unresolved output that settles when it settles. It sits beside the sequential pack because every device there quietly assumes you respected this window.</p>' +
+    '<div class="tool-controls">' +
+    '<label style="flex:1;min-width:230px">When D changes (0→1), relative to the rising edge: <b class="mono" id="shDtVal">−30 ns</b>' +
+    '<input type="range" id="shDt" min="-45" max="30" step="1" value="-30" style="width:100%" /></label></div>' +
+    '<div class="share-row">' +
+    '<button type="button" class="btn" data-shpreset="-30">Clean — well before</button>' +
+    '<button type="button" class="btn" data-shpreset="-8">Inside setup window</button>' +
+    '<button type="button" class="btn" data-shpreset="4">Inside hold window</button>' +
+    '<button type="button" class="btn" data-shpreset="22">Clean — after hold</button></div>' +
+    '<div class="schematic-box"><svg id="shSvg" viewBox="0 0 920 316" role="img" aria-label="Timing diagram: clock, data, forbidden setup and hold window, flip-flop output, optional synchronizer output" style="display:block;width:100%;height:auto"></svg></div>' +
+    '<div class="share-row"><button type="button" class="btn primary" id="shRunBtn">Run the clock edge ▸</button>' +
+    '<button type="button" class="btn" id="shSyncBtn" aria-pressed="false">Two-flop synchronizer: off</button></div>' +
+    '<div class="decimal-line" id="shMsg" aria-live="polite"></div>' +
+    '<div class="lab-check"><span class="lab-check-q" id="shQ"></span><span id="shOpts" style="display:flex;gap:6px;flex-wrap:wrap"></span><span class="lab-check-fb" id="shFb" aria-live="polite"></span></div>' +
+    '<div class="share-row"><button type="button" class="btn" id="shNewQ">New question</button>' +
+    '<button type="button" class="btn" data-shlink="seq">Open the sequential pack →</button></div>' +
+    '<p class="timing-note">The synchronizer does not repair the first flip-flop — it still goes metastable. It simply refuses to look at its output for a full clock period, by which time the output has (in this model, and with probability that grows exponentially with the wait in real silicon) resolved. Two flops reduce the failure rate enormously; no finite wait makes it zero. That is why asynchronous inputs — buttons, sensors, other clock domains — are always synchronized, never sampled raw.</p>' +
+    '<p class="cp-formal adv-only">Capture is guaranteed only if D is stable on [edge − tsu, edge + th]. Inside the window the flop\'s internal latch balances at its metastable point; resolution time is exponentially distributed (MTBF ∝ e^(t/τ)), so the model\'s 10–80 ns resolution times are illustrative values for this teaching flop, while the classification — setup violation, hold violation, clean — is computed exactly from tsu and th.</p>';
+  if (seqViewEl && seqViewEl.parentNode) seqViewEl.parentNode.insertBefore(shSec, hamSec.nextSibling || seqViewEl.nextSibling);
+  else { const cv2 = $U("circuitsView"); if (cv2) cv2.appendChild(shSec); }
+  shSec.querySelectorAll("[data-shlink]").forEach(b => b.addEventListener("click", () => { if (!clickMenuKey("seq-pack")) jumpU("seqView"); }));
+
+  function shX(t) { return 110 + (t + 60) * 3.4; } /* t in ns, −60..+170 */
+  function shWave(y, pts) { return pts.map((p, i) => (i ? "L" : "M") + shX(p[0]).toFixed(1) + " " + (y - p[1] * 26)).join(" "); }
+  function shDraw() {
+    const svg = shSec.querySelector("#shSvg");
+    const dt = sh.dt, res = sh.result;
+    const x0 = shX(-SH.tsu), x1 = shX(SH.th);
+    let s = "";
+    s += '<rect class="sh-win" x="' + x0 + '" y="18" width="' + (x1 - x0) + '" height="' + (sh.sync ? 268 : 196) + '"/>';
+    s += '<text class="sh-vlab" x="' + ((x0 + x1) / 2) + '" y="14" style="text-anchor:middle">keep-out: −15…+10 ns</text>';
+    [-60, -30, 0, 30, 60, 90, 120, 150].forEach(t => { s += '<line class="sh-grid" x1="' + shX(t) + '" y1="18" x2="' + shX(t) + '" y2="' + (sh.sync ? 286 : 214) + '"/><text class="sh-sub" x="' + shX(t) + '" y="' + (sh.sync ? 302 : 230) + '" style="text-anchor:middle">' + (t === 0 ? "edge · 0" : (t > 0 ? "+" + t : "" + t)) + "</text>"; });
+    /* CLK: low until 0, high 0..100, low after (next rising edge at +100 marked when sync) */
+    s += '<text class="sh-lab" x="14" y="52">CLK</text>';
+    s += '<path class="sh-clk" d="' + shWave(66, [[-60, 0], [0, 0], [0, 1], [100, 1], [100, 0], [170, 0]]) + '"/>';
+    if (sh.sync) s += '<text class="sh-sub" x="' + shX(100) + '" y="34" style="text-anchor:middle">next edge</text>';
+    /* D */
+    s += '<text class="sh-lab" x="14" y="122">D</text>';
+    s += '<path class="sh-data" d="' + shWave(136, [[-60, 0], [dt, 0], [dt, 1], [170, 1]]) + '"/>';
+    s += '<text class="sh-sub" x="' + Math.min(shX(dt) + 6, 880) + '" y="106">D changes at ' + (dt > 0 ? "+" + dt : "" + dt) + " ns</text>";
+    /* Q */
+    s += '<text class="sh-lab" x="14" y="192">' + (sh.sync ? "Q1" : "Q") + "</text>";
+    if (!res) {
+      s += '<path class="sh-qmeta" d="M' + shX(-60) + " 206 H" + shX(170) + '"/><text class="sh-sub" x="' + shX(-58) + '" y="182">press “Run the clock edge” — the outcome is decided at the edge, not before</text>';
+    } else if (res.captured !== null && res.kind === "clean-early") {
+      s += '<path class="sh-q" d="' + shWave(206, [[-60, 0], [SH.tcq, 0], [SH.tcq, 1], [170, 1]]) + '"/>';
+    } else if (res.captured !== null && sh.sync) {
+      /* Q1 in synchronizer mode: it captures the new 1 at the +100 edge */
+      s += '<path class="sh-q" d="' + shWave(206, [[-60, 0], [100 + SH.tcq, 0], [100 + SH.tcq, 1], [170, 1]]) + '"/>';
+    } else if (res.captured !== null) {
+      s += '<path class="sh-q" d="' + shWave(206, [[-60, 0], [170, 0]]) + '"/>';
+    } else {
+      const tx = SH.tcq, rx = SH.tcq + res.tres;
+      s += '<path class="sh-q" d="' + shWave(206, [[-60, 0], [tx, 0]]) + '"/>';
+      s += '<path class="sh-qmeta" d="M' + shX(tx) + " 193 L" + shX(Math.min(rx, 170)) + " 193\"/><path class=\"sh-qmeta\" d=\"M" + shX(tx) + " 206 L" + shX(Math.min(rx, 170)) + " 206\"/>" +
+        '<text class="sh-vlab" x="' + shX(tx + 3) + '" y="182">✕ metastable — not 0, not 1 (' + res.tres + " ns to resolve)</text>";
+      if (rx <= 170) s += '<path class="sh-q" d="' + shWave(206, [[rx, res.resolved], [170, res.resolved]]) + '"/>' +
+        '<circle cx="' + shX(rx) + '" cy="' + (206 - res.resolved * 26) + '" r="4" style="fill:var(--red)"/>';
+    }
+    /* Q2 for synchronizer */
+    if (sh.sync) {
+      s += '<text class="sh-lab" x="14" y="262">Q2</text>';
+      if (!res) s += '<path class="sh-qmeta" d="M' + shX(-60) + " 276 H" + shX(170) + '"/>';
+      else if (res.captured !== null && res.kind === "clean-late") { s += '<path class="sh-q" d="' + shWave(276, [[-60, 0], [170, 0]]) + '"/>'; s += '<text class="sh-sub" x="908" y="252" style="text-anchor:end">FF2 took Q1\'s old 0 at +100 — the 1 reaches Q2 at +212 ns (off-diagram)</text>'; }
+      else if (res.captured !== null) s += '<path class="sh-q" d="' + shWave(276, [[-60, 0], [100 + SH.tcq, 0], [100 + SH.tcq, 1], [170, 1]]) + '"/>';
+      else {
+        const q2 = res.tres + SH.tcq <= SH.period ? res.resolved : res.resolved;
+        s += '<path class="sh-q" d="' + shWave(276, [[-60, 0], [100 + SH.tcq, 0], [100 + SH.tcq, q2], [170, q2]]) + '"/>';
+        s += '<text class="sh-sub" x="908" y="252" style="text-anchor:end">FF2 samples Q1 a full period later — resolved at +' + (SH.tcq + res.tres) + " ns, in time</text>";
+      }
+    }
+    svg.innerHTML = s;
+    shSec.querySelector("#shDtVal").textContent = (dt > 0 ? "+" + dt : dt === 0 ? "0" : "−" + Math.abs(dt)) + " ns";
+  }
+  function shVerdict() {
+    const res = sh.result, msg = shSec.querySelector("#shMsg");
+    if (!res) { msg.textContent = "D is set to change at " + sh.dt + " ns relative to the edge. Press Run — classification is computed from tsu = 15 ns and th = 10 ns, not guessed."; return; }
+    if (res.kind === "clean-early") msg.textContent = "Clean capture: D changed at " + sh.dt + " ns, a full " + Math.abs(sh.dt + SH.tsu) + " ns before the setup window even opens. Q takes the new value 1, one clock-to-Q (" + SH.tcq + " ns) after the edge.";
+    else if (res.kind === "clean-late") msg.textContent = "Clean — but of the OLD value: D changed at +" + sh.dt + " ns, after the hold window closed at +" + SH.th + " ns, so this edge captures the old 0. The new 1 is not lost; the next edge (" + (sh.sync ? "shown rising in Q1 above — Q2 follows it one edge later" : "100 ns later") + ") captures it. Late is safe; only inside the window is dangerous.";
+    else {
+      const base = (res.kind === "setup" ? "Setup violation" : "Hold violation") + ": D changed at " + (sh.dt > 0 ? "+" + sh.dt : "" + sh.dt) + " ns, inside the keep-out window. Q went metastable at the edge and stayed unresolved for " + res.tres + " ns before settling to " + res.resolved + " — run it again and it may settle the other way; that coin-flip is the failure, whichever side lands.";
+      msg.textContent = sh.sync ? base + " The synchronizer's second flop samples Q1 at +100 ns: Q1 resolved at +" + (SH.tcq + res.tres) + " ns, so Q2 comes out a clean " + res.resolved + ". Fixed in practice — the first flop was not fixed at all, merely given time." : base + " Anything reading Q during those " + res.tres + " ns reads a voltage that is neither 0 nor 1. Turn on the two-flop synchronizer and run the same edge.";
+    }
+  }
+  shSec.querySelector("#shDt").addEventListener("input", e => { sh.dt = +e.target.value; sh.result = null; shDraw(); shVerdict(); });
+  shSec.querySelectorAll("[data-shpreset]").forEach(b => b.addEventListener("click", () => {
+    sh.dt = +b.dataset.shpreset; shSec.querySelector("#shDt").value = sh.dt; sh.result = null; shDraw(); shVerdict();
+  }));
+  shSec.querySelector("#shRunBtn").addEventListener("click", () => { sh.result = shRun(sh.dt, Math.random()); shDraw(); shVerdict(); });
+  shSec.querySelector("#shSyncBtn").addEventListener("click", e => {
+    sh.sync = !sh.sync; e.target.textContent = "Two-flop synchronizer: " + (sh.sync ? "on" : "off");
+    e.target.setAttribute("aria-pressed", sh.sync ? "true" : "false"); shDraw(); shVerdict();
+  });
+  let shQn = 0;
+  function shQuestion() {
+    const rng = mulberryU(4242 + shQn * 97);
+    const choices = [-32, -22, -9, -3, 0, 4, 7, 18, 26];
+    const dt = choices[Math.floor(rng() * choices.length)];
+    const c = shClassify(dt);
+    const labels = { "clean-early": "Clean capture — the new value 1 is taken", "setup": "Setup-time violation — Q may go metastable", "hold": "Hold-time violation — Q may go metastable", "clean-late": "Clean capture — the OLD value 0 is taken (new value waits one cycle)" };
+    const expected = labels[c.kind];
+    shSec.querySelector("#shQ").textContent = "Check: set the slider so D changes at " + (dt > 0 ? "+" + dt : "" + dt) + " ns and run the edge. With tsu = 15 ns and th = 10 ns, what happens?";
+    const host = shSec.querySelector("#shOpts"), fb = shSec.querySelector("#shFb");
+    host.innerHTML = ""; fb.textContent = "";
+    Object.keys(labels).map(k => labels[k]).forEach(txt => {
+      const b = document.createElement("button"); b.type = "button"; b.className = "btn"; b.textContent = txt;
+      b.addEventListener("click", () => {
+        if (txt === expected) { fb.textContent = "✓ Right — " + dt + " ns falls in the " + (c.kind === "setup" || c.kind === "hold" ? c.kind + " window" : "clean zone") + " by the model's own arithmetic against tsu and th."; fb.style.color = "var(--green)"; }
+        else { fb.textContent = "✗ Not that — measure " + dt + " ns against the window [−15, +10]: at or before −15 is a clean new-value capture, strictly after −15 up to 0 is setup, strictly after 0 up to +10 is hold, at or after +10 a clean old-value capture."; fb.style.color = "var(--red)"; }
+      });
+      host.appendChild(b);
+    });
+    window.__shQuestion = { dt, kind: c.kind, expected };
+  }
+  shSec.querySelector("#shNewQ").addEventListener("click", () => { shQn++; shQuestion(); });
+  shDraw(); shVerdict(); shQuestion();
+
+  /* ================================================================
+     3) DMA CONTROLLER — one block transfer, three ways.
+     The model (stated on the card, and the ONLY source of numbers):
+       device prepares one word every I cycles;
+       PIO:  CPU busy-waits polling for the word (I cycles), then
+             spends S = 6 cycles moving it (IN, STORE, count, loop);
+       INT:  CPU is free while the device prepares; each word costs
+             one interrupt: H = 14 cycles (entry, move, exit);
+       DMA:  CPU pays SETUP = 24 cycles once (address, count, go)
+             and DONE = 12 cycles once (completion interrupt);
+             the engine moves each word in W = 2 bus cycles, stolen
+             from the bus (CPU stalls only if it needs the bus).
+     dmaSim totals and the stepper use the same increments.
+     ================================================================ */
+  const DMA = { S: 6, H: 14, SETUP: 24, DONE: 12, W: 2 };
+  function dmaSim(N, I) {
+    const pio = { elapsed: N * (I + DMA.S), busy: N * (I + DMA.S), stolen: 0 };
+    pio.free = pio.elapsed - pio.busy;
+    const intr = { elapsed: N * Math.max(I, DMA.H) + DMA.H, busy: N * DMA.H, stolen: 0 }; /* if the 14-cycle handler ever outlasts the device interval, the CPU becomes the bottleneck and elapsed stretches to match */
+    intr.free = intr.elapsed - intr.busy;
+    const dma = { elapsed: N * I + DMA.DONE, busy: DMA.SETUP + DMA.DONE, stolen: N * DMA.W };
+    dma.free = dma.elapsed - dma.busy;
+    return { pio, intr, dma };
+  }
+  const dm = { N: 32, I: 24, method: "dma", moved: 0, elapsed: 0, busy: 0, stolen: 0, setupDone: false, doneDone: false, timer: null };
+  const dmSec = document.createElement("section");
+  dmSec.className = "card stage-card"; dmSec.id = "dmaCard"; dmSec.style.marginBottom = "16px";
+  dmSec.innerHTML =
+    "<h2>DMA controller — the transfer the CPU does not carry</h2>" +
+    '<p class="what">A peripheral has a block of words for memory. Somebody has to move every word — the question is who, and what the CPU is doing meanwhile. Run the <b>same transfer</b> three ways on one cycle model: <b>programmed I/O</b> (the CPU polls the device and carries each word itself), <b>interrupt-driven I/O</b> (the device prepares in peace; the CPU is interrupted once per word to carry it), and <b>DMA</b> (the CPU programs a DMA engine once — start address, count, go — and the engine moves the whole block, interrupting only when finished). Every number below comes from the model stated in the Details fold; the stepper and the comparison table accumulate the same increments, so they cannot disagree. This is where the <b>address-decoding lab\'s</b> memory-mapped port grows up: the DMA engine is one more bus master beside the CPU, and the tiny SAP-1 CPU in the Architecture capstone is exactly the kind of CPU being rescued here.</p>' +
+    '<div class="tool-controls">' +
+    '<label>Block size <select id="dmN" class="tool-num" style="width:auto"><option>8</option><option>16</option><option selected>32</option><option>64</option></select> words</label>' +
+    '<label>Device interval <select id="dmI" class="tool-num" style="width:auto"><option>12</option><option selected>24</option><option>48</option></select> cycles per word</label>' +
+    '<span><span class="ctrl-label" style="display:block">Method</span><span class="seg" role="group" aria-label="Transfer method" id="dmMethod">' +
+    '<button type="button" data-dmm="pio" aria-pressed="false">Programmed I/O</button>' +
+    '<button type="button" data-dmm="intr" aria-pressed="false">Interrupt-driven</button>' +
+    '<button type="button" data-dmm="dma" aria-pressed="true">DMA</button></span></span></div>' +
+    '<div class="share-row"><button type="button" class="btn primary" id="dmStep">Step one word ▸</button>' +
+    '<button type="button" class="btn" id="dmRun">▶ Run the transfer</button>' +
+    '<button type="button" class="btn" id="dmReset">Reset</button></div>' +
+    '<div class="ctrl-label" style="margin-top:12px">Peripheral buffer → memory (<span id="dmMovedLab">0 of 32 words home</span>)</div>' +
+    '<div class="dma-words" id="dmWords"></div>' +
+    '<div class="seq-state"><div class="seq-cell"><b id="dmElapsed">0</b>elapsed cycles</div>' +
+    '<div class="seq-cell one"><b id="dmBusy">0</b>CPU busy cycles</div>' +
+    '<div class="seq-cell"><b id="dmFree">0</b>CPU free cycles</div>' +
+    '<div class="seq-cell"><b id="dmStolen">0</b>bus cycles stolen (DMA)</div></div>' +
+    '<div class="decimal-line" id="dmMsg" aria-live="polite"></div>' +
+    '<div class="ctrl-label" style="margin-top:14px">The same transfer, all three ways — computed by the model</div>' +
+    '<div id="dmCompare"></div>' +
+    '<div class="lab-check"><span class="lab-check-q" id="dmQ"></span><span id="dmOpts" style="display:flex;gap:6px;flex-wrap:wrap"></span><span class="lab-check-fb" id="dmFb" aria-live="polite"></span></div>' +
+    '<div class="share-row"><button type="button" class="btn" id="dmNewQ">New question</button>' +
+    '<button type="button" class="btn" data-dmlink="addr">Address decoding &amp; memory-mapped I/O →</button>' +
+    '<button type="button" class="btn" data-dmlink="sap">The SAP-1 CPU this rescues →</button>' +
+    '<button type="button" class="btn" data-dmlink="race">Same lesson, threads: the Race →</button></div>' +
+    '<details class="details-disclosure"><summary>Details — the cycle model (every number on this card comes from here)</summary>' +
+    '<p class="proj-teaches">The device prepares one word every <b>I</b> cycles — hardware speed, the same for all three methods, which is why the elapsed times are close: the device, not the mover, is the bottleneck. <b>Programmed I/O:</b> the CPU busy-waits in a poll loop for those I cycles (it can do nothing else — polling IS the waiting), then spends 6 cycles per word moving it: IN from the port, STORE to memory, increment, compare, branch. CPU busy = elapsed; free time is zero by construction. <b>Interrupt-driven:</b> the CPU does other work while the device prepares, then pays 14 cycles per word — interrupt entry (save context), read the port, store, restore, return. <b>DMA:</b> the CPU pays 24 cycles once to write the engine\'s address, count and control registers (memory-mapped, exactly like the I/O port in the decoding lab), plus a 12-cycle completion interrupt at the end. The engine then transfers each word in 2 bus cycles (one read, one write) by <b>cycle stealing</b>: it takes the bus briefly per word while the CPU keeps computing from its registers and cache, stalling only if it reaches for the bus at that moment. Real engines also burst whole blocks, which trades longer CPU stalls for fewer arbitrations — the model here is the gentler cycle-stealing mode.</p></details>';
+  const raceEl = $U("raceCard");
+  if (raceEl && raceEl.parentNode) raceEl.parentNode.insertBefore(dmSec, raceEl.nextSibling);
+  else { const osEl = $U("sysOs"); if (osEl) osEl.appendChild(dmSec); }
+  dmSec.querySelectorAll("[data-dmlink]").forEach(b => b.addEventListener("click", () => {
+    const k = b.dataset.dmlink;
+    if (k === "addr") { if (!clickMenuKey("addr-decode")) jumpU("addrCard"); }
+    else if (k === "sap") { if (!clickMenuKey("lab-arch-10")) jumpU("dmaCard"); }
+    else jumpU("raceCard");
+  }));
+  function dmStop() { if (dm.timer) { clearInterval(dm.timer); dm.timer = null; dmSec.querySelector("#dmRun").textContent = "▶ Run the transfer"; } }
+  function dmReset() {
+    dmStop(); dm.moved = 0; dm.elapsed = 0; dm.busy = 0; dm.stolen = 0; dm.setupDone = false; dm.doneDone = false;
+    dmRender("Reset. The peripheral holds " + dm.N + " words; memory is empty. Step or run — the counters accumulate the model's own increments.");
+  }
+  function dmFinishIfDone() {
+    if (dm.moved < dm.N || dm.doneDone) return;
+    dm.doneDone = true;
+    if (dm.method === "intr") { /* the last word's interrupt was already counted per word; no tail in this model */ }
+    if (dm.method === "dma") { dm.elapsed += DMA.DONE; dm.busy += DMA.DONE; }
+    dmStop();
+  }
+  function dmStep() {
+    if (dm.moved >= dm.N) { dmFinishIfDone(); dmRender(); return; }
+    if (dm.method === "dma" && !dm.setupDone) {
+      dm.setupDone = true; dm.busy += DMA.SETUP; dm.elapsed += 0;
+      dmRender("Setup: the CPU writes the DMA engine's registers — memory address, word count " + dm.N + ", and GO — " + DMA.SETUP + " cycles of CPU time, once. From here the engine works alone; watch the CPU-busy counter barely move.");
+      return;
+    }
+    dm.moved++;
+    if (dm.method === "pio") { dm.elapsed += dm.I + DMA.S; dm.busy += dm.I + DMA.S; }
+    else if (dm.method === "intr") { dm.elapsed += Math.max(dm.I, DMA.H); dm.busy += DMA.H; if (dm.moved === dm.N) dm.elapsed += DMA.H; }
+    else { dm.elapsed += dm.I; dm.stolen += DMA.W; }
+    let msg;
+    if (dm.method === "pio") msg = "Word " + dm.moved + " of " + dm.N + ": the CPU polled for " + dm.I + " cycles (busy-waiting — that time is gone, not shared), then spent " + DMA.S + " cycles carrying the word itself.";
+    else if (dm.method === "intr") msg = "Word " + dm.moved + " of " + dm.N + ": the device prepared it while the CPU did other work for " + dm.I + " cycles; the interrupt then cost the CPU " + DMA.H + " cycles to carry the word.";
+    else msg = "Word " + dm.moved + " of " + dm.N + ": the DMA engine moved it in " + DMA.W + " stolen bus cycles while the device prepared the next over " + dm.I + " cycles. CPU involvement so far: the setup only.";
+    if (dm.moved >= dm.N) {
+      dmFinishIfDone();
+      const t = dmaSim(dm.N, dm.I)[dm.method === "intr" ? "intr" : dm.method];
+      msg = "Transfer complete — " + dm.N + " words home. This run: elapsed " + dm.elapsed + " cycles, CPU busy " + dm.busy + ", CPU free " + (dm.elapsed - dm.busy) + ". The table below prices all three methods on the same model — switch method and run the identical block to feel the difference the counters describe.";
+    }
+    dmRender(msg);
+  }
+  function dmRender(msg) {
+    const w = dmSec.querySelector("#dmWords"); w.innerHTML = "";
+    for (let i = 0; i < dm.N; i++) { const s = document.createElement("span"); if (i < dm.moved) s.className = "moved"; s.textContent = i + 1; w.appendChild(s); }
+    dmSec.querySelector("#dmMovedLab").textContent = dm.moved + " of " + dm.N + " words home";
+    dmSec.querySelector("#dmElapsed").textContent = dm.elapsed;
+    dmSec.querySelector("#dmBusy").textContent = dm.busy;
+    dmSec.querySelector("#dmFree").textContent = Math.max(0, dm.elapsed - dm.busy);
+    dmSec.querySelector("#dmStolen").textContent = dm.stolen;
+    if (msg) dmSec.querySelector("#dmMsg").textContent = msg;
+    const sim = dmaSim(dm.N, dm.I);
+    const rows = [["Programmed I/O", sim.pio], ["Interrupt-driven", sim.intr], ["DMA", sim.dma]];
+    const maxE = Math.max(sim.pio.elapsed, sim.intr.elapsed, sim.dma.elapsed);
+    dmSec.querySelector("#dmCompare").innerHTML = rows.map(([name, r]) =>
+      '<div style="font-size:13px;margin-top:8px"><b>' + name + '</b> — elapsed ' + r.elapsed + " cycles · CPU busy " + r.busy + " · CPU free " + r.free + (r.stolen ? " · bus stolen " + r.stolen : "") +
+      '</div><div class="dma-bar"><i class="b-busy" style="width:' + Math.max(1, Math.round(r.busy / maxE * 100)) + '%"></i><i class="b-free" style="width:' + Math.round(r.free / maxE * 100) + '%"></i></div>').join("") +
+      '<p style="font-size:12.5px;color:var(--muted);margin:2px 0 0">Amber = CPU busy · teal = CPU free to do other work. Elapsed barely changes across methods — the device sets the pace. What changes is who pays for the wait.</p>';
+  }
+  dmSec.querySelector("#dmMethod").querySelectorAll("[data-dmm]").forEach(b => b.addEventListener("click", () => {
+    dm.method = b.dataset.dmm;
+    dmSec.querySelector("#dmMethod").querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x === b ? "true" : "false"));
+    dmReset();
+  }));
+  dmSec.querySelector("#dmN").addEventListener("change", e => { dm.N = +e.target.value; dmReset(); dmQuestion(); });
+  dmSec.querySelector("#dmI").addEventListener("change", e => { dm.I = +e.target.value; dmReset(); dmQuestion(); });
+  dmSec.querySelector("#dmStep").addEventListener("click", () => { dmStop(); dmStep(); });
+  dmSec.querySelector("#dmReset").addEventListener("click", dmReset);
+  dmSec.querySelector("#dmRun").addEventListener("click", e => {
+    if (dm.timer) { dmStop(); return; }
+    if (dm.moved >= dm.N && dm.doneDone) dmReset();
+    e.target.textContent = "❚❚ Pause";
+    dm.timer = setInterval(() => { dmStep(); if (dm.moved >= dm.N && dm.doneDone) dmStop(); }, 260);
+  });
+  let dmQn = 0;
+  function dmQuestion() {
+    const sim = dmaSim(dm.N, dm.I);
+    const expected = sim.dma.busy;
+    dmSec.querySelector("#dmQ").textContent = "Check: for this block (" + dm.N + " words, device interval " + dm.I + " cycles), how many cycles is the CPU busy across the WHOLE DMA transfer — setup and completion interrupt included?";
+    const cand = Array.from(new Set([expected, sim.intr.busy, sim.pio.busy, sim.dma.elapsed]));
+    const rng = mulberryU(31337 + dmQn * 71);
+    for (let i = cand.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); const t = cand[i]; cand[i] = cand[j]; cand[j] = t; }
+    const host = dmSec.querySelector("#dmOpts"), fb = dmSec.querySelector("#dmFb");
+    host.innerHTML = ""; fb.textContent = "";
+    cand.forEach(v => {
+      const b = document.createElement("button"); b.type = "button"; b.className = "btn"; b.textContent = v + " cycles";
+      b.addEventListener("click", () => {
+        if (v === expected) { fb.textContent = "✓ Right — the model charges DMA exactly two CPU costs: " + DMA.SETUP + " cycles of setup + " + DMA.DONE + " cycles for the completion interrupt = " + expected + ". The per-word work is the engine's, not the CPU's."; fb.style.color = "var(--green)"; }
+        else { fb.textContent = "✗ That is a different method's number — read the three rows in the comparison table: DMA's CPU-busy figure is the one that does not grow with the block size."; fb.style.color = "var(--red)"; }
+      });
+      host.appendChild(b);
+    });
+    window.__dmaQuestion = { N: dm.N, I: dm.I, expected };
+  }
+  dmSec.querySelector("#dmNewQ").addEventListener("click", () => { dmQn++; dmQuestion(); });
+  dmRender("The peripheral holds " + dm.N + " words; memory is empty. DMA is selected: step once for the setup, then watch the engine carry the block while the CPU-busy counter stays almost still.");
+  dmQuestion();
+
+  /* ================= verification handles ================= */
+  window.__hamCheck = { encode: hamEncode, decode: hamDecode, verify: hamVerify };
+  window.__shCheck = { classify: shClassify, run: shRun, resolveTime: shResolveTime, params: SH };
+  window.__dmaCheck = { sim: dmaSim, consts: DMA, state: () => ({ moved: dm.moved, elapsed: dm.elapsed, busy: dm.busy, stolen: dm.stolen, method: dm.method, N: dm.N, I: dm.I }) };
+
+  /* ================= MENU REGISTRATION + COUNT REBUILD ================= */
+  function addMenuItemU(groupName, afterKey, spec) {
+    const list = $U("menuList"); if (!list) return false;
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "menu-item"; b.dataset.key = spec.key;
+    b.dataset.search = (spec.label + " " + spec.hint + " " + spec.search).toLowerCase();
+    if (spec.level) b.dataset.uxlevel = spec.level;
+    b.innerHTML = '<span class="mi-dot" aria-hidden="true"></span><span class="mi-label"></span><small></small>';
+    b.querySelector(".mi-label").textContent = spec.label;
+    b.querySelector("small").textContent = spec.hint;
+    b.addEventListener("click", () => { const p = $U("menuPanel"); if (p) p.hidden = true; const mb = $U("menuBtn"); if (mb) mb.setAttribute("aria-expanded", "false"); spec.go(); });
+    if (afterKey) {
+      const anchor = list.querySelector('[data-key="' + afterKey + '"]');
+      if (anchor) { anchor.parentNode.insertBefore(b, anchor.nextSibling); return true; }
+    }
+    let sib = null, inGroup = false;
+    Array.prototype.slice.call(list.children).forEach(el => {
+      if (el.classList.contains("menu-group")) inGroup = (el.dataset.group || "").trim() === groupName;
+      else if (inGroup && el.classList.contains("menu-item")) sib = el;
+    });
+    if (sib) sib.parentNode.insertBefore(b, sib.nextSibling); else list.appendChild(b);
+    return true;
+  }
+  addMenuItemU("Logic & Circuits", null, {
+    key: "hamming-ecc", label: "Hamming(7,4) error-correction lab",
+    hint: "Encode 4 bits with 3 parity bits, inject an error, watch the syndrome find and fix it",
+    search: "hamming 7,4 error correction ecc parity syndrome codeword single error double error sec ded memory simulator",
+    level: "intermediate",
+    go: () => { setTopArea("circuits"); syncRail("circuits"); jumpU("hammingCard"); }
+  });
+  addMenuItemU("Logic & Circuits", "hamming-ecc", {
+    key: "setup-hold", label: "Setup & hold — metastability lab",
+    hint: "Change data inside the forbidden window and watch the flip-flop output go metastable, then fix it with a synchronizer",
+    search: "setup hold time metastability flip-flop timing window violation synchronizer two flop clock edge simulator sequential",
+    level: "intermediate",
+    go: () => { setTopArea("circuits"); syncRail("circuits"); jumpU("setupHoldCard"); }
+  });
+  addMenuItemU("Operating Systems", "os-race", {
+    key: "dma-controller", label: "DMA controller lab",
+    hint: "One block transfer three ways — programmed I/O, interrupts, DMA — with cycle counts and CPU-free time side by side",
+    search: "dma direct memory access controller programmed io interrupt driven cycle stealing bus peripheral transfer cpu free simulator os architecture",
+    level: "intermediate",
+    go: () => { setTopArea("systems"); syncRail("systems"); const pb = document.querySelector('#sysPicker [data-sys="os"]'); if (pb) pb.click(); jumpU("dmaCard"); }
+  });
+  (function rebuildCountsU() {
+    const RJ = window.__uxRoundJ; if (!RJ) return;
+    const groups = RJ.menuGroups(); const counts = {}; let total = 0;
+    groups.forEach(g => {
+      counts[g.name] = g.items.length; total += g.items.length;
+      const c = g.header.querySelector(".mi-count"); if (c) c.textContent = g.items.length;
+    });
+    window.LAB_MENU = { groups: groups.map(g => ({ name: g.name, items: g.items.map(b => { const l = b.querySelector(".mi-label"); return l ? l.textContent : ""; }) })), count: total };
+    window.LAB_MODULES = { modules: groups.map(g => ({ name: g.name, count: g.items.length })), total };
+    RJ.buildRailAndList(counts);
+    RJ.buildGallery();
+    ["boards", "arch", "os", "org"].forEach(id => {
+      const h = document.querySelector("#module-" + id + " .mh-count");
+      if (!h) return;
+      const name = { boards: "Boards, Modulation & Projects", arch: "Computer Architecture", os: "Operating Systems", org: "Computer Organization" }[id];
+      if (counts[name]) h.textContent = counts[name] + " items";
+    });
+    window.__countsU = { total, counts };
+  })();
+})();
+</script>
