@@ -15480,6 +15480,15 @@ html[data-theme="blueprint"]{--crit:#fda4af}
 .addr-dev{flex:1 1 180px}
 .addr-bits{font-family:"IBM Plex Mono",monospace;color:var(--muted);font-size:12px;flex:none}
 .addr-hex{font:inherit;font-family:"IBM Plex Mono",monospace;font-size:15px;padding:8px 10px;border:1px solid var(--line2);border-radius:8px;background:var(--panel);color:var(--ink);width:130px;max-width:100%}
+.race-threads{display:flex;gap:12px;flex-wrap:wrap;margin-top:12px}
+.race-thread{flex:1 1 250px;border:1.6px solid var(--line2);border-radius:9px;background:var(--panel2);padding:10px 12px}
+.race-thead{font-size:15px}
+.race-status{color:var(--muted);font-size:13px;font-weight:600}
+.race-steps{list-style:none;margin:8px 0 2px;padding:0;font-size:13.5px;line-height:1.5}
+.race-steps li{padding:5px 9px;border-radius:7px}
+.race-steps li.next{background:var(--amber-soft);box-shadow:inset 0 0 0 1.6px var(--amber);font-weight:700}
+.race-steps li.done{color:var(--muted)}
+.race-callout{border:1.6px solid var(--red);border-radius:9px;background:var(--panel2);padding:10px 12px;margin-top:10px;font-size:14px;line-height:1.55}
 </style>
 <script>
 "use strict";
@@ -15945,6 +15954,207 @@ html[data-theme="blueprint"]{--crit:#fda4af}
   adSec.querySelector("#addrNewQ").addEventListener("click", () => { AD.qn++; adQuestion(); });
   adPaint(); adQuestion();
 
+  /* ================= THE RACE — TWO THREADS, ONE COUNTER =================
+     A thread-interleaving stepper for the OS module, placed beside the
+     scheduling simulator. One small-step engine (raceStep) drives
+     everything on the card: the Step buttons, the auto-run, and the
+     check question — which runs its stated interleaving through
+     raceRun and marks whatever the engine produces, never a stored
+     key. A lost update is detected from state, not from the step
+     string: a STORE whose thread loaded a value the shared counter
+     has since moved away from is overwriting the other thread's
+     already-stored increment. */
+  function raceFresh(useLock) {
+    return {
+      useLock: !!useLock, counter: 0, holder: null, seq: [], lost: false, lostInfo: null,
+      threads: { A: { pc: 0, reg: null, loadedVal: null }, B: { pc: 0, reg: null, loadedVal: null } }
+    };
+  }
+  function raceStep(st, t) {
+    const th = st.threads[t];
+    if (th.pc >= 3) return "done";
+    if (st.useLock && st.holder && st.holder !== t) return "blocked";
+    if (st.useLock && !st.holder) st.holder = t;
+    const n = th.pc + 1;
+    if (n === 1) { th.reg = st.counter; th.loadedVal = st.counter; }
+    else if (n === 2) { th.reg = th.reg + 1; }
+    else {
+      if (st.counter !== th.loadedVal && !st.lost) {
+        st.lost = true;
+        st.lostInfo = { by: t, other: t === "A" ? "B" : "A", loadedVal: th.loadedVal, wrote: th.reg };
+      }
+      st.counter = th.reg;
+      if (st.useLock && st.holder === t) st.holder = null;
+    }
+    th.pc++;
+    st.seq.push(t + n);
+    return "ok";
+  }
+  function raceRun(letters, useLock) {
+    const st = raceFresh(useLock);
+    letters.forEach(t => raceStep(st, t));
+    return st;
+  }
+  const RACE_STEPS = [
+    "LOAD — copy the shared counter into my own register",
+    "ADD — add 1 to my register (the shared counter is untouched)",
+    "STORE — write my register back over the shared counter"
+  ];
+  const RACE_START_MSG = "The counter starts at 0 and both registers are empty. Step Thread A or Thread B — you choose who runs next, one instruction at a time.";
+  let RS = raceFresh(false);
+  let raceMsg = RACE_START_MSG;
+  let raceBlocked = null;
+  let raceTimer = null;
+
+  const raceSec = document.createElement("section");
+  raceSec.className = "card stage-card"; raceSec.id = "raceCard"; raceSec.style.marginBottom = "16px";
+  raceSec.innerHTML =
+    "<h2>The Race: two threads, one counter</h2>" +
+    '<p class="what">Two threads run the <b>same three steps</b> on one shared counter that starts at 0: <b>LOAD</b> the counter into a private register, <b>ADD 1</b> to the register, <b>STORE</b> the register back. But <span class="mono">counter++</span> is not one indivisible operation, and the scheduler can switch threads between any two steps. You pick the interleaving: step either thread, watch the registers and the counter, and find the order that loses an update — then turn the lock on and try to break it again.</p>' +
+    '<div class="share-row">' +
+    '<button type="button" class="btn primary" id="raceStepA">Step Thread A ▸</button>' +
+    '<button type="button" class="btn primary" id="raceStepB">Step Thread B ▸</button>' +
+    '<button type="button" class="btn" id="raceReset">Reset</button>' +
+    '<button type="button" class="btn" id="raceLock" aria-pressed="false">Use a lock: off</button>' +
+    '<button type="button" class="btn" id="racePlay">▶ Auto-run</button></div>' +
+    '<div class="seq-state">' +
+    '<div class="seq-cell one"><b id="raceCounter">0</b>shared counter</div>' +
+    '<div class="seq-cell"><b id="raceRegA">—</b>Thread A register</div>' +
+    '<div class="seq-cell"><b id="raceRegB">—</b>Thread B register</div>' +
+    '<div class="seq-cell" id="raceLockCell" hidden><b id="raceLockState">free</b>the lock</div></div>' +
+    '<div class="race-threads">' +
+    '<div class="race-thread"><div class="race-thead"><b>Thread A</b><span class="race-status" id="raceStatusA"></span></div><ol class="race-steps" id="raceStepsA"></ol></div>' +
+    '<div class="race-thread"><div class="race-thead"><b>Thread B</b><span class="race-status" id="raceStatusB"></span></div><ol class="race-steps" id="raceStepsB"></ol></div></div>' +
+    '<div class="decimal-line" id="raceSeq" style="margin-top:12px"></div>' +
+    '<div class="decimal-line" id="raceMsg" aria-live="polite"></div>' +
+    '<div class="race-callout" id="raceCallout" hidden></div>' +
+    '<div class="lab-check"><span class="lab-check-q" id="raceQ"></span><span id="raceOpts" style="display:flex;gap:6px;flex-wrap:wrap"></span><span class="lab-check-fb" id="raceFb" aria-live="polite"></span></div>' +
+    '<p class="timing-note">Auto-run plays one shuffled interleaving of the six steps to the end; it starts paused — press it when you want it to run, pause it whenever you like, and the Step buttons always work.</p>';
+  const schedCardEl = $T("sys-sched");
+  if (schedCardEl && schedCardEl.parentNode) schedCardEl.parentNode.insertBefore(raceSec, schedCardEl.nextSibling);
+  else { const osSec = $T("sysOs"); if (osSec) osSec.appendChild(raceSec); }
+
+  function raceRender() {
+    raceSec.querySelector("#raceCounter").textContent = RS.counter;
+    ["A", "B"].forEach(t => {
+      const th = RS.threads[t];
+      raceSec.querySelector("#raceReg" + t).textContent = th.reg === null ? "—" : th.reg;
+      raceSec.querySelector("#raceSteps" + t).innerHTML = RACE_STEPS.map((s, i) => {
+        const cls = th.pc > i ? "done" : th.pc === i ? "next" : "";
+        const mark = th.pc > i ? "✓ " : (i + 1) + ". ";
+        return '<li class="' + cls + '">' + mark + s + "</li>";
+      }).join("");
+      let st = "";
+      if (raceBlocked === t) st = "waiting for the lock";
+      else if (th.pc >= 3) st = "finished";
+      else if (RS.useLock && RS.holder === t) st = "holds the lock";
+      else if (RS.useLock && RS.holder) st = "waiting for the lock";
+      raceSec.querySelector("#raceStatus" + t).textContent = st ? " · " + st : "";
+      raceSec.querySelector("#raceStep" + t).disabled = th.pc >= 3;
+    });
+    raceSec.querySelector("#raceLockCell").hidden = !RS.useLock;
+    if (RS.useLock) raceSec.querySelector("#raceLockState").textContent = RS.holder ? "held by " + RS.holder : "free";
+    const lk = raceSec.querySelector("#raceLock");
+    lk.textContent = "Use a lock: " + (RS.useLock ? "on" : "off");
+    lk.setAttribute("aria-pressed", RS.useLock ? "true" : "false");
+    raceSec.querySelector("#raceSeq").textContent = "Interleaving so far: " + (RS.seq.length ? RS.seq.join(" ") : "(nothing yet — press a Step button)");
+    raceSec.querySelector("#raceMsg").textContent = raceMsg;
+    const co = raceSec.querySelector("#raceCallout");
+    co.hidden = !RS.lost;
+    if (RS.lost && RS.lostInfo) {
+      const li = RS.lostInfo;
+      co.innerHTML = "<b>A lost update.</b> Both threads read the counter as " + li.loadedVal + " before either of them stored. Each added 1 to its own private copy, so each STORE wrote " + li.wrote + " — and Thread " + li.by + "'s STORE has just overwritten Thread " + li.other + "'s. Two increments ran, but the counter only moved once.";
+    }
+  }
+  function raceDescribe(t, n, wasLost) {
+    const th = RS.threads[t], other = t === "A" ? "B" : "A";
+    if (n === 1) raceMsg = "Step " + t + "1 — Thread " + t + " LOADs: it copies the shared counter (" + th.loadedVal + ") into its own register. The shared counter has not changed.";
+    else if (n === 2) raceMsg = "Step " + t + "2 — Thread " + t + " ADDs 1 to its register: the register is now " + th.reg + ". The shared counter is still " + RS.counter + " — the new value exists only inside Thread " + t + ".";
+    else if (RS.lost && !wasLost) raceMsg = "Step " + t + "3 — Thread " + t + " STOREs " + th.reg + " over the counter, overwriting the " + th.reg + " that Thread " + other + " stored a moment ago. Read the callout below: an update has been lost.";
+    else raceMsg = "Step " + t + "3 — Thread " + t + " STOREs its register (" + th.reg + ") back: the shared counter is now " + RS.counter + "." + (RS.useLock ? " The lock is released." : "");
+    if (RS.useLock && n === 1) raceMsg += " Thread " + t + " takes the lock and holds it until its STORE.";
+    if (RS.threads.A.pc >= 3 && RS.threads.B.pc >= 3) {
+      if (RS.useLock) raceMsg = "Finished — counter = " + RS.counter + ". Same code, but the lock changes which interleavings are possible: a thread that starts holds the lock until its STORE, so the other thread can never load a stale copy in between. Every interleaving still allowed ends at 2.";
+      else if (RS.lost) raceMsg = "Finished — counter = " + RS.counter + ". Two threads each added 1, but the counter only went up once: one update was lost. Reset and run one thread all the way through before the other starts (A1 A2 A3, then B1 B2 B3) and the same code ends at 2.";
+      else raceMsg = "Finished — counter = " + RS.counter + ": both increments counted. That worked because one thread had stored before the other one loaded. Reset and try the order A1 B1 A2 B2 A3 B3 — same code, different order, different result.";
+    }
+  }
+  function raceStopAuto() {
+    if (raceTimer) { clearInterval(raceTimer); raceTimer = null; }
+    raceSec.querySelector("#racePlay").textContent = "▶ Auto-run";
+  }
+  function raceTryStep(t) {
+    raceStopAuto();
+    const th = RS.threads[t];
+    if (th.pc >= 3) return;
+    const wasLost = RS.lost, n = th.pc + 1;
+    const r = raceStep(RS, t);
+    if (r === "blocked") {
+      raceBlocked = t;
+      raceMsg = "Thread " + t + " is waiting for the lock: Thread " + RS.holder + " holds it, so step " + t + n + " does not run. Thread " + t + " can only start once Thread " + RS.holder + " finishes its STORE and releases the lock.";
+    } else {
+      raceBlocked = null;
+      raceDescribe(t, n, wasLost);
+    }
+    raceRender();
+  }
+  function raceAutoTick() {
+    const cand = ["A", "B"].filter(t => RS.threads[t].pc < 3 && !(RS.useLock && RS.holder && RS.holder !== t));
+    if (!cand.length) { raceStopAuto(); raceRender(); return; }
+    const t = cand[Math.floor(Math.random() * cand.length)];
+    const wasLost = RS.lost, n = RS.threads[t].pc + 1;
+    raceStep(RS, t);
+    raceBlocked = null;
+    raceDescribe(t, n, wasLost);
+    raceRender();
+    if (RS.threads.A.pc >= 3 && RS.threads.B.pc >= 3) raceStopAuto();
+  }
+  raceSec.querySelector("#raceStepA").addEventListener("click", () => raceTryStep("A"));
+  raceSec.querySelector("#raceStepB").addEventListener("click", () => raceTryStep("B"));
+  raceSec.querySelector("#raceReset").addEventListener("click", () => {
+    raceStopAuto();
+    RS = raceFresh(RS.useLock); raceBlocked = null; raceMsg = RACE_START_MSG;
+    raceRender();
+  });
+  raceSec.querySelector("#raceLock").addEventListener("click", () => {
+    raceStopAuto();
+    const nl = !RS.useLock;
+    RS = raceFresh(nl); raceBlocked = null;
+    raceMsg = nl
+      ? "Lock on, simulation reset. The first thread to step takes the lock and holds it until its STORE — now try the old order: step A once, then try to step B."
+      : "Lock off, simulation reset. Step the threads in any order — try A1 B1 A2 B2 A3 B3 and watch the counter.";
+    raceRender();
+  });
+  raceSec.querySelector("#racePlay").addEventListener("click", () => {
+    if (raceTimer) { raceStopAuto(); return; }
+    if (RS.threads.A.pc >= 3 && RS.threads.B.pc >= 3) { RS = raceFresh(RS.useLock); raceBlocked = null; raceMsg = RACE_START_MSG; raceRender(); }
+    raceSec.querySelector("#racePlay").textContent = "❚❚ Pause auto-run";
+    raceTimer = setInterval(raceAutoTick, 800);
+  });
+  (function raceQuestion() {
+    const expected = raceRun(["A", "B", "A", "B", "A", "B"], false).counter;
+    raceSec.querySelector("#raceQ").textContent = "Check: with the lock OFF, run the interleaving A1 B1 A2 B2 A3 B3 with the Step buttons. What is the final counter?";
+    const rng = mulberry(20261110);
+    const opts = Array.from(new Set([expected, 0, 1, 2]));
+    for (let i = opts.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); const tmp = opts[i]; opts[i] = opts[j]; opts[j] = tmp; }
+    const host = raceSec.querySelector("#raceOpts"), fb = raceSec.querySelector("#raceFb");
+    opts.forEach(v => {
+      const b = document.createElement("button");
+      b.type = "button"; b.className = "btn"; b.textContent = v;
+      b.addEventListener("click", () => {
+        if (v === expected) { fb.textContent = "✓ Right — stepping that order through this same engine gives " + expected + ": both threads loaded 0, so both stored 1, and the second store overwrote the first."; fb.style.color = "var(--green)"; }
+        else { fb.textContent = "✗ Not quite — run it exactly (lock off): Step A, Step B, Step A, Step B, Step A, Step B, then read the shared counter."; fb.style.color = "var(--red)"; }
+      });
+      host.appendChild(b);
+    });
+    window.__raceCheck = {
+      expected,
+      run: (letters, lock) => { const s = raceRun(letters, lock); return { counter: s.counter, lost: s.lost, seq: s.seq.join(" ") }; },
+      state: () => ({ counter: RS.counter, seq: RS.seq.join(" "), lost: RS.lost, holder: RS.holder, useLock: RS.useLock, pcA: RS.threads.A.pc, pcB: RS.threads.B.pc })
+    };
+  })();
+  raceRender();
+
   /* ================= MENU REGISTRATION + COUNT REBUILD ================= */
   function addMenuItem(groupName, afterKey, spec) {
     const list = $T("menuList"); if (!list) return false;
@@ -15981,6 +16191,12 @@ html[data-theme="blueprint"]{--crit:#fda4af}
     search: "address decoding memory map chip select memory-mapped i/o ram rom decoder bus",
     level: "beginner",
     go: () => { setTopArea("systems"); syncRail("systems"); const pb = document.querySelector('#sysPicker [data-sys="arch"]'); if (pb) pb.click(); jumpT("addrCard"); }
+  });
+  addMenuItem("Operating Systems", "sys-sched", {
+    key: "os-race", label: "The Race: Two Threads, One Counter",
+    hint: "Step two threads through one shared counter and watch an update get lost, then fix it with a lock",
+    search: "race condition threads interleaving shared counter lost update lock mutex critical section scheduling concurrency synchronisation os",
+    go: () => { setTopArea("systems"); syncRail("systems"); const pb = document.querySelector('#sysPicker [data-sys="os"]'); if (pb) pb.click(); jumpT("raceCard"); }
   });
   (function rebuildCounts() {
     const RJ = window.__uxRoundJ; if (!RJ) return;
