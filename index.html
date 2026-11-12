@@ -18000,3 +18000,668 @@ button.seq-cell:hover{border-color:var(--amber)}
   })();
 })();
 </script>
+
+<style>
+/* ===== Round V — tri-state bus · microprogrammed SAP-1 · mux display ===== */
+.seq-cell.busx{border-color:var(--red);color:var(--red);background:var(--panel)}
+.seq-cell.busz{border-style:dashed;color:var(--muted)}
+.ts-en[aria-pressed="true"]{background:var(--amber-soft);border-color:var(--amber)}
+table.tt tr.mu-cur td{background:var(--amber-soft);font-weight:700}
+.mux-digits{display:flex;flex-wrap:wrap;gap:14px;margin-top:10px}
+.mux-digit{text-align:center}
+.mux-digit svg{width:74px;height:auto;display:block}
+.mux-digit .mux-en{font-family:"IBM Plex Mono",monospace;font-size:11px;font-weight:700;margin-top:4px;color:var(--muted)}
+.mux-digit.active .mux-en{color:var(--amber)}
+.mux-digit .mux-seg{fill:var(--line)}
+.mux-digit .mux-seg.lit{fill:var(--red);filter:drop-shadow(0 0 4px var(--red))}
+</style>
+<script>
+"use strict";
+/* ================================================================
+   ROUND V — three new labs, each graded from its own model:
+   1) Tri-state bus — the bus is resolved PER BIT from the enabled
+      drivers: no driver -> Z (floating), drivers agreeing -> that
+      bit, drivers disagreeing -> X (contention). Never a fake 0/1.
+      The same resolver grades the check question and is verified
+      over the four truth cases below (__busCheck.verify).
+   2) Microprogrammed SAP-1 — a control store (fetch rows + one
+      execute block per opcode) drives a micro-stepper whose
+      instruction-level semantics are exactly reSAP1's; verify()
+      runs all three established programs both ways and compares
+      A, output and memory, interrupt images included via the
+      base traces the capstone already publishes.
+   3) Multiplexed 7-segment — segment patterns come from a real
+      gate netlist (minterm decoder + BCD-valid blanking, the
+      7447 behaviour) evaluated by the site engine and verified
+      against the reference table for all 16 input codes; the
+      scan model prices refresh per digit from the step clock.
+   All three start paused: nothing auto-runs.
+   ================================================================ */
+(function roundV() {
+  const $V = id => document.getElementById(id);
+  function mulberryV(seed) { let a = seed >>> 0; return function () { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+  function jumpV(id) { const el = id && $V(id); if (el) setTimeout(() => el.scrollIntoView({ behavior: "smooth", block: "start" }), 60); }
+  function clickMenuKey(key) { const it = document.querySelector('#menuList .menu-item[data-key="' + key + '"]'); if (it) { it.click(); return true; } return false; }
+  const hex2 = v => "0x" + v.toString(16).toUpperCase().padStart(2, "0");
+
+  /* ================================================================
+     1) TRI-STATE BUS — drivers: REG A, REG B, ALU (A op B).
+     ================================================================ */
+  function triResolve(drivers) {
+    /* drivers: [{name, data (0..255), en}] -> per-bit resolution */
+    const act = drivers.filter(d => d.en);
+    const bits = [];
+    for (let i = 7; i >= 0; i--) {
+      if (!act.length) bits.push("Z");
+      else {
+        const b0 = (act[0].data >> i) & 1;
+        bits.push(act.every(d => ((d.data >> i) & 1) === b0) ? String(b0) : "X");
+      }
+    }
+    const hasX = bits.indexOf("X") >= 0, allZ = bits.every(b => b === "Z");
+    const value = (!hasX && !allZ) ? act[0].data : null;
+    return { bits, state: allZ ? "Z" : hasX ? "X" : "driven", value, active: act.map(d => d.name) };
+  }
+  function busVerify() {
+    const A = { name: "A", data: 0x3C, en: true }, B = { name: "B", data: 0x5A, en: true };
+    const off = d => Object.assign({}, d, { en: false });
+    const one = triResolve([A, off(B)]);
+    const none = triResolve([off(A), off(B)]);
+    const same = triResolve([A, Object.assign({}, B, { data: 0x3C })]);
+    const diff = triResolve([A, B]);
+    return {
+      oneDriver: one.state === "driven" && one.value === 0x3C,
+      noDriver: none.state === "Z" && none.bits.every(b => b === "Z"),
+      contentionSameValue: same.state === "driven" && same.value === 0x3C,
+      contentionDifferentValue: diff.state === "X" && diff.bits.indexOf("X") >= 0 && diff.bits.indexOf("Z") < 0,
+      pass: false
+    };
+  }
+  (function () { const v = busVerify(); v.pass = v.oneDriver && v.noDriver && v.contentionSameValue && v.contentionDifferentValue; busVerify._r = v; })();
+
+  const bus = { a: 0x3C, b: 0x5A, op: "add", en: { A: true, B: false, ALU: false }, regC: null, outR: null };
+  function busDrivers() {
+    const alu = bus.op === "add" ? (bus.a + bus.b) & 0xff : (bus.a - bus.b) & 0xff;
+    return [
+      { name: "REG A", data: bus.a, en: bus.en.A },
+      { name: "REG B", data: bus.b, en: bus.en.B },
+      { name: "ALU", data: alu, en: bus.en.ALU }
+    ];
+  }
+  const busSec = document.createElement("section");
+  busSec.className = "card stage-card"; busSec.id = "tristateCard"; busSec.style.marginBottom = "16px";
+  busSec.innerHTML =
+    "<h2>Tri-state buffers &amp; the shared bus — one wire, many would-be drivers</h2>" +
+    '<p class="what">On the SAP-1 datapath every register and the ALU talk over <b>one shared bus</b> — that only works because each driver connects through a <b>tri-state buffer</b>: enabled, it drives its value; disabled, it disconnects entirely (high impedance, <b>Z</b>) as if it were not soldered in. The rule of the bus is <i>exactly one driver at a time</i>. This bench resolves the bus honestly, bit by bit: one driver → its value; <b>no</b> driver → <b>Z</b>, floating, shown as Z — not a polite 0; two drivers that <b>disagree</b> on a bit → <b>X</b>, contention, flagged — on real hardware that fight is a near-short between supplies and can cook the chips. Set the enables, make transfers, then break the rule on purpose. It is the same discipline the <b>address-decoding lab</b> enforces from the other side: one chip selected, everything else off the bus.</p>' +
+    '<div class="tool-controls">' +
+    '<label>Register A <span class="mono" id="busAval"></span><span style="display:flex;gap:6px"><button type="button" class="btn" id="busAminus">−</button><button type="button" class="btn" id="busAplus">+</button></span></label>' +
+    '<label>Register B <span class="mono" id="busBval"></span><span style="display:flex;gap:6px"><button type="button" class="btn" id="busBminus">−</button><button type="button" class="btn" id="busBplus">+</button></span></label>' +
+    '<label>ALU operation <span class="seg" role="group" aria-label="ALU operation" id="busOpSeg"><button type="button" data-busop="add" aria-pressed="true">A + B</button><button type="button" data-busop="sub" aria-pressed="false">A − B</button></span></label></div>' +
+    '<div class="ctrl-label">Drivers — click an enable (EN) to connect or disconnect that driver</div>' +
+    '<div class="seq-state" id="busDrivers"></div>' +
+    '<div class="ctrl-label" style="margin-top:14px">The shared bus — resolved per bit from the enabled drivers</div>' +
+    '<div class="seq-state" id="busBits"></div>' +
+    '<div class="decimal-line" id="busMsg" aria-live="polite"></div>' +
+    '<div class="share-row"><button type="button" class="btn primary" id="busCapC">Capture bus → Register C</button>' +
+    '<button type="button" class="btn" id="busCapOut">Capture bus → Output register</button>' +
+    '<button type="button" class="btn" data-buspreset="one">Preset: A drives alone</button>' +
+    '<button type="button" class="btn" data-buspreset="none">Preset: nobody drives</button>' +
+    '<button type="button" class="btn" data-buspreset="fight">Preset: contention!</button></div>' +
+    '<div class="seq-state" id="busDest"></div>' +
+    '<div class="lab-check"><span class="lab-check-q" id="busQ"></span><span id="busOpts" style="display:flex;gap:6px;flex-wrap:wrap"></span><span class="lab-check-fb" id="busFb" aria-live="polite"></span></div>' +
+    '<div class="share-row"><button type="button" class="btn" id="busNewQ">New question</button>' +
+    '<button type="button" class="btn" data-buslink="sap">The SAP-1 datapath this bus belongs to →</button>' +
+    '<button type="button" class="btn" data-buslink="addr">Address decoding &amp; chip-selects →</button></div>' +
+    '<p class="cp-formal adv-only">Per wire: BUS = d if every enabled driver agrees on d, Z if the enabled set is empty, X if two enabled drivers disagree. Two drivers enabled with the SAME value read correctly — logic cannot tell — but the rule is still broken: any drift between them becomes contention, so control logic must guarantee one-hot enables, never rely on agreement. A floating (Z) bus does not read 0: inputs on it drift, leak and pick up noise, which is why real buses add pull-ups, keepers, or a driver that is always on.</p>';
+  const sysArchEl = $V("sysArch");
+  if (sysArchEl) sysArchEl.appendChild(busSec);
+  busSec.querySelectorAll("[data-buslink]").forEach(b => b.addEventListener("click", () => {
+    if (b.dataset.buslink === "sap") { if (!clickMenuKey("lab-arch-10")) jumpV("tristateCard"); }
+    else { if (!clickMenuKey("addr-decode")) jumpV("addrCard"); }
+  }));
+  function busRender(msg) {
+    const drvs = busDrivers();
+    busSec.querySelector("#busAval").textContent = "= " + hex2(bus.a);
+    busSec.querySelector("#busBval").textContent = "= " + hex2(bus.b);
+    const dh = busSec.querySelector("#busDrivers"); dh.innerHTML = "";
+    drvs.forEach((d, i) => {
+      const key = ["A", "B", "ALU"][i];
+      const cell = document.createElement("div"); cell.className = "seq-cell" + (d.en ? " one" : "");
+      cell.innerHTML = "<b>" + hex2(d.data) + "</b>" + d.name + " · data";
+      dh.appendChild(cell);
+      const en = document.createElement("button"); en.type = "button"; en.className = "btn ts-en"; en.setAttribute("aria-pressed", d.en ? "true" : "false");
+      en.textContent = "EN " + key + ": " + (d.en ? "ON — driving" : "off — Z");
+      en.addEventListener("click", () => { bus.en[key] = !bus.en[key]; busRender(); });
+      dh.appendChild(en);
+    });
+    const r = triResolve(drvs);
+    const bh = busSec.querySelector("#busBits"); bh.innerHTML = "";
+    r.bits.forEach((bit, i) => {
+      const c = document.createElement("div");
+      c.className = "seq-cell" + (bit === "X" ? " busx" : bit === "Z" ? " busz" : bit === "1" ? " one" : "");
+      c.innerHTML = "<b>" + bit + "</b>bit " + (7 - i);
+      bh.appendChild(c);
+    });
+    const st = document.createElement("div");
+    st.className = "seq-cell" + (r.state === "X" ? " busx" : r.state === "Z" ? " busz" : " one");
+    st.innerHTML = "<b>" + (r.state === "driven" ? hex2(r.value) : r.state) + "</b>bus reads";
+    bh.appendChild(st);
+    const dh2 = busSec.querySelector("#busDest"); dh2.innerHTML =
+      '<div class="seq-cell' + (bus.regC === "X" ? " busx" : bus.regC !== null ? " one" : "") + '"><b>' + (bus.regC === null ? "—" : bus.regC === "X" ? "X" : hex2(bus.regC)) + "</b>Register C</div>" +
+      '<div class="seq-cell' + (bus.outR === "X" ? " busx" : bus.outR !== null ? " one" : "") + '"><b>' + (bus.outR === null ? "—" : bus.outR === "X" ? "X" : hex2(bus.outR)) + "</b>Output register</div>";
+    if (msg !== undefined) { busSec.querySelector("#busMsg").textContent = msg; return; }
+    const m = busSec.querySelector("#busMsg");
+    if (r.state === "Z") m.textContent = "No driver is enabled: the bus floats at high impedance (Z). It carries no value — anything that samples it now reads noise, not 0. Enable exactly one driver.";
+    else if (r.state === "X") m.textContent = "⚠ CONTENTION: " + r.active.join(" and ") + " are both driving and disagree on " + r.bits.filter(b => b === "X").length + " bit(s) — those wires are X, neither 0 nor 1. On hardware the two output stages fight through each other; disable one driver now.";
+    else if (r.active.length > 1) m.textContent = r.active.join(" and ") + " are both enabled but happen to agree on every bit, so the bus reads " + hex2(r.value) + " — correct by luck, not by design. The one-driver rule is still broken; turn one enable off.";
+    else m.textContent = "Clean transfer state: " + r.active[0] + " alone drives the bus with " + hex2(r.value) + " (" + r.bits.join("") + "). Capture it into a destination register whenever you are ready.";
+  }
+  function busCapture(which) {
+    const r = triResolve(busDrivers());
+    if (r.state === "Z") { busRender("Capture refused by reality: the bus is floating (Z) — there is no value to capture, so the destination keeps its old contents. Enable a driver first."); return; }
+    if (r.state === "X") {
+      if (which === "C") bus.regC = "X"; else bus.outR = "X";
+      busRender("Captured — and that is the problem: the destination now holds X, a corrupted non-value latched off a contended bus. Fix the enables and capture again to overwrite it with real data."); return;
+    }
+    if (which === "C") bus.regC = r.value; else bus.outR = r.value;
+    busRender("Captured: " + (which === "C" ? "Register C" : "the Output register") + " ← " + hex2(r.value) + ", driven by " + r.active.join(" + ") + ". That latch is the whole point of the bus: one source, one destination, one clock edge.");
+  }
+  busSec.querySelector("#busCapC").addEventListener("click", () => busCapture("C"));
+  busSec.querySelector("#busCapOut").addEventListener("click", () => busCapture("O"));
+  busSec.querySelector("#busAminus").addEventListener("click", () => { bus.a = (bus.a - 1) & 0xff; busRender(); });
+  busSec.querySelector("#busAplus").addEventListener("click", () => { bus.a = (bus.a + 1) & 0xff; busRender(); });
+  busSec.querySelector("#busBminus").addEventListener("click", () => { bus.b = (bus.b - 1) & 0xff; busRender(); });
+  busSec.querySelector("#busBplus").addEventListener("click", () => { bus.b = (bus.b + 1) & 0xff; busRender(); });
+  busSec.querySelector("#busOpSeg").querySelectorAll("[data-busop]").forEach(b => b.addEventListener("click", () => {
+    bus.op = b.dataset.busop;
+    busSec.querySelector("#busOpSeg").querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x === b ? "true" : "false"));
+    busRender();
+  }));
+  busSec.querySelectorAll("[data-buspreset]").forEach(b => b.addEventListener("click", () => {
+    const p = b.dataset.buspreset;
+    bus.en = p === "one" ? { A: true, B: false, ALU: false } : p === "none" ? { A: false, B: false, ALU: false } : { A: true, B: true, ALU: false };
+    busRender(p === "fight" ? undefined : undefined);
+  }));
+  let busQn = 0;
+  function busQuestion() {
+    const rng = mulberryV(90210 + busQn * 131);
+    const vals = [0x3C, 0x5A, 0x96];
+    const names = ["REG A", "REG B", "ALU"];
+    const mask = Math.floor(rng() * 8); /* 0..7: the empty set (mask 0) is in the rotation on purpose — a no-driver scenario whose answer is Z must be askable and gradable, exactly as the bench and triResolve already support it */
+    const scen = names.map((n, i) => ({ name: n, data: vals[i], en: !!(mask & (1 << i)) }));
+    if (scen.filter(d => d.en).length === 1) { /* force variety: sometimes add a second driver */
+      if (rng() < 0.6) { const off = scen.find(d => !d.en); if (off) off.en = true; }
+    }
+    const r = triResolve(scen);
+    const enTxt = scen.map(d => "EN(" + d.name + ")=" + (d.en ? 1 : 0)).join(", ");
+    busSec.querySelector("#busQ").textContent = "Check: REG A holds 0x3C, REG B holds 0x5A, the ALU output is 0x96, and the enables are " + enTxt + ". What does the bus read?";
+    const opts = [{ t: "Z — floating, no value", ok: r.state === "Z" }, { t: "X — contention on at least one bit", ok: r.state === "X" }];
+    [0x3C, 0x5A, 0x96].forEach(v => opts.push({ t: hex2(v), ok: r.state === "driven" && r.value === v }));
+    for (let i = opts.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); const t = opts[i]; opts[i] = opts[j]; opts[j] = t; }
+    const host = busSec.querySelector("#busOpts"), fb = busSec.querySelector("#busFb");
+    host.innerHTML = ""; fb.textContent = "";
+    opts.forEach(o => {
+      const b = document.createElement("button"); b.type = "button"; b.className = "btn"; b.textContent = o.t;
+      b.addEventListener("click", () => {
+        if (o.ok) { fb.textContent = "✓ Right — resolving those exact enables bit by bit gives " + (r.state === "driven" ? hex2(r.value) : r.state) + ", computed by the same resolver that drives the bench above."; fb.style.color = "var(--green)"; }
+        else { fb.textContent = "✗ Not that — count the enabled drivers first: none enabled is Z, exactly one is its value, two or more means compare them bit by bit for X."; fb.style.color = "var(--red)"; }
+      });
+      host.appendChild(b);
+    });
+    window.__busQuestion = { mask, state: r.state, value: r.value };
+  }
+  busSec.querySelector("#busNewQ").addEventListener("click", () => { busQn++; busQuestion(); });
+  busRender(); busQuestion();
+
+  /* ================================================================
+     2) MICROPROGRAMMED CONTROL FOR THE SAP-1.
+     Control store: 3 fetch rows shared by every instruction, then
+     one execute block per opcode. The micro-stepper applies the
+     control signals; its instruction effects are reSAP1's own.
+     ================================================================ */
+  const MU_FETCH = [
+    { addr: "F0", sig: ["PCout", "MARin"], note: "MAR ← PC" },
+    { addr: "F1", sig: ["MEMout", "IRin", "PCinc"], note: "IR ← mem[MAR] · PC ← PC + 1" },
+    { addr: "F2", sig: ["DECODE"], note: "µPC ← first execute row of the decoded opcode" }
+  ];
+  const MU_EXEC = {
+    0: [{ addr: "LDA·0", sig: ["IRout", "MARin"], note: "MAR ← IR address field" }, { addr: "LDA·1", sig: ["MEMout", "Ain"], note: "A ← mem[MAR]" }],
+    1: [{ addr: "ADD·0", sig: ["IRout", "MARin"], note: "MAR ← IR address field" }, { addr: "ADD·1", sig: ["MEMout", "Bin"], note: "B ← mem[MAR]" }, { addr: "ADD·2", sig: ["ALUadd", "Ain"], note: "A ← A + B" }],
+    2: [{ addr: "SUB·0", sig: ["IRout", "MARin"], note: "MAR ← IR address field" }, { addr: "SUB·1", sig: ["MEMout", "Bin"], note: "B ← mem[MAR]" }, { addr: "SUB·2", sig: ["ALUsub", "Ain"], note: "A ← A − B" }],
+    3: [{ addr: "OUT·0", sig: ["Aout", "OUTin"], note: "OUT register ← A" }],
+    4: [{ addr: "HLT·0", sig: ["HALT"], note: "clock stopped — no further micro-steps" }],
+    5: [{ addr: "JMP·0", sig: ["IRout", "PCin"], note: "PC ← IR address field" }],
+    6: [{ addr: "JZ·0", sig: ["IRout", "PCin if A=0"], note: "PC ← IR address field, only when A = 0" }],
+    7: [{ addr: "STA·0", sig: ["IRout", "MARin"], note: "MAR ← IR address field" }, { addr: "STA·1", sig: ["Aout", "MEMin"], note: "mem[MAR] ← A" }],
+    8: [{ addr: "RETI·0", sig: ["SPCout", "PCin"], note: "PC ← saved PC (the interrupt extension's return)" }]
+  };
+  const MU_OPNAMES = ["LDA", "ADD", "SUB", "OUT", "HLT", "JMP", "JZ", "STA", "RETI"];
+  const MU_PROGS = {
+    add: { name: "P1 · Add two numbers", mem: [0x09, 0x1A, 0x30, 0x40, 0, 0, 0, 0, 0, 20, 22, 0, 0, 0, 0, 0] },
+    count: { name: "P2 · Count down with a loop", mem: [0x09, 0x30, 0x2A, 0x65, 0x51, 0x40, 0, 0, 0, 3, 1, 0, 0, 0, 0, 0] },
+    sta: { name: "P3 · Store and reload (STA)", mem: [0x09, 0x1A, 0x7B, 0x0C, 0x1B, 0x30, 0x40, 0, 0, 17, 25, 0, 0, 0, 0, 0] }
+  };
+  function muFresh(key, withHandler) {
+    const mem = MU_PROGS[key].mem.slice(0, 16); while (mem.length < 16) mem.push(0);
+    if (withHandler) { mem[13] = 0x30; mem[14] = 0x80; } /* the capstone's handler: OUT at 13, RETI (0x80) at 14, in memory no program uses */
+    return { mem, PC: 0, MAR: 0, IR: null, A: 0, B: 0, OUT: null, out: [], phase: 0, execIdx: 0, exec: null, micro: 0, instrs: 0, halted: false, cur: null,
+      savedPC: null, pendingInt: false, inHandler: false, ints: 0, diverted: false };
+  }
+  function muApplySignals(S, row) {
+    row.sig.forEach(s => {
+      if (s === "MARin" && row.addr === "F0") S.MAR = S.PC;
+      else if (s === "MEMout" && row.addr === "F1") { /* value moves at IRin below */ }
+      else if (s === "IRin") S.IR = S.mem[S.MAR] & 0xff;
+      else if (s === "PCinc") S.PC = (S.PC + 1) & 15;
+      else if (s === "MARin") S.MAR = S.IR & 15;
+      else if (s === "Ain" && S.exec && S.exec[0] && (S.IR >> 4) === 0) S.A = S.mem[S.MAR];
+      else if (s === "Bin") S.B = S.mem[S.MAR];
+      else if (s === "ALUadd") { /* lands at Ain below */ }
+      else if (s === "ALUsub") { /* lands at Ain below */ }
+      else if (s === "Ain" && (S.IR >> 4) === 1) S.A = (S.A + S.B) & 0xff;
+      else if (s === "Ain" && (S.IR >> 4) === 2) S.A = (S.A - S.B) & 0xff;
+      else if (s === "OUTin") { S.OUT = S.A; S.out.push(S.A); }
+      else if (s === "HALT") S.halted = true;
+      else if (s === "SPCout") { /* the saved-PC register is the source this row's PCin loads — modelled on S.savedPC below */ }
+      else if (s === "PCin" && (S.IR >> 4) === 5) S.PC = S.IR & 15;
+      else if (s === "PCin" && (S.IR >> 4) === 8) { S.PC = S.savedPC === null ? S.PC : S.savedPC; S.savedPC = null; S.inHandler = false; }
+      else if (s === "PCin if A=0") { if (S.A === 0) S.PC = S.IR & 15; }
+      else if (s === "MEMin") S.mem[S.MAR] = S.A;
+    });
+  }
+  function muDivert(S) { S.pendingInt = false; S.savedPC = S.PC; S.PC = 13; S.inHandler = true; S.ints++; S.diverted = true; }
+  function muStepOnce(S) {
+    if (S.halted) return null;
+    S.diverted = false;
+    /* an interrupt requested while the machine sits at an instruction
+       boundary is taken before the next fetch — the same rule the
+       capstone widget states: never mid-instruction */
+    if (S.pendingInt && !S.inHandler && S.phase === 0 && S.instrs > 0) muDivert(S);
+    let row;
+    if (S.phase < 3) { row = MU_FETCH[S.phase]; muApplySignals(S, row); if (S.phase === 2) S.exec = MU_EXEC[S.IR >> 4] || []; S.phase++; }
+    else {
+      row = S.exec[S.execIdx]; muApplySignals(S, row); S.execIdx++;
+      if (S.execIdx >= S.exec.length) { S.phase = 0; S.execIdx = 0; S.exec = null; S.instrs++; }
+    }
+    S.micro++; S.cur = row;
+    return row;
+  }
+  function muRun(key) {
+    const S = muFresh(key); let guard = 0;
+    while (!S.halted && guard++ < 2000) muStepOnce(S);
+    return S;
+  }
+  function muRunInterrupt(key, afterInstrs) {
+    const S = muFresh(key, true); let guard = 0, fired = false;
+    while (!S.halted && guard++ < 3000) {
+      if (!fired && S.instrs >= afterInstrs) { S.pendingInt = true; fired = true; }
+      muStepOnce(S);
+    }
+    return S;
+  }
+  function muVerify() {
+    const base = window.RE && window.RE.reSAP1;
+    if (!base) return { pass: false, reason: "reSAP1 unavailable" };
+    const per = {};
+    Object.keys(MU_PROGS).forEach(k => {
+      const m = muRun(k), b = base(MU_PROGS[k].mem);
+      per[k] = m.A === b.A && m.out.join(",") === b.out.join(",") && m.mem.join(",") === b.mem.join(",") && m.halted === b.halted;
+    });
+    /* interrupt path, checked against the capstone's established
+       result for the same scenario: fire after 2 instructions of P1
+       (A is then 42); the handler's OUT inserts A's value at the
+       position the main program's outputs had reached, RETI (the
+       control store's own row, executed by this stepper) restores
+       the saved PC, and the final A, later memory writes and the
+       remaining outputs match the uninterrupted run */
+    const ib = base(MU_PROGS.add.mem);
+    const im = muRunInterrupt("add", 2);
+    const outsBefore = ib.trace.slice(0, 2).filter(t => t.op === "OUT").length;
+    const expOut = ib.out.slice(); expOut.splice(outsBefore, 0, ib.trace[1].A);
+    const intOk = im.A === ib.A && im.out.join(",") === expOut.join(",") && im.mem[11] === ib.mem[11] && im.ints === 1 && im.savedPC === null && !im.inHandler && im.halted;
+    return { per, interrupt: intOk, pass: Object.keys(per).every(k => per[k]) && intOk };
+  }
+  const muTotalWords = MU_FETCH.length + Object.keys(MU_EXEC).reduce((s, k) => s + MU_EXEC[k].length, 0);
+  const muHwStates = MU_FETCH.length + Math.max.apply(null, Object.keys(MU_EXEC).map(k => MU_EXEC[k].length));
+
+  const mu = { S: muFresh("add", true), key: "add" };
+  const muSec = document.createElement("section");
+  muSec.className = "card stage-card"; muSec.id = "microCard"; muSec.style.marginBottom = "16px";
+  muSec.innerHTML =
+    "<h2>Microprogrammed control — the SAP-1, one control word at a time</h2>" +
+    '<p class="what">The capstone CPU steps instruction by instruction and keeps the machinery that <i>sequences</i> each instruction invisible. Here is that machinery, as a <b>microprogram</b>: a small ROM — the <b>control store</b> — whose rows are <b>microinstructions</b>. Each row is one clock tick\'s worth of control signals (PCout, MARin, Ain…). Every instruction runs the same three <b>fetch</b> rows, then dispatches to the execute rows for its opcode. Step micro-by-micro and watch the datapath state move exactly when a control word says so — the results are the capstone\'s own: this stepper\'s instruction effects are verified against the established SAP-1 runs (all three programs, same A, same output, same memory), and the interrupt extension\'s RETI gets its row too — the ⚡ Interrupt button below exercises the whole path at micro level: divert between instructions, the handler\'s OUT row, RETI\'s row restoring the saved PC, and the run still lands on the capstone\'s result. Control has stopped being a black box: it is a program, stored in ROM, that you can read.</p>' +
+    '<div class="tool-controls"><label>Program <select id="muProg" class="tool-num" style="width:auto"><option value="add">' + MU_PROGS.add.name + '</option><option value="count">' + MU_PROGS.count.name + '</option><option value="sta">' + MU_PROGS.sta.name + '</option></select></label>' +
+    '<button type="button" class="btn primary" id="muStep">Step one microinstruction ▸</button>' +
+    '<button type="button" class="btn" id="muInstr">Run whole instruction ▸▸</button>' +
+    '<button type="button" class="btn" id="muReset">Reset</button>' +
+    '<button type="button" class="btn" id="muInt" aria-pressed="false">⚡ Interrupt</button></div>' +
+    '<div class="seq-state" id="muState"></div>' +
+    '<div class="decimal-line" id="muMsg" aria-live="polite"></div>' +
+    '<div class="ctrl-label" style="margin-top:14px">The control store — ' + muTotalWords + ' words (3 fetch + execute rows per opcode); the current microinstruction is highlighted</div>' +
+    '<div class="tt-wrap" style="max-height:300px"><table class="tt" id="muTable"></table></div>' +
+    '<details class="details-disclosure"><summary>Hardwired vs microprogrammed — the same ADD, two controllers</summary>' +
+    '<p class="proj-teaches"><b>Hardwired:</b> a state counter walks T0…T' + (muHwStates - 1) + ' (' + muHwStates + ' states on this machine — 3 fetch + up to ' + (muHwStates - 3) + ' execute), and combinational logic ANDs state × opcode-decoder outputs into the same control signals. No memory lookup per tick, so it is as fast as gates allow — but change what ADD does and you redesign and re-verify logic; add an opcode and you may need more states everywhere. <b>Microprogrammed (this card):</b> the signals live in ' + muTotalWords + ' ROM words; the "logic" is a µPC that mostly just counts, plus one dispatch at F2. Adding or fixing an instruction means writing new ROM rows — the datapath and sequencer do not change — which is why big instruction sets (and patchable CPUs: microcode updates are a real shipping mechanism) chose this route. The price is real too: a ROM access sits inside every micro-step, the store and sequencer are extra hardware, and a bug in a control word is a bug in every instruction that uses the row. Same datapath, same results — the honest trade is <b>flexibility and regularity against raw speed and minimal hardware</b>, and which side wins depends on how big the instruction set is: for 8 opcodes hardwired is arguably simpler; for 800 it is not close.</p></details>' +
+    '<div class="lab-check"><span class="lab-check-q" id="muQ"></span><span id="muOpts" style="display:flex;gap:6px;flex-wrap:wrap"></span><span class="lab-check-fb" id="muFb" aria-live="polite"></span></div>' +
+    '<div class="share-row"><button type="button" class="btn" id="muNewQ">New question</button>' +
+    '<button type="button" class="btn" data-mulink="sap">The SAP-1 capstone (instruction-level view) →</button>' +
+    '<button type="button" class="btn" data-mulink="bus">The bus those control signals drive →</button></div>';
+  if (sysArchEl) sysArchEl.appendChild(muSec);
+  muSec.querySelectorAll("[data-mulink]").forEach(b => b.addEventListener("click", () => {
+    if (b.dataset.mulink === "sap") { if (!clickMenuKey("lab-arch-10")) jumpV("microCard"); }
+    else jumpV("tristateCard");
+  }));
+  (function muBuildTable() {
+    const t = muSec.querySelector("#muTable");
+    let h = "<thead><tr><th>µ-address</th><th>Control signals asserted</th><th>Effect</th></tr></thead><tbody>";
+    MU_FETCH.forEach(r => { h += '<tr data-muaddr="' + r.addr + '"><td>' + r.addr + "</td><td>" + r.sig.join(" · ") + "</td><td>" + r.note + "</td></tr>"; });
+    Object.keys(MU_EXEC).forEach(op => MU_EXEC[op].forEach(r => { h += '<tr data-muaddr="' + r.addr + '"><td>' + r.addr + "</td><td>" + r.sig.join(" · ") + "</td><td>" + r.note + "</td></tr>"; }));
+    t.innerHTML = h + "</tbody>";
+  })();
+  function muRender(msg) {
+    const S = mu.S;
+    const opName = S.IR === null ? "—" : (MU_OPNAMES[S.IR >> 4] || "?");
+    muSec.querySelector("#muState").innerHTML =
+      '<div class="seq-cell"><b>' + S.PC + "</b>PC</div>" +
+      '<div class="seq-cell"><b>' + S.MAR + "</b>MAR</div>" +
+      '<div class="seq-cell"><b>' + (S.IR === null ? "—" : hex2(S.IR) + " · " + opName) + "</b>IR</div>" +
+      '<div class="seq-cell one"><b>' + S.A + "</b>A</div>" +
+      '<div class="seq-cell"><b>' + S.B + "</b>B register</div>" +
+      '<div class="seq-cell' + (S.savedPC !== null ? " one" : "") + '"><b>' + (S.savedPC === null ? "—" : S.savedPC) + "</b>saved PC (interrupt)</div>" +
+      '<div class="seq-cell"><b>' + (S.OUT === null ? "—" : S.OUT) + "</b>OUT register</div>" +
+      '<div class="seq-cell"><b>' + (S.cur ? S.cur.addr : "—") + "</b>µPC (current row)</div>" +
+      '<div class="seq-cell"><b>' + S.micro + "</b>micro-steps</div>" +
+      '<div class="seq-cell"><b>' + S.instrs + "</b>instructions done</div>" +
+      '<div class="seq-cell"><b>' + (S.halted ? "halted" : S.out.join(", ") || "—") + "</b>" + (S.halted ? "state" : "output so far") + "</div>";
+    muSec.querySelectorAll("#muTable tr[data-muaddr]").forEach(tr => tr.classList.toggle("mu-cur", !!S.cur && tr.dataset.muaddr === S.cur.addr));
+    if (msg) muSec.querySelector("#muMsg").textContent = msg;
+  }
+  function muStepMsg(row) {
+    const S = mu.S;
+    if (!row) return "Halted — the microprogram has stopped the clock. Reset to run it again.";
+    let m = "µ-step " + S.micro + " · row " + row.addr + ": signals " + row.sig.join(" · ") + " → " + row.note + ".";
+    if (row.addr === "F2" && S.IR !== null) m += " Dispatch: opcode " + (S.IR >> 4) + " is " + MU_OPNAMES[S.IR >> 4] + ", so the µPC jumps to row " + (MU_EXEC[S.IR >> 4] ? MU_EXEC[S.IR >> 4][0].addr : "?") + " — this jump is the one place the micro-sequencer is not just counting.";
+    if (S.diverted) m = "⚡ Interrupt taken at the instruction boundary, before this fetch: saved PC ← the next main-program instruction, PC ← 13 (the handler: OUT, then RETI — both ordinary control-store rows below). " + m;
+    if (S.halted) m += " The machine halts here — HLT is a control word that stops the clock, not an instruction that 'does' anything else.";
+    else if (S.phase === 0) m += " Instruction complete (" + S.instrs + " done). The next micro-step starts the fetch rows again — every instruction pays the same 3 fetch micro-steps before its own rows run.";
+    return m;
+  }
+  muSec.querySelector("#muStep").addEventListener("click", () => { const row = muStepOnce(mu.S); muRender(muStepMsg(row)); });
+  muSec.querySelector("#muInstr").addEventListener("click", () => {
+    if (mu.S.halted) { muRender("Halted — Reset to run again."); return; }
+    const before = mu.S.instrs; let row = null, guard = 0;
+    do { row = muStepOnce(mu.S); guard++; } while (!mu.S.halted && mu.S.instrs === before && guard < 12);
+    muRender(muStepMsg(row) + " (Ran the whole instruction: it took " + guard + " micro-steps — 3 fetch + " + (guard - 3) + " execute.)");
+  });
+  function muReset() { mu.S = muFresh(mu.key, true); const ib = muSec.querySelector("#muInt"); if (ib) { ib.setAttribute("aria-pressed", "false"); ib.textContent = "⚡ Interrupt"; } muRender("Reset. µPC points at row F0; nothing has moved. Step once: the first control word of every instruction this machine ever runs is F0 — PCout · MARin. The interrupt handler (OUT · RETI) sits installed at addresses 13–14, exactly as in the capstone."); }
+  muSec.querySelector("#muInt").addEventListener("click", () => {
+    const S = mu.S, ib = muSec.querySelector("#muInt");
+    if (S.halted) { muRender("The machine has halted — an interrupt cannot restart it. Reset and fire the interrupt while the program is still running."); return; }
+    if (S.inHandler) { muRender("Already inside the handler — this CPU does not nest interrupts; the request is ignored until RETI's row restores the saved PC. Step on."); return; }
+    if (S.pendingInt) { muRender("Interrupt already requested — it will be taken at the next instruction boundary. Press Step."); return; }
+    S.pendingInt = true; ib.setAttribute("aria-pressed", "true"); ib.textContent = "⚡ Interrupt (pending)";
+    muRender("Interrupt requested. Nothing happens mid-instruction: the current instruction's remaining micro-rows finish, then the machine saves the next PC and restarts fetch at the handler (address 13). Step and watch the boundary.");
+    const chk = setInterval(() => { if (!mu.S.pendingInt && !mu.S.inHandler && mu.S.ints > 0) { ib.setAttribute("aria-pressed", "false"); ib.textContent = "⚡ Interrupt"; clearInterval(chk); } }, 300);
+  });
+  muSec.querySelector("#muReset").addEventListener("click", muReset);
+  muSec.querySelector("#muProg").addEventListener("change", e => { mu.key = e.target.value; muReset(); muQuestion(); });
+  let muQn = 0;
+  function muQuestion() {
+    const run = muRun(mu.key);
+    const expected = run.micro;
+    muSec.querySelector("#muQ").textContent = "Check: run " + MU_PROGS[mu.key].name + " to HLT under the microprogram (3 fetch rows per instruction plus its execute rows). How many micro-steps does the whole program take?";
+    const rng = mulberryV(5150 + muQn * 77);
+    const cand = Array.from(new Set([expected, run.instrs, expected - 3, expected + 4]));
+    for (let i = cand.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); const t = cand[i]; cand[i] = cand[j]; cand[j] = t; }
+    const host = muSec.querySelector("#muOpts"), fb = muSec.querySelector("#muFb");
+    host.innerHTML = ""; fb.textContent = "";
+    cand.forEach(v => {
+      const b = document.createElement("button"); b.type = "button"; b.className = "btn"; b.textContent = v + " micro-steps";
+      b.addEventListener("click", () => {
+        if (v === expected) { fb.textContent = "✓ Right — the micro-stepper itself takes exactly " + expected + " micro-steps for this program (" + run.instrs + " instructions, each paying 3 fetch rows plus its own execute rows), and finishes with A = " + run.A + ", matching the capstone."; fb.style.color = "var(--green)"; }
+        else { fb.textContent = "✗ Not that — count from the store: every instruction costs 3 fetch micro-steps plus its execute rows (LDA 2, ADD 3, OUT 1, HLT 1…), loops included. Or step the program and read the micro-step counter at HLT."; fb.style.color = "var(--red)"; }
+      });
+      host.appendChild(b);
+    });
+    window.__muQuestion = { prog: mu.key, expected, instrs: run.instrs, A: run.A };
+  }
+  muSec.querySelector("#muNewQ").addEventListener("click", () => { muQn++; muQuestion(); });
+  muRender("Loaded " + MU_PROGS.add.name + ". µPC points at row F0; nothing has moved — the simulation starts paused. Step once: every instruction begins with the same fetch rows.");
+  muQuestion();
+
+  /* ================================================================
+     3) MULTIPLEXED 4-DIGIT 7-SEGMENT DISPLAY.
+     Segments from a minterm-decoder netlist + BCD blanking,
+     evaluated by window.LAB and verified against the 7447 table.
+     Scan: a step clock enables one digit at a time; per-digit
+     refresh = step clock / 4; flicker-free at >= 50 Hz per digit.
+     ================================================================ */
+  const SEG_REF = { 0: [1,1,1,1,1,1,0], 1: [0,1,1,0,0,0,0], 2: [1,1,0,1,1,0,1], 3: [1,1,1,1,0,0,1], 4: [0,1,1,0,0,1,1], 5: [1,0,1,1,0,1,1], 6: [1,0,1,1,1,1,1], 7: [1,1,1,0,0,0,0], 8: [1,1,1,1,1,1,1], 9: [1,1,1,1,0,1,1] };
+  const SEG_MINTERMS = { a: [0,2,3,5,6,7,8,9], b: [0,1,2,3,4,7,8,9], c: [0,1,3,4,5,6,7,8,9], d: [0,2,3,5,6,8,9], e: [0,2,6,8], f: [0,4,5,6,8,9], g: [2,3,4,5,6,8,9] };
+  function seg7447Def() {
+    const gates = [];
+    ["D3", "D2", "D1", "D0"].forEach(n => gates.push({ id: "n" + n, type: "NOT", ins: [n], out: "n" + n }));
+    const lit = (bit, v) => ((v >> bit) & 1) ? ["D3", "D2", "D1", "D0"][3 - bit] : "n" + ["D3", "D2", "D1", "D0"][3 - bit];
+    /* bit index: value bit3 (8s) is D3 ... bit0 (1s) is D0 */
+    const nameOf = b => ["D0", "D1", "D2", "D3"][b];
+    Object.keys(SEG_MINTERMS).forEach(seg => {
+      const outs = [];
+      SEG_MINTERMS[seg].forEach(m => {
+        const ins = [3, 2, 1, 0].map(b => ((m >> b) & 1) ? nameOf(b) : "n" + nameOf(b));
+        const o = "m_" + seg + "_" + m;
+        gates.push({ id: o, type: "AND", ins, out: o }); outs.push(o);
+      });
+      gates.push({ id: "raw_" + seg, type: "OR", ins: outs, out: "raw_" + seg });
+    });
+    gates.push({ id: "bv1", type: "OR", ins: ["D2", "D1"], out: "bvOr" });
+    gates.push({ id: "bv2", type: "AND", ins: ["D3", "bvOr"], out: "bvAnd" });
+    gates.push({ id: "bv3", type: "NOT", ins: ["bvAnd"], out: "BCDvalid" });
+    ["a", "b", "c", "d", "e", "f", "g"].forEach(seg => gates.push({ id: "fin_" + seg, type: "AND", ins: ["raw_" + seg, "BCDvalid"], out: "SEG_" + seg }));
+    return { inputs: ["D3", "D2", "D1", "D0"], outputs: ["SEG_a", "SEG_b", "SEG_c", "SEG_d", "SEG_e", "SEG_f", "SEG_g"], gates };
+  }
+  const segDef = window.LAB.computeLevels(seg7447Def());
+  function seg7447(d) {
+    const v = window.LAB.evaluateAll(segDef, { D3: (d >> 3) & 1, D2: (d >> 2) & 1, D1: (d >> 1) & 1, D0: d & 1 });
+    return ["a", "b", "c", "d", "e", "f", "g"].map(s => v["SEG_" + s]);
+  }
+  function segVerify() {
+    let ok = true;
+    for (let d = 0; d < 16; d++) {
+      const got = seg7447(d).join(""), want = (SEG_REF[d] || [0,0,0,0,0,0,0]).join("");
+      if (got !== want) ok = false;
+    }
+    return ok;
+  }
+  const MUX = { digits: [1, 2, 3, 4], phase: 0, prev: -1, stepHz: 8, timer: null, FLICKER_HZ: 50, NDIG: 4 };
+  const muxSec = document.createElement("section");
+  muxSec.className = "card stage-card"; muxSec.id = "muxDispCard"; muxSec.style.marginTop = "16px";
+  muxSec.innerHTML =
+    "<h2>Multiplexed 7-segment display — four digits, one decoder, no waiting</h2>" +
+    '<p class="what">Four digits would naively need four 7447 decoders and 28 segment wires. Instead this build has <b>one</b> 7447 and a scanning counter: the counter enables <b>one digit at a time</b> (thousands → hundreds → tens → ones) while the decoder shows that digit\'s pattern, cycling fast enough that <b>persistence of vision</b> fuses the four flashes into one steady readout. The segment patterns are not typed in — they come from a gate netlist of the 7447\'s decoding logic (minterms plus the BCD-blanking the <b>DIP-switch 7447 project</b> shows for codes 10–15), verified against the reference table for all sixteen input codes. The scan clock is the job the <b>555 astable project</b> does on the bench: a free-running oscillator whose rate you set — set it too slow here and the fusion fails in front of you: visible stepping, flicker, and a ghost of the previous digit.</p>' +
+    '<div class="tool-controls">' +
+    '<label>Reading (4 digits) <input type="text" id="muxVal" class="tool-num" style="width:92px" value="1234" maxlength="4" inputmode="numeric" autocomplete="off" /></label>' +
+    '<label>Scan step clock <select id="muxRate" class="tool-num" style="width:auto"><option value="2">2 Hz — watch it step</option><option value="8" selected>8 Hz — flicker &amp; ghosting</option><option value="30">30 Hz — harsh flicker</option><option value="120">120 Hz — near fusion</option><option value="240">240 Hz — fused</option><option value="400">400 Hz — fused, brisk</option></select></label>' +
+    '<span><button type="button" class="btn" id="muxStepBtn">Step scan ▸</button> <button type="button" class="btn primary" id="muxPlay">▶ Play scan</button></span></div>' +
+    '<div class="mux-digits" id="muxDigits"></div>' +
+    '<div class="ctrl-label" style="margin-top:12px">Digit-enable timing — one full frame (each digit enabled for exactly one step period)</div>' +
+    '<div class="schematic-box"><svg id="muxStrip" viewBox="0 0 920 148" role="img" aria-label="Timing strip: four digit-enable waveforms, one high at a time, with a marker on the current phase" style="display:block;width:100%;height:auto"></svg></div>' +
+    '<div class="seq-state" id="muxStats"></div>' +
+    '<div class="decimal-line" id="muxMsg" aria-live="polite"></div>' +
+    '<div class="lab-check"><span class="lab-check-q" id="muxQ"></span><span id="muxOpts" style="display:flex;gap:6px;flex-wrap:wrap"></span><span class="lab-check-fb" id="muxFb" aria-live="polite"></span></div>' +
+    '<div class="share-row"><button type="button" class="btn" data-muxlink="bcd">The single-digit 7447 project →</button>' +
+    '<button type="button" class="btn" data-muxlink="t555">The 555 astable (scan-clock source) →</button></div>' +
+    '<p class="cp-formal adv-only">Frame rate = step clock ÷ 4 digits; each digit\'s duty cycle is exactly 25%, so a multiplexed digit runs at a quarter of the brightness of a statically driven one at the same segment current (real designs push higher peak current to compensate, within the LED\'s pulse rating). Above the flicker-fusion threshold used here (50 Hz per digit) the four slots are rendered together at duty brightness and the marker keeps time on the strip — the page cannot literally flash a digit at 240 Hz steps, and does not pretend to; the verdicts are computed from the rates, and at honestly displayable rates (≤ 30 Hz steps) you watch the real stepping, flicker and afterglow.</p>';
+  const shEl = $V("setupHoldCard");
+  if (shEl && shEl.parentNode) shEl.parentNode.insertBefore(muxSec, shEl.nextSibling);
+  else { const cv3 = $V("circuitsView"); if (cv3) cv3.appendChild(muxSec); }
+  muxSec.querySelectorAll("[data-muxlink]").forEach(b => b.addEventListener("click", () => {
+    if (b.dataset.muxlink === "bcd") { if (!clickMenuKey("ux-bcd")) jumpV("muxDispCard"); }
+    else { if (!clickMenuKey("ux-555")) jumpV("muxDispCard"); }
+  }));
+  const SEG_RECTS = [[30,4,30,8],[62,14,8,26],[62,52,8,26],[30,88,30,8],[20,52,8,26],[20,14,8,26],[30,46,30,8]];
+  (function muxBuildDigits() {
+    const host = muxSec.querySelector("#muxDigits"); host.innerHTML = "";
+    MUX.digits.forEach((d, i) => {
+      const wrap = document.createElement("div"); wrap.className = "mux-digit"; wrap.id = "muxDig" + i;
+      wrap.innerHTML = '<svg viewBox="0 0 90 100" role="img" aria-label="Digit ' + (i + 1) + '">' + SEG_RECTS.map((r, s) => '<rect class="mux-seg" data-mseg="' + s + '" x="' + r[0] + '" y="' + r[1] + '" width="' + r[2] + '" height="' + r[3] + '" rx="3"/>').join("") + "</svg>" +
+        '<div class="mux-en">EN' + i + " · " + ["thousands", "hundreds", "tens", "ones"][i] + "</div>";
+      host.appendChild(wrap);
+    });
+  })();
+  function muxRates() {
+    const perDigit = MUX.stepHz / MUX.NDIG;
+    return { perDigit, onMs: 1000 / MUX.stepHz, fused: perDigit >= MUX.FLICKER_HZ };
+  }
+  function muxRender(msg) {
+    const r = muxRates();
+    const fused = r.fused, playing = !!MUX.timer;
+    MUX.digits.forEach((d, i) => {
+      const wrap = muxSec.querySelector("#muxDig" + i);
+      const segs = seg7447(d);
+      let mode = "off"; /* off | full | ghost | duty */
+      if (fused && playing) mode = "duty";
+      else if (i === MUX.phase) mode = "full";
+      else if (playing && !fused && i === MUX.prev) mode = "ghost";
+      wrap.classList.toggle("active", mode === "full" || mode === "duty");
+      wrap.querySelectorAll("[data-mseg]").forEach(rect => {
+        const s = +rect.dataset.mseg, lit = segs[s] === 1;
+        rect.classList.toggle("lit", lit && mode !== "off");
+        rect.style.opacity = !lit ? "" : mode === "full" ? "1" : mode === "duty" ? "0.55" : mode === "ghost" ? "0.32" : "0";
+        if (!lit || mode === "off") rect.style.opacity = "";
+        if (!lit) rect.classList.remove("lit");
+      });
+    });
+    /* timing strip */
+    const svg = muxSec.querySelector("#muxStrip");
+    let s = "";
+    for (let i = 0; i < 4; i++) {
+      const y = 18 + i * 32, x0 = 92, x1 = 892, w = (x1 - x0) / 4;
+      s += '<text class="sh-lab" x="10" y="' + (y + 14) + '">EN' + i + "</text>";
+      let d = "M" + x0 + " " + (y + 20);
+      for (let k = 0; k < 4; k++) { const xa = x0 + k * w, xb = xa + w; if (k === i) d += " L" + xa + " " + (y + 20) + " L" + xa + " " + y + " L" + xb + " " + y + " L" + xb + " " + (y + 20); else d += " L" + xb + " " + (y + 20); }
+      s += '<path class="sh-q" d="' + d + '"/>';
+    }
+    const mx = 92 + (MUX.phase + 0.5) * ((892 - 92) / 4);
+    s += '<line x1="' + mx + '" y1="6" x2="' + mx + '" y2="140" style="stroke:var(--red);stroke-width:2;stroke-dasharray:4 3"/>';
+    svg.innerHTML = s;
+    muxSec.querySelector("#muxStats").innerHTML =
+      '<div class="seq-cell"><b>' + MUX.stepHz + " Hz</b>scan step clock</div>" +
+      '<div class="seq-cell"><b>' + r.perDigit + " Hz</b>refresh per digit</div>" +
+      '<div class="seq-cell"><b>' + r.onMs.toFixed(r.onMs < 10 ? 1 : 0) + " ms</b>on-time per slot</div>" +
+      '<div class="seq-cell"><b>25%</b>duty per digit</div>' +
+      '<div class="seq-cell' + (r.fused ? " one" : " busx") + '"><b>' + (r.fused ? "fused" : r.perDigit >= 25 ? "flickering" : "stepping") + "</b>perceived state</div>";
+    if (msg !== undefined) { muxSec.querySelector("#muxMsg").textContent = msg; return; }
+    const m = muxSec.querySelector("#muxMsg");
+    if (!playing && !fused) m.textContent = "Paused at digit EN" + MUX.phase + " (the " + ["thousands", "hundreds", "tens", "ones"][MUX.phase] + " digit, showing " + MUX.digits[MUX.phase] + "). Step the scan by hand, or press Play — at " + MUX.stepHz + " Hz steps each digit is refreshed only " + r.perDigit + " times a second, far under the " + MUX.FLICKER_HZ + " Hz fusion threshold, so your eye catches the stepping and the previous digit ghosts.";
+    else if (!playing && fused) m.textContent = "Paused. At " + MUX.stepHz + " Hz steps each digit refreshes at " + r.perDigit + " Hz — over the " + MUX.FLICKER_HZ + " Hz fusion threshold — so on Play all four appear lit together, each at 25%-duty brightness.";
+    else if (fused) m.textContent = "Fused: each digit is being refreshed " + r.perDigit + " times a second, faster than persistence of vision can separate, so all four digits read as one steady " + MUX.digits.join("") + " — at a quarter of single-digit brightness, the duty-cycle price of sharing one decoder.";
+    else if (r.perDigit >= 25) m.textContent = "Flickering hard: " + r.perDigit + " Hz per digit is close to, but still under, the " + MUX.FLICKER_HZ + " Hz fusion threshold — the readout shimmers and the just-vacated digit ghosts after it. Raise the scan clock.";
+    else m.textContent = "Stepping in plain sight: at " + r.perDigit + " Hz per digit there is no fusion at all — one digit lit at a time, the previous one ghosting as it decays. This is the same readout with the scan clock starved; nothing else changed.";
+  }
+  function muxStop() { if (MUX.timer) { clearInterval(MUX.timer); MUX.timer = null; muxSec.querySelector("#muxPlay").textContent = "▶ Play scan"; } }
+  function muxStep() { MUX.prev = MUX.phase; MUX.phase = (MUX.phase + 1) % 4; muxRender(); }
+  muxSec.querySelector("#muxStepBtn").addEventListener("click", () => { muxStop(); muxStep(); });
+  muxSec.querySelector("#muxPlay").addEventListener("click", e => {
+    if (MUX.timer) { muxStop(); muxRender(); return; }
+    e.target.textContent = "❚❚ Pause scan";
+    if (muxRates().fused) { MUX.timer = setInterval(() => { MUX.prev = MUX.phase; MUX.phase = (MUX.phase + 1) % 4; muxRender("keep"); const mm = muxSec.querySelector("#muxMsg"); if (mm && muxRates().fused) mm.textContent = "Fused: each digit is being refreshed " + muxRates().perDigit + " times a second, faster than persistence of vision can separate, so all four digits read as one steady " + MUX.digits.join("") + " — at a quarter of single-digit brightness, the duty-cycle price of sharing one decoder."; }, 120); muxRender(); return; }
+    MUX.timer = setInterval(muxStep, Math.max(30, Math.round(1000 / MUX.stepHz)));
+    muxRender();
+  });
+  muxSec.querySelector("#muxRate").addEventListener("change", e => {
+    MUX.stepHz = +e.target.value;
+    if (MUX.timer) { muxStop(); muxSec.querySelector("#muxPlay").click(); }
+    muxRender();
+  });
+  muxSec.querySelector("#muxVal").addEventListener("input", e => {
+    const clean = (e.target.value.replace(/\D/g, "") + "0000").slice(0, 4);
+    MUX.digits = clean.split("").map(Number);
+    muxRender();
+  });
+  function muxQuestion() {
+    const expected = MUX.NDIG * MUX.FLICKER_HZ;
+    muxSec.querySelector("#muxQ").textContent = "Check: this display scans " + MUX.NDIG + " digits from one decoder, and a digit looks steady when it is refreshed at least " + MUX.FLICKER_HZ + " times per second. What is the slowest scan step clock that keeps all four digits flicker-free?";
+    const cand = [expected / 2, expected, expected * 2, MUX.FLICKER_HZ];
+    const host = muxSec.querySelector("#muxOpts"), fb = muxSec.querySelector("#muxFb");
+    host.innerHTML = ""; fb.textContent = "";
+    cand.forEach(v => {
+      const b = document.createElement("button"); b.type = "button"; b.className = "btn"; b.textContent = v + " Hz";
+      b.addEventListener("click", () => {
+        if (v === expected) { fb.textContent = "✓ Right — the step clock is shared by " + MUX.NDIG + " digits, so each digit only gets step ÷ " + MUX.NDIG + ". Flicker-free needs step ÷ " + MUX.NDIG + " ≥ " + MUX.FLICKER_HZ + ", i.e. a step clock of at least " + expected + " Hz — exactly the model's own arithmetic."; fb.style.color = "var(--green)"; }
+        else { fb.textContent = "✗ Not that — divide the candidate by " + MUX.NDIG + " first: that is what one digit actually gets. It must reach " + MUX.FLICKER_HZ + " Hz."; fb.style.color = "var(--red)"; }
+      });
+      host.appendChild(b);
+    });
+    window.__muxQuestion = { expected, perDigit: MUX.FLICKER_HZ, digits: MUX.NDIG };
+  }
+  muxRender(); muxQuestion();
+
+  /* ================= verification handles ================= */
+  window.__busCheck = { resolve: triResolve, verify: () => busVerify._r };
+  window.__microCheck = { store: { fetch: MU_FETCH, exec: MU_EXEC, totalWords: muTotalWords, hwStates: muHwStates }, run: muRun, runInterrupt: muRunInterrupt, stepOnce: muStepOnce, fresh: muFresh, verify: muVerify };
+  window.__muxCheck = { seg: seg7447, verifySegs: segVerify, minStepHz: () => MUX.NDIG * MUX.FLICKER_HZ, refresh: hz => hz / MUX.NDIG, state: () => ({ digits: MUX.digits.slice(), phase: MUX.phase, stepHz: MUX.stepHz, playing: !!MUX.timer }) };
+
+  /* ================= MENU REGISTRATION + COUNT REBUILD ================= */
+  function addMenuItemV(groupName, afterKey, spec) {
+    const list = $V("menuList"); if (!list) return false;
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "menu-item"; b.dataset.key = spec.key;
+    b.dataset.search = (spec.label + " " + spec.hint + " " + spec.search).toLowerCase();
+    if (spec.level) b.dataset.uxlevel = spec.level;
+    b.innerHTML = '<span class="mi-dot" aria-hidden="true"></span><span class="mi-label"></span><small></small>';
+    b.querySelector(".mi-label").textContent = spec.label;
+    b.querySelector("small").textContent = spec.hint;
+    b.addEventListener("click", () => { const p = $V("menuPanel"); if (p) p.hidden = true; const mb = $V("menuBtn"); if (mb) mb.setAttribute("aria-expanded", "false"); spec.go(); });
+    if (afterKey) {
+      const anchor = list.querySelector('[data-key="' + afterKey + '"]');
+      if (anchor) { anchor.parentNode.insertBefore(b, anchor.nextSibling); return true; }
+    }
+    let sib = null, inGroup = false;
+    Array.prototype.slice.call(list.children).forEach(el => {
+      if (el.classList.contains("menu-group")) inGroup = (el.dataset.group || "").trim() === groupName;
+      else if (inGroup && el.classList.contains("menu-item")) sib = el;
+    });
+    if (sib) sib.parentNode.insertBefore(b, sib.nextSibling); else list.appendChild(b);
+    return true;
+  }
+  addMenuItemV("Computer Architecture", "addr-decode", {
+    key: "tristate-bus", label: "Tri-state buffers & shared bus lab",
+    hint: "Two registers and the ALU on one bus — drive it clean, float it, then cause contention (X) on purpose",
+    search: "tri-state tristate buffer shared bus high impedance z floating contention x enable register alu datapath sap-1 one hot simulator",
+    level: "intermediate",
+    go: () => { setTopArea("systems"); syncRail("systems"); const pb = document.querySelector('#sysPicker [data-sys="arch"]'); if (pb) pb.click(); jumpV("tristateCard"); }
+  });
+  addMenuItemV("Computer Architecture", "tristate-bus", {
+    key: "micro-sap1", label: "Microprogrammed control unit — SAP-1",
+    hint: "Step fetch and execute as microinstructions from a control-store ROM, with the hardwired comparison",
+    search: "microprogrammed control unit microcode control store rom microinstruction sap-1 fetch execute hardwired control signals sequencer simulator",
+    level: "intermediate",
+    go: () => { setTopArea("systems"); syncRail("systems"); const pb = document.querySelector('#sysPicker [data-sys="arch"]'); if (pb) pb.click(); jumpV("microCard"); }
+  });
+  addMenuItemV("Logic & Circuits", "setup-hold", {
+    key: "mux-7seg", label: "Multiplexed 7-segment display lab",
+    hint: "Four digits from one 7447 on a scanning counter — slow the scan and watch flicker and ghosting appear",
+    search: "multiplexed seven segment display 7447 scanning counter persistence of vision flicker ghosting digit enable 555 scan clock simulator",
+    level: "intermediate",
+    go: () => { setTopArea("circuits"); syncRail("circuits"); jumpV("muxDispCard"); }
+  });
+  (function rebuildCountsV() {
+    const RJ = window.__uxRoundJ; if (!RJ) return;
+    const groups = RJ.menuGroups(); const counts = {}; let total = 0;
+    groups.forEach(g => {
+      counts[g.name] = g.items.length; total += g.items.length;
+      const c = g.header.querySelector(".mi-count"); if (c) c.textContent = g.items.length;
+    });
+    window.LAB_MENU = { groups: groups.map(g => ({ name: g.name, items: g.items.map(b => { const l = b.querySelector(".mi-label"); return l ? l.textContent : ""; }) })), count: total };
+    window.LAB_MODULES = { modules: groups.map(g => ({ name: g.name, count: g.items.length })), total };
+    RJ.buildRailAndList(counts);
+    RJ.buildGallery();
+    ["boards", "arch", "os", "org"].forEach(id => {
+      const h = document.querySelector("#module-" + id + " .mh-count");
+      if (!h) return;
+      const name = { boards: "Boards, Modulation & Projects", arch: "Computer Architecture", os: "Operating Systems", org: "Computer Organization" }[id];
+      if (counts[name]) h.textContent = counts[name] + " items";
+    });
+    window.__countsV = { total, counts };
+  })();
+})();
+</script>
