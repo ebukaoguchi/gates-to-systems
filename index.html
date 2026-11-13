@@ -6346,6 +6346,10 @@ function conceptJump(id) {
   if (id === "assoc") { document.querySelector('[data-sys="arch"]').click(); scrollToId("sys-cache"); }
   if (id === "deadlock") { document.querySelector('[data-sys="os"]').click(); scrollToId("os-banker"); }
   if (id === "abstraction") { showSandbox(); scrollToId("sbChipList"); }
+  /* Concepts expansion round */
+  if (id === "signednums" || id === "fixedpoint") { document.querySelector('[data-adv="tools"]').click(); scrollToId("tool-trainer"); }
+  if (id === "kmapmin") { const kb = document.getElementById("pickerKmap"); if (kb) kb.click(); scrollToId("kmapView"); }
+  if (id === "memhier") { document.querySelector('[data-sys="arch"]').click(); scrollToId("sys-cache"); }
 }
 function closeConcept() { $("conceptPanel").hidden = true; const v = $("cpVisual"); if (v._cleanup) v._cleanup(); }
 $("cpClose").addEventListener("click", closeConcept);
@@ -7857,6 +7861,393 @@ Object.assign(CONCEPTS, {
         if (tlb[p] !== undefined) { hits++; el.querySelector(".res").textContent = "Page " + p + ": TLB HIT → frame " + tlb[p] + " in ~1 cycle. Running tally: " + hits + " hits, " + miss + " misses."; }
         else { miss++; const fr = { 1: 2, 2: 7 }[p]; tlb[p] = fr; el.querySelector(".res").textContent = "Page " + p + ": TLB MISS → walk the page table in memory (~100 cycles), find frame " + fr + ", and cache the entry. Running tally: " + hits + " hits, " + miss + " misses."; }
       }));
+    } }
+});
+/* ---------- Concepts expansion round — 8 new panels registered into the
+   same CONCEPTS registry (Menu, gallery, deep links and search absorb
+   them automatically). NOTE: the candidate "Latch vs flip-flop" panel
+   was NOT rebuilt — the registry already has latchff with the same
+   shared D/CLK interactive — so the bench substitute B1 (fixed point)
+   takes its slot. All readings, minimisations, margins and checks below
+   are computed in code at run time. ---------- */
+Object.assign(CONCEPTS, {
+  signednums: { term: "Signed numbers — one pattern, four readings", def: "The same 8 bits are four different numbers depending on the reading rule: unsigned, sign-magnitude, ones' complement, or two's complement. Hardware picks two's complement because one adder serves all three other readings' jobs.",
+    wrong: "Thinking 11111111 'is' −1. It is 255 unsigned, −127 sign-magnitude, −0 ones' complement, and only −1 under the two's complement rule. The bits alone never decide — the rule does.",
+    jump: ["advanced", "Tools · Number-conversion trainer — drill the readings"],
+    mount(el) {
+      const A = [1, 0, 0, 1, 1, 1, 0, 0], B = [0, 1, 1, 0, 0, 1, 0, 0];
+      const val = bits => bits.reduce((s, b, i) => s + b * Math.pow(2, 7 - i), 0);
+      const readings = v => ({
+        u: v,
+        sm: (v & 128) ? -(v & 127) : (v & 127),
+        oc: (v & 128) ? -(255 - v) : v,
+        tc: v >= 128 ? v - 256 : v
+      });
+      el.innerHTML = '<div class="sn-a" style="display:flex;gap:4px;flex-wrap:wrap;align-items:center"></div>' +
+        '<div class="c-out sn-read"></div>' +
+        '<p style="font-size:12.5px;color:var(--muted);margin:10px 0 4px"><b style="color:var(--ink)">Add a second pattern</b> (two\u2019s complement arithmetic):</p>' +
+        '<div class="sn-b" style="display:flex;gap:4px;flex-wrap:wrap;align-items:center"></div>' +
+        '<div class="c-out sn-sum"></div>' +
+        '<p style="font-size:12.5px;color:var(--muted);margin:10px 0 4px"><b style="color:var(--ink)">Check:</b> the pattern <span class="mono">1111 0101</span> is used as a two\u2019s complement value. What number is it?</p>' +
+        '<div class="sn-check" style="display:flex;gap:6px;flex-wrap:wrap"></div><div class="c-out sn-verdict">Pick the reading the two\u2019s complement rule gives.</div>';
+      const bitBtn = (bits, i, cls) => '<button type="button" class="' + cls + '" data-i="' + i + '" aria-label="bit ' + (7 - i) + '" style="font-family:\'IBM Plex Mono\',monospace;font-size:14px;font-weight:700;width:32px;height:36px;border-radius:7px;border:1.4px solid var(--line2);cursor:pointer;' + (bits[i] ? "background:var(--teal);color:#fff" : "background:var(--panel);color:var(--ink)") + '">' + bits[i] + "</button>";
+      const draw = () => {
+        el.querySelector(".sn-a").innerHTML = '<span style="font-size:12px;color:var(--muted);margin-right:2px">pattern</span>' + A.map((_, i) => bitBtn(A, i, "sn-ba")).join("");
+        el.querySelector(".sn-b").innerHTML = '<span style="font-size:12px;color:var(--muted);margin-right:2px">plus</span>' + B.map((_, i) => bitBtn(B, i, "sn-bb")).join("");
+        const v = val(A), r = readings(v);
+        el.querySelector(".sn-read").innerHTML = "Bits " + A.join("") + " read four ways —<br>unsigned: <b>" + r.u + "</b> · sign-magnitude: <b>" + r.sm + "</b> · ones\u2019 complement: <b>" + (r.oc === 0 && (v & 128) ? "\u22120 (the awkward second zero)" : r.oc) + "</b> · two\u2019s complement: <b>" + r.tc + "</b>.<br>Only two\u2019s complement has a single zero and lets one adder do signed and unsigned work — that is why every CPU uses it.";
+        const a = val(A), b = val(B), sum = a + b, res = sum & 255;
+        const carryIn = ((a & 127) + (b & 127)) >= 128 ? 1 : 0;
+        const carryOut = sum >= 256 ? 1 : 0;
+        const ovf = carryIn !== carryOut;
+        const trueSum = readings(a).tc + readings(b).tc;
+        const resBits = res.toString(2).padStart(8, "0");
+        el.querySelector(".sn-sum").innerHTML = a.toString(2).padStart(8, "0") + " + " + b.toString(2).padStart(8, "0") + " = <b>" + resBits + "</b> (kept 8 bits)<br>carry INTO the sign bit: <b>" + carryIn + "</b> · carry OUT of it: <b>" + carryOut + "</b> → overflow flag = " + carryIn + " \u2260 " + carryOut + " ? <b>" + (ovf ? "YES — overflow" : "no") + "</b>.<br>" +
+          (ovf ? "The true sum is " + trueSum + ", outside the two\u2019s complement range \u2212128\u2026127, so the stored pattern reads back as " + readings(res).tc + " — a wrong answer with no error raised. The carries disagreeing is exactly how the CPU knows."
+               : "The true sum is " + trueSum + ", inside \u2212128\u2026127, and the stored pattern reads back as " + readings(res).tc + " — correct. Equal carries are the adder\u2019s all-clear.");
+        el.querySelectorAll(".sn-ba").forEach(btn => btn.addEventListener("click", () => { const i = +btn.dataset.i; A[i] = A[i] ? 0 : 1; draw(); }));
+        el.querySelectorAll(".sn-bb").forEach(btn => btn.addEventListener("click", () => { const i = +btn.dataset.i; B[i] = B[i] ? 0 : 1; draw(); }));
+      };
+      const P = 0xF5, pr = readings(P);
+      const opts = [pr.u, pr.sm, pr.oc, pr.tc];
+      el.querySelector(".sn-check").innerHTML = opts.map(o => '<button type="button" class="btn sn-opt" data-v="' + o + '">' + o + "</button>").join("");
+      el.querySelectorAll(".sn-opt").forEach(btn => btn.addEventListener("click", () => {
+        const picked = +btn.dataset.v;
+        el.querySelector(".sn-verdict").textContent = picked === pr.tc
+          ? "Correct: " + P.toString(2).padStart(8, "0") + " as two\u2019s complement is " + pr.tc + " (unsigned it would be " + pr.u + "; sign-magnitude " + pr.sm + "; ones\u2019 complement " + pr.oc + " — the distractors were the other three readings of the same bits)."
+          : "That is the " + (picked === pr.u ? "unsigned" : picked === pr.sm ? "sign-magnitude" : "ones\u2019 complement") + " reading (" + picked + "). Under two\u2019s complement the sign bit weighs \u2212128, not +128: value = \u2212128 + " + (P & 127) + " = " + pr.tc + ".";
+      }));
+      draw();
+    } },
+  kmapmin: { term: "Karnaugh map — shrink the logic", def: "A truth table folded so that neighbours differ in exactly one variable (Gray order). Any rectangle of 1s that wraps the edges is one product term — bigger rectangles, fewer literals, less hardware.",
+    wrong: "Thinking the map's columns run 00, 01, 10, 11 like counting. They run 00, 01, 11, 10 — Gray order — so that physically adjacent cells are logically adjacent too; in counting order the groupings would tear.",
+    jump: ["circuits", "K-map tool — the full minimiser with don\u2019t-cares"],
+    mount(el) {
+      const GRAY = [0, 1, 3, 2];
+      let n = 4, mins = new Set([0, 2, 8, 10]);
+      function qm(nv, mts) {
+        let cur = mts.map(m => ({ bits: m.toString(2).padStart(nv, "0"), mins: [m] }));
+        const primes = [];
+        while (cur.length) {
+          const used = cur.map(() => false), next = [], seen = new Set();
+          for (let i = 0; i < cur.length; i++) for (let j = i + 1; j < cur.length; j++) {
+            const a = cur[i].bits, b = cur[j].bits; let diff = -1, nd = 0;
+            for (let k = 0; k < nv; k++) if (a[k] !== b[k]) { nd++; diff = k; }
+            if (nd === 1 && a[diff] !== "-") { used[i] = used[j] = true; const nb = a.slice(0, diff) + "-" + a.slice(diff + 1); if (!seen.has(nb)) { seen.add(nb); next.push({ bits: nb, mins: cur[i].mins.concat(cur[j].mins) }); } }
+          }
+          cur.forEach((t, i) => { if (!used[i]) primes.push(t); });
+          cur = next;
+        }
+        const chosen = new Set(), remaining = new Set(mts);
+        let progress = true;
+        while (remaining.size && progress) {
+          progress = false;
+          Array.from(remaining).forEach(m => {
+            const cand = primes.map((p, idx) => ({ p, idx })).filter(x => !chosen.has(x.idx) && x.p.mins.indexOf(m) >= 0);
+            if (cand.length === 1) { chosen.add(cand[0].idx); cand[0].p.mins.forEach(x => remaining.delete(x)); progress = true; }
+          });
+        }
+        while (remaining.size) {
+          let best = -1, bc = 0;
+          primes.forEach((p, idx) => { if (chosen.has(idx)) return; const c = p.mins.filter(m => remaining.has(m)).length; if (c > bc) { bc = c; best = idx; } });
+          if (best < 0) break;
+          chosen.add(best); primes[best].mins.forEach(x => remaining.delete(x));
+        }
+        return Array.from(chosen).map(i => primes[i]);
+      }
+      const expr = (bits, vars) => { const parts = []; bits.split("").forEach((c, i) => { if (c === "1") parts.push(vars[i]); else if (c === "0") parts.push(vars[i] + "\u2032"); }); return parts.length ? parts.join("") : "1"; };
+      const segments = (set, size) => {
+        if (set.length === size) return [[0, size - 1]];
+        const start = set.find(s => set.indexOf((s + size - 1) % size) < 0);
+        const out = []; let lo = start, hi = start;
+        const sorted = []; let c = start;
+        while (set.indexOf(c) >= 0) { sorted.push(c); c = (c + 1) % size; }
+        lo = sorted[0]; hi = sorted[sorted.length - 1];
+        if (sorted[0] === 0 || hi >= lo) { if (hi >= lo && sorted.every((v, i) => i === 0 || v === sorted[i - 1] + 1)) return [[lo, hi]]; }
+        const wrapEnd = sorted.filter(v => v >= start), wrapStart = sorted.filter(v => v < start);
+        if (wrapStart.length && wrapEnd.length) return [[start, size - 1], [0, wrapStart[wrapStart.length - 1]]];
+        return [[lo, hi]];
+      };
+      el.innerHTML = '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px"><button type="button" class="btn km-n" data-n="3">3 variables</button><button type="button" class="btn km-n" data-n="4">4 variables</button><button type="button" class="btn km-wrap">Preset: wrap-around group</button><button type="button" class="btn km-clear">Clear</button></div>' +
+        '<div class="km-grid"></div><div class="c-out km-out"></div>' +
+        '<p style="font-size:12.5px;color:var(--muted);margin:8px 0 0">Axis labels run 00, 01, 11, 10 — <b style="color:var(--ink)">Gray order</b> — so that any two touching cells (including across the edges) differ in exactly one variable. That is the whole trick: one differing variable is one literal a grouping can drop.</p>';
+      const draw = () => {
+        const vars = n === 4 ? ["A", "B", "C", "D"] : ["A", "B", "C"];
+        const rowVars = n === 4 ? 2 : 1, colVars = n - rowVars;
+        const rows = Math.pow(2, rowVars), cols = 4;
+        const cellM = (r, c) => { const rv = rowVars === 2 ? GRAY[r] : r, cv = GRAY[c]; return (rv << colVars) | cv; };
+        const chosen = mins.size ? qm(n, Array.from(mins)) : [];
+        const COLORS = ["var(--teal)", "var(--amber)", "#c0563f", "var(--muted)"];
+        const CS = 42, X0 = 34, Y0 = 26;
+        let s = '<svg viewBox="0 0 ' + (X0 + cols * CS + 6) + " " + (Y0 + rows * CS + 6) + '" style="width:100%;height:auto" role="img" aria-label="Karnaugh map grid">';
+        for (let c = 0; c < cols; c++) s += '<text class="hz-label small" x="' + (X0 + c * CS + CS / 2) + '" y="14">' + GRAY[c].toString(2).padStart(colVars, "0") + "</text>";
+        for (let r = 0; r < rows; r++) s += '<text class="hz-label small" x="16" y="' + (Y0 + r * CS + CS / 2 + 3) + '">' + (rowVars === 2 ? GRAY[r] : r).toString(2).padStart(rowVars, "0") + "</text>";
+        s += '<text class="hz-label small" x="' + (X0 + cols * CS / 2) + '" y="' + (Y0 - 14) + '">' + vars.slice(rowVars).join("") + '</text><text class="hz-label small" x="16" y="14">' + vars.slice(0, rowVars).join("") + "</text>";
+        for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+          const m = cellM(r, c), on = mins.has(m);
+          s += '<g class="km-cell" data-m="' + m + '" style="cursor:pointer"><rect x="' + (X0 + c * CS) + '" y="' + (Y0 + r * CS) + '" width="' + CS + '" height="' + CS + '" style="fill:' + (on ? "var(--panel2)" : "var(--panel)") + ';stroke:var(--line2)"/>' +
+            '<text class="fsm-lab" x="' + (X0 + c * CS + CS / 2) + '" y="' + (Y0 + r * CS + CS / 2 + 5) + '">' + (on ? "1" : "0") + '</text>' +
+            '<text class="hz-label small" x="' + (X0 + c * CS + 10) + '" y="' + (Y0 + r * CS + 12) + '">m' + m + "</text></g>";
+        }
+        chosen.forEach((t, ti) => {
+          const rowPat = t.bits.slice(0, rowVars), colPat = t.bits.slice(rowVars);
+          const rowSet = [], colSet = [];
+          for (let r = 0; r < rows; r++) { const rv = (rowVars === 2 ? GRAY[r] : r).toString(2).padStart(rowVars, "0"); if (rowPat.split("").every((ch, k) => ch === "-" || ch === rv[k])) rowSet.push(r); }
+          for (let c = 0; c < cols; c++) { const cv = GRAY[c].toString(2).padStart(colVars, "0"); if (colPat.split("").every((ch, k) => ch === "-" || ch === cv[k])) colSet.push(c); }
+          segments(rowSet, rows).forEach(rs => segments(colSet, cols).forEach(cs2 => {
+            s += '<rect x="' + (X0 + cs2[0] * CS + 3) + '" y="' + (Y0 + rs[0] * CS + 3) + '" width="' + ((cs2[1] - cs2[0] + 1) * CS - 6) + '" height="' + ((rs[1] - rs[0] + 1) * CS - 6) + '" rx="9" fill="none" stroke="' + COLORS[ti % COLORS.length] + '" stroke-width="2.6" pointer-events="none"/>';
+          }));
+        });
+        s += "</svg>";
+        el.querySelector(".km-grid").innerHTML = s;
+        el.querySelectorAll(".km-cell").forEach(g => g.addEventListener("click", () => { const m = +g.dataset.m; if (mins.has(m)) mins.delete(m); else mins.add(m); draw(); }));
+        const list = Array.from(mins).sort((a, b) => a - b);
+        el.querySelector(".km-out").innerHTML = !list.length ? "F = 0 — the map is empty. Click cells to place 1s."
+          : "F(" + vars.join(",") + ") = \u03A3m(" + list.join(", ") + ")<br>Minimised by prime implicants in code: <b>F = " + chosen.map(t => expr(t.bits, vars)).join(" + ") + "</b><br>" +
+            chosen.map((t, ti) => '<span style="color:' + COLORS[ti % COLORS.length] + '">\u25A0</span> ' + expr(t.bits, vars) + " covers m" + t.mins.filter(m => mins.has(m)).sort((a, b) => a - b).join(", m")).join("<br>") +
+            (chosen.some(t => { const rp = t.bits.slice(0, rowVars), cp = t.bits.slice(rowVars); return (rp.indexOf("-") >= 0 || cp.indexOf("-") >= 0) && t.mins.length >= 4; }) ? "" : "");
+        el.querySelectorAll(".km-n").forEach(b => { b.classList.toggle("primary", +b.dataset.n === n); });
+      };
+      el.querySelectorAll(".km-n").forEach(b => b.addEventListener("click", () => { n = +b.dataset.n; mins = n === 4 ? new Set([0, 2, 8, 10]) : new Set([0, 1, 4, 5]); draw(); }));
+      el.querySelector(".km-wrap").addEventListener("click", () => { n = 4; mins = new Set([0, 2, 8, 10]); draw(); });
+      el.querySelector(".km-clear").addEventListener("click", () => { mins = new Set(); draw(); });
+      draw();
+    } },
+  noise: { term: "Noise margins — how much slack a signal has", def: "A gate promises: outputs stay below VOL (for 0) or above VOH (for 1); inputs accept anything below VIL as 0 and above VIH as 1. The gaps between promise and acceptance — the noise margins — are the noise a wire may add before bits flip.",
+    wrong: "Thinking the band between VIL and VIH is 'sometimes 0, sometimes 1, it averages out'. It is undefined: the receiver may read either, or oscillate. A signal resting there is a bug, not a maybe.",
+    jump: ["advanced", "Components explorer — real parts with real thresholds"],
+    mount(el) {
+      const FAM = {
+        TTL: { VOL: 0.4, VIL: 0.8, VIH: 2.0, VOH: 2.4 },
+        CMOS: { VOL: 0.1, VIL: 1.5, VIH: 3.5, VOH: 4.9 }
+      };
+      let fam = "TTL", vin = 0.3, noise = 0;
+      el.innerHTML = '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px"><button type="button" class="btn nm-f" data-f="TTL">TTL levels</button><button type="button" class="btn nm-f" data-f="CMOS">CMOS levels (5 V)</button></div>' +
+        '<svg viewBox="0 0 330 176" style="width:100%;height:auto" class="nm-svg" role="img" aria-label="Voltage axis with logic level bands"></svg>' +
+        cSlider("Input voltage at the receiving gate", 0, 5, 0.3, 0.05, v => (+v).toFixed(2) + " V") +
+        cSlider("Noise added to a LOW output on its way over", 0, 1.2, 0, 0.05, v => (+v).toFixed(2) + " V") +
+        '<div class="c-out nm-out"></div>';
+      const Y = v => 158 - v * 29;
+      const draw = () => {
+        const F = FAM[fam];
+        const volD = Math.min(F.VOL + noise, 5);
+        const nmh = F.VOH - F.VIH, nml = F.VIL - volD, nmlClean = F.VIL - F.VOL;
+        let s = '<rect x="70" y="' + Y(F.VIL) + '" width="90" height="' + (Y(0) - Y(F.VIL)) + '" style="fill:rgba(15,118,110,.20)"/><rect x="70" y="' + Y(5) + '" width="90" height="' + (Y(F.VIH) - Y(5)) + '" style="fill:rgba(15,118,110,.20)"/>' +
+          '<rect x="70" y="' + Y(F.VIH) + '" width="90" height="' + (Y(F.VIL) - Y(F.VIH)) + '" style="fill:rgba(192,86,63,.25)"/>' +
+          '<line x1="70" y1="' + Y(0) + '" x2="70" y2="' + Y(5) + '" stroke="var(--line2)"/>' +
+          '<text class="hz-label small" x="115" y="' + (Y(F.VIL) + 13) + '">valid 0 (in \u2264 VIL ' + F.VIL + ')</text>' +
+          '<text class="hz-label small" x="115" y="' + ((Y(F.VIH) + Y(F.VIL)) / 2 + 3) + '">UNDEFINED</text>' +
+          '<text class="hz-label small" x="115" y="' + (Y(5) + 13) + '">valid 1 (in \u2265 VIH ' + F.VIH + ")</text>" +
+          '<line x1="180" y1="' + Y(F.VOH) + '" x2="300" y2="' + Y(F.VOH) + '" stroke="var(--teal)" stroke-width="2"/><text class="hz-label small" x="240" y="' + (Y(F.VOH) - 4) + '">VOH ' + F.VOH + " V — lowest legal 1 out</text>" +
+          '<line x1="180" y1="' + Y(F.VOL) + '" x2="300" y2="' + Y(F.VOL) + '" stroke="var(--teal)" stroke-width="2"/><text class="hz-label small" x="240" y="' + (Y(F.VOL) + 12) + '">VOL ' + F.VOL + " V — highest legal 0 out</text>";
+        if (noise > 0) s += '<line x1="180" y1="' + Y(volD) + '" x2="300" y2="' + Y(volD) + '" stroke="#c0563f" stroke-width="2.4"/><text class="hz-label small" x="240" y="' + (Y(volD) - 4) + '">degraded 0 arrives at ' + volD.toFixed(2) + " V</text>";
+        s += '<line x1="52" y1="' + Y(vin) + '" x2="322" y2="' + Y(vin) + '" stroke="var(--amber)" stroke-width="2.6"/><circle cx="60" cy="' + Y(vin) + '" r="4.5" style="fill:var(--amber)"/><text class="hz-label small" x="290" y="' + (Y(vin) - 5) + '">your input ' + vin.toFixed(2) + " V</text>";
+        el.querySelector(".nm-svg").innerHTML = s;
+        const cls = vin <= F.VIL ? "a valid 0" : vin >= F.VIH ? "a valid 1" : "in the UNDEFINED band — the gate may read 0, 1, or chatter";
+        el.querySelector(".nm-out").innerHTML = fam + ": NMH = VOH \u2212 VIH = " + F.VOH + " \u2212 " + F.VIH + " = <b>" + nmh.toFixed(2) + " V</b> · NML = VIL \u2212 VOL = " + F.VIL + " \u2212 " + F.VOL + " = <b>" + nmlClean.toFixed(2) + " V</b>.<br>Your input " + vin.toFixed(2) + " V is read as <b>" + cls + "</b>." +
+          (noise > 0 ? "<br>With " + noise.toFixed(2) + " V of noise riding on a LOW output, it arrives at " + volD.toFixed(2) + " V and NML shrinks to <b>" + nml.toFixed(2) + " V</b>" + (nml < 0 ? " — NEGATIVE: a perfectly legal output is now misread. The margin is not a nicety; it is the error budget for the whole wire." : ". Still positive — the receiver still reads a clean 0.") : "");
+        el.querySelectorAll(".nm-f").forEach(b => b.classList.toggle("primary", b.dataset.f === fam));
+      };
+      wireSlider(el, 0, v => { vin = v; draw(); });
+      wireSlider(el, 1, v => { noise = v; draw(); });
+      el.querySelectorAll(".nm-f").forEach(b => b.addEventListener("click", () => { fam = b.dataset.f; draw(); }));
+      draw();
+    } },
+  graycode: { term: "Gray code — one bit changes at a time", def: "A counting code where neighbours differ in exactly one bit: gray = binary \u2295 (binary \u00BB 1). Position encoders use it because a sensor caught mid-step can only be off by one step, never by half the dial.",
+    wrong: "Thinking Gray code is an error-correcting code. It corrects nothing — it prevents a specific disaster: several bits changing at once and being sampled halfway, which can read as a value that was never counted.",
+    jump: ["circuits", "Gate Lab — counters, and the bits that change together"],
+    mount(el) {
+      let b = 7;
+      const gray = x => x ^ (x >> 1);
+      const bits4 = x => x.toString(2).padStart(4, "0");
+      el.innerHTML = '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button type="button" class="btn gc-prev">\u2212 count down</button><b class="mono gc-n" style="font-size:17px"></b><button type="button" class="btn gc-next">count up +</button></div>' +
+        '<div class="c-out gc-out"></div>' +
+        '<div class="tt-wrap" style="max-height:230px;overflow:auto;margin-top:10px"><table class="tt gc-tab"></table></div>' +
+        '<p style="font-size:12.5px;color:var(--muted);margin:10px 0 4px"><b style="color:var(--ink)">The encoder story — the 7 \u2192 8 step:</b></p>' +
+        '<div style="display:flex;gap:6px;flex-wrap:wrap"><button type="button" class="btn gc-sb">Binary 0111 \u2192 1000</button><button type="button" class="btn gc-sg">Gray 0100 \u2192 1100</button></div><div class="c-out gc-story">Pick a code and see what a sensor can read mid-transition.</div>';
+      const draw = () => {
+        const g = gray(b);
+        const work = [3, 2, 1, 0].map(pos => {
+          const hi = (b >> (pos + 1)) & 1, lo = (b >> pos) & 1;
+          return "g" + pos + " = b" + (pos + 1) + " \u2295 b" + pos + " = " + hi + " \u2295 " + lo + " = " + ((g >> pos) & 1);
+        });
+        el.querySelector(".gc-n").textContent = "count = " + b;
+        el.querySelector(".gc-out").innerHTML = "binary " + bits4(b) + " \u2192 gray = b \u2295 (b \u226B 1) = " + bits4(b) + " \u2295 " + bits4(b >> 1) + " = <b>" + bits4(g) + "</b><br>" + work.join(" · ");
+        let rows = "<thead><tr><th>n</th><th>binary</th><th>bits flipped</th><th>Gray</th><th>bits flipped</th></tr></thead><tbody>", tb = 0, tg = 0;
+        for (let i = 0; i <= 15; i++) {
+          const fb = i ? (bits4(i).split("").filter((c, k) => c !== bits4(i - 1)[k]).length) : 0;
+          const fg = i ? (bits4(gray(i)).split("").filter((c, k) => c !== bits4(gray(i - 1))[k]).length) : 0;
+          tb += fb; tg += fg;
+          rows += '<tr' + (i === b ? ' class="active"' : "") + "><td>" + i + "</td><td>" + bits4(i) + "</td><td>" + (i ? fb : "\u2014") + "</td><td>" + bits4(gray(i)) + "</td><td>" + (i ? fg : "\u2014") + "</td></tr>";
+        }
+        rows += "</tbody>";
+        el.querySelector(".gc-tab").innerHTML = rows;
+        el.querySelector(".gc-out").innerHTML += "<br>Counting 0\u219215 costs binary <b>" + tb + " bit-flips</b> in total; Gray costs <b>" + tg + "</b> — exactly one per step, by construction.";
+      };
+      const story = bin => {
+        const from = bin ? 7 : gray(7), to = bin ? 8 : gray(8);
+        const changing = [3, 2, 1, 0].filter(p => ((from >> p) & 1) !== ((to >> p) & 1));
+        const possible = [];
+        for (let mask = 0; mask < Math.pow(2, changing.length); mask++) { let v = from; changing.forEach((p, k) => { if (mask & (1 << k)) v ^= (1 << p); }); possible.push(v); }
+        possible.sort((x, y) => x - y);
+        el.querySelector(".gc-story").innerHTML = (bin ? "Binary" : "Gray") + " " + bits4(from) + " \u2192 " + bits4(to) + ": <b>" + changing.length + " bit" + (changing.length === 1 ? "" : "s") + " change" + (changing.length === 1 ? "s" : "") + "</b>. " +
+          (bin ? "If the sensor samples while the bits are mid-flight, each changing bit may read old or new: <b>" + possible.length + " different values</b> can appear (" + possible.join(", ") + ") — including values nowhere near 7 or 8. A position read as 0 or 15 for one instant is a real machine lurch."
+               : "Only one bit is ever in flight, so a mid-transition sample reads either the old value or the new one: <b>" + possible.length + " possibilities</b> (" + possible.join(", ") + "). Worst case the position is off by exactly one step — never by a lurch.");
+      };
+      el.querySelector(".gc-next").addEventListener("click", () => { b = (b + 1) % 16; draw(); });
+      el.querySelector(".gc-prev").addEventListener("click", () => { b = (b + 15) % 16; draw(); });
+      el.querySelector(".gc-sb").addEventListener("click", () => story(true));
+      el.querySelector(".gc-sg").addEventListener("click", () => story(false));
+      draw();
+    } },
+  bcd: { term: "BCD — binary that counts in decimal", def: "Binary-coded decimal gives every decimal digit its own 4-bit nibble (8421 weights). It wastes codes — 1010 to 1111 are forbidden — and buys exact decimal: no rounding, ever, which is why money and clocks still use it.",
+    wrong: "Thinking BCD is just binary written in groups. 42 in binary is 101010; in BCD it is 0100 0010. The grouping is the encoding, not a formatting choice — the nibble boundary forces a carry after 9, not after 15.",
+    jump: ["advanced", "Project · DIP-switch BCD \u2192 7-segment (7447)"],
+    mount(el) {
+      let n = 8;
+      const bin8 = x => x.toString(2).padStart(8, "0");
+      const nib = d => d.toString(2).padStart(4, "0");
+      el.innerHTML = '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button type="button" class="btn bc-step">Step the count +1</button><button type="button" class="btn bc-reset">Back to 0</button><b class="mono bc-n" style="font-size:16px"></b></div>' +
+        '<div class="c-out bc-out"></div>' +
+        '<p style="font-size:12.5px;color:var(--muted);margin:10px 0 4px"><b style="color:var(--ink)">One nibble, 16 patterns — only 10 are legal BCD:</b></p><div class="bc-chart" style="display:flex;gap:4px;flex-wrap:wrap"></div>' +
+        '<p style="font-size:12.5px;color:var(--muted);margin:10px 0 4px"><b style="color:var(--ink)">Check:</b> which pattern is 47 written in BCD?</p>' +
+        '<div class="bc-check" style="display:flex;gap:6px;flex-wrap:wrap"></div><div class="c-out bc-verdict">The two encodings part company at the nibble boundary.</div>';
+      const draw = () => {
+        const tens = Math.floor(n / 10), ones = n % 10;
+        el.querySelector(".bc-n").textContent = "value = " + n;
+        el.querySelector(".bc-out").innerHTML = "pure binary: <b>" + bin8(n) + "</b> (counts 0\u2013255, carries after 15 per nibble)<br>BCD: <b>" + nib(tens) + " " + nib(ones) + "</b> — tens nibble " + nib(tens) + " = " + tens + ", ones nibble " + nib(ones) + " = " + ones +
+          (n === 10 ? "<br><b>The divergence:</b> binary rolled 1001 \u2192 1010 and kept counting inside the nibble; BCD was forbidden from using 1010, so it spent a carry at 9 \u2192 10 and opened a new nibble. Six patterns per nibble are thrown away to keep digits honest." : "") +
+          (n > 10 ? "<br>Same value, different patterns: binary " + bin8(n) + " vs BCD " + nib(tens) + nib(ones) + " — they never agree again past 9." : "");
+        el.querySelector(".bc-chart").innerHTML = Array.from({ length: 16 }, (_, i) => '<span class="pin-badge" style="' + (i > 9 ? "opacity:.45;text-decoration:line-through;border-color:#c0563f;color:#c0563f" : "") + '">' + nib(i) + (i > 9 ? " \u2717" : " = " + i) + "</span>").join("");
+      };
+      el.querySelector(".bc-step").addEventListener("click", () => { n = n >= 20 ? 0 : n + 1; draw(); });
+      el.querySelector(".bc-reset").addEventListener("click", () => { n = 0; draw(); });
+      const bcd47 = nib(4) + " " + nib(7), bin47 = bin8(47).slice(0, 4) + " " + bin8(47).slice(4), swap47 = nib(7) + " " + nib(4);
+      el.querySelector(".bc-check").innerHTML = [bin47, bcd47, swap47].map(p => '<button type="button" class="btn bc-opt" data-p="' + p + '">' + p + "</button>").join("");
+      el.querySelectorAll(".bc-opt").forEach(btn => btn.addEventListener("click", () => {
+        const bits47 = 47 .toString(2).length, bcdBits = 2 * 4;
+        el.querySelector(".bc-verdict").textContent = btn.dataset.p === bcd47
+          ? "Correct: 47 in BCD is " + bcd47 + " — digit 4 in one nibble, digit 7 in the next. Width check: BCD spends " + bcdBits + " bits (2 digits \u00D7 4) where pure binary needs only " + bits47 + " (" + 47 .toString(2) + "). That 2-bit tax per number is the price of exact decimal digits."
+          : "Not BCD: " + btn.dataset.p + (btn.dataset.p === bin47 ? " is 47 in pure binary (" + bin8(47) + ") — one number, no digit boundaries." : " reads as digit 7 then digit 4 — that is 74 in BCD.") + " BCD encodes each digit separately: 4 \u2192 " + nib(4) + ", 7 \u2192 " + nib(7) + ", so 47 is " + bcd47 + ".";
+      }));
+      draw();
+    } },
+  parity: { term: "Parity & checksums — catching flipped bits", def: "Parity adds one bit that makes a word's 1-count even (or odd): any single flip breaks the count and is caught. A checksum adds whole bytes the same way. Both are arithmetic tripwires — cheap, and honestly limited.",
+    wrong: "Thinking a passing parity check means the data is correct. Two flips restore the count and sail through: parity detects every odd number of errors and is blind to every even number. It is a tripwire, not a proof.",
+    jump: ["circuits", "Hamming(7,4) error-correction lab — parity that can also repair"],
+    mount(el) {
+      const W = [1, 0, 1, 1, 0, 0, 1, 0];
+      let mode = "even", sent = null;
+      const xor = arr => arr.reduce((s, b) => s ^ b, 0);
+      el.innerHTML = '<p style="font-size:12.5px;color:var(--muted);margin:0 0 6px"><b style="color:var(--ink)">1 · The word.</b> Toggle the bits:</p><div class="pa-w" style="display:flex;gap:4px;flex-wrap:wrap"></div>' +
+        '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px"><button type="button" class="btn pa-m" data-m="even">Even parity</button><button type="button" class="btn pa-m" data-m="odd">Odd parity</button><button type="button" class="btn primary pa-send">Send it \u2192</button></div>' +
+        '<div class="c-out pa-out"></div>' +
+        '<p style="font-size:12.5px;color:var(--muted);margin:10px 0 6px"><b style="color:var(--ink)">2 · The channel.</b> After sending, click received bits to flip them (that is what noise does), and watch the checker:</p><div class="pa-r" style="display:flex;gap:4px;flex-wrap:wrap"></div><div class="c-out pa-check">Nothing sent yet.</div>' +
+        '<p style="font-size:12.5px;color:var(--muted);margin:10px 0 6px"><b style="color:var(--ink)">3 · A checksum over 4 bytes.</b> Edit a byte, or use the two attacks:</p>' +
+        '<div class="pa-bytes" style="display:flex;gap:8px;flex-wrap:wrap;align-items:end"></div>' +
+        '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px"><button type="button" class="btn pa-bump">Attack: change byte 3 by +1</button><button type="button" class="btn pa-swap">Attack: swap bytes 1 and 3</button></div><div class="c-out pa-sum"></div>';
+      const pbit = () => { const x = xor(W); return mode === "even" ? x : x ^ 1; };
+      const drawWord = () => {
+        el.querySelector(".pa-w").innerHTML = W.map((b, i) => '<button type="button" class="pa-bw" data-i="' + i + '" style="font-family:\'IBM Plex Mono\',monospace;font-weight:700;width:30px;height:34px;border-radius:7px;border:1.4px solid var(--line2);cursor:pointer;' + (b ? "background:var(--teal);color:#fff" : "background:var(--panel);color:var(--ink)") + '">' + b + "</button>").join("");
+        el.querySelectorAll(".pa-bw").forEach(btn => btn.addEventListener("click", () => { const i = +btn.dataset.i; W[i] = W[i] ? 0 : 1; drawWord(); }));
+        el.querySelector(".pa-out").innerHTML = "Word " + W.join("") + " has " + W.reduce((s, b) => s + b, 0) + " ones. " + (mode === "even" ? "Even" : "Odd") + " parity bit = <b>" + pbit() + "</b> (computed: XOR of the word " + (mode === "even" ? "as-is" : "inverted") + "), making the 9-bit codeword " + W.join("") + "<b>" + pbit() + "</b> with an " + mode + " total count.";
+        el.querySelectorAll(".pa-m").forEach(b => b.classList.toggle("primary", b.dataset.m === mode));
+      };
+      const drawRecv = () => {
+        if (!sent) { el.querySelector(".pa-r").innerHTML = ""; return; }
+        el.querySelector(".pa-r").innerHTML = sent.map((b, i) => '<button type="button" class="pa-br" data-i="' + i + '" aria-label="received bit ' + i + '" style="font-family:\'IBM Plex Mono\',monospace;font-weight:700;width:30px;height:34px;border-radius:7px;cursor:pointer;border:1.4px ' + (i === 8 ? "dashed" : "solid") + ' var(--line2);' + (b ? "background:var(--amber);color:#201505" : "background:var(--panel);color:var(--ink)") + '">' + b + "</button>").join("") + '<span style="font-size:11.5px;color:var(--muted);align-self:center">last bit = parity</span>';
+        el.querySelectorAll(".pa-br").forEach(btn => btn.addEventListener("click", () => { const i = +btn.dataset.i; sent[i] = sent[i] ? 0 : 1; drawRecv(); }));
+        const original = W.concat([pbit()]);
+        const flips = sent.filter((b, i) => b !== original[i]).length;
+        const ok = xor(sent) === (mode === "even" ? 0 : 1);
+        el.querySelector(".pa-check").innerHTML = "Checker recomputes the count over all 9 received bits: " + (ok ? "<b>count is " + mode + " — PASS</b>" : "<b>count is wrong — ERROR FLAGGED</b>") + ". Flips so far: " + flips + "." +
+          (flips === 0 ? " Untouched data passes, as it should." : ok ? " And yet the received word " + (sent.slice(0, 8).join("") === W.join("") ? "differs only in the parity bit" : "is NOT the word that was sent") + " — " + flips + " flips is an even count, so the tripwire never felt them. This is parity\u2019s honest limit." : " An odd number of flips always breaks the count — that much parity guarantees.");
+      };
+      el.querySelectorAll(".pa-m").forEach(b => b.addEventListener("click", () => { mode = b.dataset.m; sent = null; el.querySelector(".pa-check").textContent = "Parity mode changed — send again."; drawWord(); drawRecv(); }));
+      el.querySelector(".pa-send").addEventListener("click", () => { sent = W.concat([pbit()]); drawRecv(); });
+      const bytes = [58, 16, 196, 7];
+      const drawBytes = () => {
+        el.querySelector(".pa-bytes").innerHTML = bytes.map((v, i) => '<label style="font-size:12px;color:var(--muted)">byte ' + (i + 1) + '<br><input type="number" min="0" max="255" value="' + v + '" data-bi="' + i + '" style="width:70px;font:inherit;background:var(--panel);border:1px solid var(--line2);border-radius:6px;color:var(--ink);padding:4px 6px"/></label>').join("");
+        el.querySelectorAll("[data-bi]").forEach(inp => inp.addEventListener("input", () => { bytes[+inp.dataset.bi] = Math.max(0, Math.min(255, +inp.value || 0)); drawBytes(); }));
+        const sum = bytes.reduce((s, b) => s + b, 0), check = (256 - (sum % 256)) % 256, total = (sum + check) % 256;
+        el.querySelector(".pa-sum").innerHTML = "Sum of bytes = " + bytes.join(" + ") + " = " + sum + " \u00B1 mod 256 = " + (sum % 256) + ". Checksum byte = 256 \u2212 " + (sum % 256) + " = <b>" + check + "</b>, chosen so the grand total mod 256 is <b>" + total + "</b> " + (total === 0 ? "— receiver accepts." : "— receiver REJECTS: the bytes changed in transit.") ;
+      };
+      el.querySelector(".pa-bump").addEventListener("click", () => { bytes[2] = (bytes[2] + 1) % 256; drawBytes(); el.querySelector(".pa-sum").innerHTML += "<br>Byte 3 changed: the sum moved, the stored checksum no longer cancels it — <b>caught</b>."; });
+      el.querySelector(".pa-swap").addEventListener("click", () => { const t = bytes[0]; bytes[0] = bytes[2]; bytes[2] = t; drawBytes(); el.querySelector(".pa-sum").innerHTML += "<br>Bytes 1 and 3 swapped: addition does not care about order, so the sum — and the checksum — are unchanged. <b>Missed.</b> Order-blindness is the additive checksum\u2019s classic hole (CRCs exist to close it)."; });
+      drawWord(); drawBytes();
+    } },
+  memhier: { term: "Memory hierarchy — fast is small, big is slow", def: "No memory is both fast and big, so machines stack levels: tiny fast registers and caches near the CPU, vast slow disk at the bottom. Programs survive the 10-million-to-1 speed gap because they reuse nearby data — locality is the truce.",
+    wrong: "Thinking RAM is 'the memory' and caches are a bonus. A modern CPU starved to RAM-only speeds would run roughly a hundred times slower; the hierarchy is not an optimisation, it is what makes the rated speed real.",
+    jump: ["systems", "Cache explorer — the top of the pyramid at work"],
+    mount(el) {
+      const LV = [
+        { name: "Registers", size: "\u2248 1 KB", bytes: 1e3, ns: 0.3, cost: "part of the CPU die — priciest storage per byte that exists" },
+        { name: "L1 cache", size: "\u2248 64 KB", bytes: 64e3, ns: 1, cost: "SRAM on die — thousands of dollars per GB" },
+        { name: "L2 cache", size: "\u2248 1 MB", bytes: 1e6, ns: 4, cost: "SRAM on die — thousands of dollars per GB" },
+        { name: "L3 cache", size: "\u2248 32 MB", bytes: 32e6, ns: 12, cost: "SRAM shared across cores — still die area, still dear" },
+        { name: "RAM (DRAM)", size: "\u2248 16 GB", bytes: 16e9, ns: 100, cost: "\u2248 $3 per GB" },
+        { name: "SSD (flash)", size: "\u2248 1 TB", bytes: 1e12, ns: 100000, cost: "\u2248 $0.08 per GB" },
+        { name: "HDD (spinning disk)", size: "\u2248 8 TB", bytes: 8e12, ns: 1e7, cost: "\u2248 $0.02 per GB" }
+      ];
+      let sel = 4;
+      const human = sec => {
+        if (sec < 90) return sec % 1 ? sec.toFixed(1) + " seconds" : sec + " seconds";
+        if (sec < 5400) return (sec / 60).toFixed(1) + " minutes";
+        if (sec < 129600) return (sec / 3600).toFixed(1) + " hours";
+        return (sec / 86400).toFixed(1) + " days";
+      };
+      el.innerHTML = '<div class="mh-rows"></div><div class="c-out mh-out"></div><p style="font-size:12px;color:var(--muted);margin:8px 0 0">Sizes, times and prices are typical orders of magnitude for a current desktop-class machine — the ratios between levels, not the third digit, are the lesson.</p>';
+      const draw = () => {
+        const lo = Math.log10(LV[0].bytes), hi = Math.log10(LV[LV.length - 1].bytes);
+        el.querySelector(".mh-rows").innerHTML = LV.map((L, i) => {
+          const w = 26 + (Math.log10(L.bytes) - lo) / (hi - lo) * 74;
+          return '<button type="button" class="mh-row" data-i="' + i + '" style="display:flex;align-items:center;gap:9px;width:100%;text-align:left;background:none;border:none;border-bottom:1px solid var(--line);padding:5px 2px;cursor:pointer;color:var(--ink)">' +
+            '<span style="flex:0 0 118px;font-size:12.5px;font-weight:' + (i === sel ? "700" : "400") + '">' + L.name + "</span>" +
+            '<span style="height:16px;width:' + w.toFixed(1) + '%;max-width:46%;border-radius:3px;background:' + (i === sel ? "var(--amber)" : "var(--teal)") + ';opacity:' + (i === sel ? "1" : ".55") + '"></span>' +
+            '<span class="mono" style="font-size:11.5px;color:var(--muted)">' + L.size + " \u00B7 " + (L.ns < 1 ? L.ns + " ns" : L.ns >= 1e6 ? (L.ns / 1e6) + " ms" : L.ns >= 1e3 ? (L.ns / 1e3) + " \u00B5s" : L.ns + " ns") + "</span></button>";
+        }).join("");
+        el.querySelectorAll(".mh-row").forEach(r => r.addEventListener("click", () => { sel = +r.dataset.i; draw(); }));
+        const L = LV[sel], l1 = LV[1];
+        const ratio = L.ns / l1.ns;
+        el.querySelector(".mh-out").innerHTML = "<b>" + L.name + "</b> — size " + L.size + " \u00B7 access \u2248 " + (L.ns < 1 ? L.ns + " ns" : L.ns >= 1e6 ? (L.ns / 1e6) + " ms" : L.ns >= 1e3 ? (L.ns / 1e3) + " \u00B5s" : L.ns + " ns") + " \u00B7 cost: " + L.cost + ".<br>Human scale, computed from the ratios: if an L1 fetch took <b>1 second</b>, a fetch from " + L.name + " would take <b>" + human(ratio) + "</b>" + (sel === 1 ? " — it IS the 1-second reference; everything else is measured against it." : ". In one " + L.name + " fetch the CPU could make <b>" + Math.round(ratio).toLocaleString("en-US") + "</b> L1 fetches.") +
+          (sel >= 4 ? "<br>That gap is why a cache miss is not a small delay — and why programmers are taught to love sequential, local access patterns." : "");
+      };
+      draw();
+    } },
+  fixedpoint: { term: "Fixed point — fractions in binary", def: "Put an imaginary binary point in a fixed place — here 4 bits before it, 4 after (Q4.4) — and fractions become integers the ALU already knows. The price is a fixed step: with 4 fractional bits the finest grain is 1/16, and values between grains cannot exist.",
+    wrong: "Thinking fixed point is 'floating point but simpler'. Floating point moves the point to keep precision proportional; fixed point nails it down, so range and step are set at design time — overflow and grain are the designer's problem, forever.",
+    jump: ["advanced", "Tools · Number-conversion trainer — binary fractions by hand"],
+    mount(el) {
+      const A = [0, 0, 1, 0, 1, 1, 0, 0], B = [0, 0, 0, 1, 0, 1, 0, 0];
+      const units = bits => bits.reduce((s, b, i) => s + b * Math.pow(2, 7 - i), 0);
+      const dec = u => (u / 16).toFixed(4).replace(/0+$/, "").replace(/\.$/, ".0");
+      const PLACE = ["8", "4", "2", "1", "\u00BD", "\u00BC", "\u215B", "\u215F"];
+      el.innerHTML = '<div class="fp-a" style="display:flex;gap:4px;flex-wrap:wrap;align-items:flex-start"></div>' +
+        '<div class="c-out fp-out"></div>' +
+        '<p style="font-size:12.5px;color:var(--muted);margin:10px 0 4px"><b style="color:var(--ink)">Add a second Q4.4 pattern:</b></p><div class="fp-b" style="display:flex;gap:4px;flex-wrap:wrap;align-items:flex-start"></div>' +
+        '<div class="c-out fp-sum"></div>' +
+        '<p style="font-size:12.5px;color:var(--muted);margin:10px 0 4px"><b style="color:var(--ink)">Can it hold 0.1?</b></p>' +
+        '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center"><input type="text" class="fp-t" value="0.1" style="width:80px;font:inherit;background:var(--panel);border:1px solid var(--line2);border-radius:6px;color:var(--ink);padding:5px 8px"/><button type="button" class="btn fp-try">Find the nearest Q4.4 value</button></div><div class="c-out fp-near">Type a decimal and ask the format what it can actually store.</div>';
+      const row = (bits, cls) => bits.map((b, i) => '<span style="display:inline-flex;flex-direction:column;align-items:center;gap:2px"><button type="button" class="' + cls + '" data-i="' + i + '" style="font-family:\'IBM Plex Mono\',monospace;font-weight:700;width:30px;height:34px;border-radius:7px;cursor:pointer;border:1.4px solid ' + (i === 4 ? "var(--amber)" : "var(--line2)") + ";" + (b ? "background:var(--teal);color:#fff" : "background:var(--panel);color:var(--ink)") + '">' + b + '</button><span style="font-size:10.5px;color:var(--muted)">' + PLACE[i] + "</span></span>").join("") ;
+      const draw = () => {
+        el.querySelector(".fp-a").innerHTML = row(A, "fp-ba");
+        el.querySelector(".fp-b").innerHTML = row(B, "fp-bb");
+        el.querySelectorAll(".fp-ba").forEach(btn => btn.addEventListener("click", () => { const i = +btn.dataset.i; A[i] = A[i] ? 0 : 1; draw(); }));
+        el.querySelectorAll(".fp-bb").forEach(btn => btn.addEventListener("click", () => { const i = +btn.dataset.i; B[i] = B[i] ? 0 : 1; draw(); }));
+        const ua = units(A), ub = units(B);
+        const intPart = ua >> 4, frac = ua & 15;
+        el.querySelector(".fp-out").innerHTML = "Pattern " + A.slice(0, 4).join("") + "." + A.slice(4).join("") + " = " + (ua >> 4) + " + " + frac + "/16 = <b>" + dec(ua) + "</b>. The point never moves and is never stored — it lives in the programmer\u2019s head and in every line of code that touches this value.";
+        const tot = ua + ub, ovf = tot > 255, res = tot & 255;
+        el.querySelector(".fp-sum").innerHTML = dec(ua) + " + " + dec(ub) + " = <b>" + dec(tot) + "</b> in sixteenths: " + ua + " + " + ub + " = " + tot + (ovf ? " — that needs 9 bits. Q4.4 tops out at " + dec(255) + ", so the stored pattern wraps to " + res.toString(2).padStart(8, "0") + " = " + dec(res) + ": silent overflow, same as integers." : " \u2192 stored as " + res.toString(2).padStart(8, "0") + " (" + dec(res) + "). Plain integer addition did all the work — that is the appeal.");
+      };
+      el.querySelector(".fp-try").addEventListener("click", () => {
+        const x = parseFloat(el.querySelector(".fp-t").value);
+        if (isNaN(x)) { el.querySelector(".fp-near").textContent = "That is not a decimal number."; return; }
+        const u = Math.max(0, Math.min(255, Math.round(x * 16)));
+        const near = u / 16, err = Math.abs(x - near);
+        el.querySelector(".fp-near").innerHTML = "Nearest Q4.4 value to " + x + " is <b>" + near + "</b> (" + u.toString(2).padStart(8, "0").slice(0, 4) + "." + u.toString(2).padStart(8, "0").slice(4) + ") — error " + err.toFixed(5) + ", at most half a step (" + (1 / 32) + "). " + (err === 0 ? "This one lands exactly on a grain." : "Values between grains simply do not exist in this format; every store rounds, and the error is permanent.");
+      });
+      draw();
     } }
 });
 
@@ -18895,7 +19286,15 @@ table.tt tr.mu-cur td{background:var(--amber-soft);font-weight:700}
     "fault-trainer": "breadboard fault finding trainer diagnosis bench",
     "tristate-bus": "tri-state tristate bus high impedance",
     "sbx-sandbox": "sandbox build your own circuit gates chips",
-    "verilog-export": "verilog hdl export simulate simulation"
+    "verilog-export": "verilog hdl export simulate simulation",
+    "concept-signednums": "signed numbers negative two's complement twos complement sign magnitude ones complement overflow range",
+    "concept-kmapmin": "karnaugh kmap k-map minimise minimize simplify sop sum of products boolean grouping",
+    "concept-noise": "noise margin margins logic levels ttl cmos vil vih vol voh undefined band thresholds signal slack",
+    "concept-graycode": "gray code encoder rotary position one bit changes reflected binary counting",
+    "concept-bcd": "bcd binary coded decimal 8421 nibble digits decimal counting invalid codes money",
+    "concept-parity": "parity checksum error detection flipped bits even odd bytes crc tripwire",
+    "concept-memhier": "memory hierarchy pyramid registers cache ram ssd hdd latency access time cost locality levels storage",
+    "concept-fixedpoint": "fixed point fractions binary point decimals radix fractional step grain represent"
   };
   function enrichSearch() {
     const list = $W("menuList"); if (!list) return;
@@ -18918,7 +19317,7 @@ table.tt tr.mu-cur td{background:var(--amber-soft);font-weight:700}
   enrichSearch();
 
   /* ================= 2b) matcher: token AND over enriched haystacks ================= */
-  const Q_SYN = { "breadbord": ["breadboard"], "flip": ["latch"], "flop": ["latch"], "7": ["seven"], "kmap": ["karnaugh"], "karnaugh": ["kmap"], "mux": ["multiplexer"], "demux": ["demultiplexer"], "ecc": ["hamming", "error"], "dma": ["direct", "memory", "access"], "alu": ["arithmetic"] };
+  const Q_SYN = { "breadbord": ["breadboard"], "flip": ["latch"], "flop": ["latch"], "7": ["seven"], "kmap": ["karnaugh"], "karnaugh": ["kmap"], "mux": ["multiplexer"], "demux": ["demultiplexer"], "ecc": ["hamming", "error"], "dma": ["direct", "memory", "access"], "alu": ["arithmetic"], "negative": ["signed"], "simplify": ["karnaugh"], "rotary": ["gray"], "pyramid": ["hierarchy"], "fractions": ["fixed"], "margins": ["noise"], "decimal": ["bcd"] };
   window.__fgsQMatch = function (hay, q) {
     const toks = String(q).toLowerCase().split(/\s+/).filter(Boolean);
     return toks.every(t => {
