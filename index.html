@@ -5,6 +5,9 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="color-scheme" content="light dark" />
+<link rel="manifest" href="manifest.webmanifest" />
+<link rel="apple-touch-icon" href="apple-touch-icon.png" />
+<meta name="theme-color" content="#185a9d" />
 <link rel="icon" href="data:," />
 <title>From Gates to Systems</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -725,6 +728,14 @@ footer.site .owner-credit{font-size:13.5px;color:var(--ink);font-weight:600}
 .menu-item .mi-dot{width:7px;height:7px;border-radius:50%;background:var(--amber);flex:none;align-self:center;visibility:hidden}
 .menu-item[aria-current="true"] .mi-dot{visibility:visible}
 .menu-empty{font-size:13px;color:var(--muted);margin:10px 4px 4px}
+/* Install as an app — a quiet footer inside the Menu panel. It sits
+   outside .menu-list, so it is never filtered, folded or counted as a
+   menu item; it uses only theme variables, so Paper, Slate Dark,
+   Oscilloscope and Blueprint all carry it unchanged. */
+.menu-install{border-top:1px solid var(--line);margin-top:10px;padding:11px 4px 2px;flex:none}
+.menu-install h3{margin:0 0 8px;font-size:11px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
+.menu-install p{margin:8px 0 0;font-size:12.5px;line-height:1.5;color:var(--muted)}
+.menu-install .btn{min-height:40px}
 /* Text size settings strip — phone widths only. The bar's TEXT
    toggle moves here, to the very top of the Menu panel, above the
    accordion groups; above the phone breakpoint the row never shows
@@ -881,6 +892,11 @@ body.lvl-advanced #startHere{display:none}
             <div class="menu-filter-row"><input type="text" id="menuFilter" placeholder="Find anything — try mux, cache, 555, carry…" aria-label="Filter menu items" /><button type="button" class="menu-close-btn" id="menuCloseBtn" aria-label="Close menu">✕</button></div>
             <div class="menu-list" id="menuList"></div>
             <p class="menu-empty" id="menuEmpty" hidden>No item matches — try a shorter word.</p>
+            <div class="menu-install" id="menuInstall">
+              <h3>From Gates to Systems as an app</h3>
+              <button type="button" class="btn primary" id="installAppBtn">Install app</button>
+              <p>To install, open your browser menu and choose &ldquo;Install app&rdquo; or &ldquo;Add to Home Screen&rdquo;. On iPhone or iPad: open this page in Safari, tap Share, then &ldquo;Add to Home Screen&rdquo;.</p>
+            </div>
           </div>
         </div>
         <div class="theme-control">
@@ -9440,6 +9456,79 @@ const EP_PROJECTS = [
   });
 })();
 
+</script>
+<script>
+/* ===== Install as an app + service worker (automatic updates) =====
+   The companion files (manifest.webmanifest, sw.js, icons) live beside
+   this page in the published site. In the preview sandbox they 404:
+   every step below is guarded so that absence stays silent — no thrown
+   errors, no console noise — and the page behaves exactly as before. */
+(function () {
+  "use strict";
+
+  /* --- Install affordance: capture the browser's install prompt --- */
+  var deferredPrompt = null;
+  window.addEventListener("beforeinstallprompt", function (e) {
+    e.preventDefault();
+    deferredPrompt = e;
+  });
+  window.addEventListener("appinstalled", function () {
+    deferredPrompt = null;
+    var b = document.getElementById("installAppBtn");
+    if (b) { b.disabled = true; b.textContent = "App installed"; }
+  });
+  document.addEventListener("DOMContentLoaded", function () {
+    var btn = document.getElementById("installAppBtn");
+    if (!btn) return;
+    btn.addEventListener("click", function () {
+      if (!deferredPrompt) return; /* no prompt available: the instruction line under the button is the guide */
+      var p = deferredPrompt;
+      deferredPrompt = null;
+      try {
+        p.prompt();
+        if (p.userChoice && p.userChoice.then) p.userChoice.then(function () {}, function () {});
+      } catch (err) { /* prompt refused — instruction line still applies */ }
+    });
+  });
+
+  /* --- Service worker with automatic updates --- */
+  if (!("serviceWorker" in navigator)) return;
+  /* Was this page already controlled before we registered? That is what
+     separates an UPDATE (reload once, land on the newest build) from a
+     FIRST INSTALL (never force a reload). Captured before registering. */
+  var hadController = !!navigator.serviceWorker.controller;
+  var reloadFlag = "fgts-sw-reloaded";
+  var alreadyReloaded = false;
+  try { alreadyReloaded = window.sessionStorage.getItem(reloadFlag) === "1"; } catch (e) {}
+  navigator.serviceWorker.addEventListener("controllerchange", function () {
+    if (!hadController) return;      /* first install: leave the page alone */
+    if (alreadyReloaded) return;     /* session flag: reload at most once, no loops */
+    alreadyReloaded = true;
+    try { window.sessionStorage.setItem(reloadFlag, "1"); } catch (e) {}
+    window.location.reload();
+  });
+  function registerSW() {
+    var regPromise;
+    try {
+      regPromise = navigator.serviceWorker.register("sw.js", { updateViaCache: "none" });
+    } catch (e) { return; }
+    if (!regPromise || !regPromise.then) return;
+    regPromise.then(function (reg) {
+      var checkForUpdate = function () {
+        try {
+          var u = reg.update();
+          if (u && u.catch) u.catch(function () {});
+        } catch (e) {}
+      };
+      checkForUpdate(); /* look for a newer build on every load */
+      document.addEventListener("visibilitychange", function () {
+        if (document.visibilityState === "visible") checkForUpdate(); /* and whenever the page comes back into view */
+      });
+    }, function () { /* sw.js missing (preview sandbox): stay silent */ });
+  }
+  if (document.readyState === "complete") registerSW();
+  else window.addEventListener("load", registerSW);
+})();
 </script>
 </body>
 </html>
