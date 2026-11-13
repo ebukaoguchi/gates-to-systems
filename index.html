@@ -19488,3 +19488,1851 @@ table.tt tr.mu-cur td{background:var(--amber-soft);font-weight:700}
   decorateGallery();
 })();
 </script>
+<style>
+/* ===== Round X — module expansion: Organization +6 · Architecture +6 · OS +6 ===== */
+.rx-sigrow{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:5px 0}
+.rx-sigrow .rx-signame{font-family:"IBM Plex Mono",monospace;font-weight:700;font-size:13px;min-width:92px}
+.rx-sigrow .rx-sigdo{font-size:12.5px;color:var(--muted);flex:1;min-width:180px}
+.rx-tog{font-family:"IBM Plex Mono",monospace;font-weight:700;min-width:52px;min-height:40px;border:1.5px solid var(--line2);border-radius:8px;background:var(--panel2);cursor:pointer;color:var(--ink)}
+.rx-tog.on{border-color:var(--amber);background:var(--amber-soft)}
+.rx-tog.x{border-style:dashed;color:var(--muted)}
+.rx-bits{display:flex;flex-wrap:wrap;gap:3px;margin:8px 0}
+.rx-bits span{width:26px;height:30px;border:1.4px solid var(--line2);border-radius:6px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:"IBM Plex Mono",monospace;font-size:12px;font-weight:700;background:var(--panel2)}
+.rx-bits span small{font-size:8.5px;font-weight:600;color:var(--muted)}
+.rx-bits span.f-op{border-color:var(--amber);background:var(--amber-soft)}
+.rx-bits span.f-a{border-color:var(--teal)}
+.rx-bits span.f-b{border-color:var(--amber)}
+.rx-grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media (max-width:720px){.rx-grid2{grid-template-columns:1fr}}
+.rx-panel{border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--panel2)}
+.rx-panel h3{margin:0 0 6px;font-size:14.5px}
+.rx-membar{display:flex;height:34px;border:1px solid var(--line2);border-radius:7px;overflow:hidden;margin:6px 0}
+.rx-membar i{display:block;height:100%;font-style:normal;font-size:10.5px;font-family:"IBM Plex Mono",monospace;display:flex;align-items:center;justify-content:center;overflow:hidden;white-space:nowrap}
+.rx-membar .u{background:var(--amber-soft);border-right:1px solid var(--line2);color:var(--ink)}
+.rx-membar .f{background:var(--panel);color:var(--muted)}
+.rx-membar .new{background:var(--teal);color:#fff}
+.rx-slots{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0}
+.rx-slot{width:56px;min-height:48px;border:1.6px solid var(--line2);border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:"IBM Plex Mono",monospace;font-weight:700;background:var(--panel2);font-size:14px}
+.rx-slot small{font-size:9.5px;color:var(--muted);font-weight:600}
+.rx-slot.hit{border-color:var(--green)} .rx-slot.miss{border-color:var(--red)} .rx-slot.cur{border-color:var(--amber);background:var(--amber-soft)}
+.rx-disk{display:grid;grid-template-columns:repeat(8,1fr);gap:4px;margin:8px 0}
+.rx-disk span{border:1.4px solid var(--line2);border-radius:6px;min-height:38px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:"IBM Plex Mono",monospace;font-size:11px;background:var(--panel2);color:var(--muted)}
+.rx-disk span.other{background:var(--panel);opacity:.55}
+.rx-disk span.file{border-color:var(--amber);background:var(--amber-soft);color:var(--ink);font-weight:700}
+.rx-disk span.idx{border-color:var(--teal);color:var(--teal);font-weight:700}
+.rx-disk span.acc{outline:3px solid var(--amber);outline-offset:1px}
+.rx-tree{font-family:"IBM Plex Mono",monospace;font-size:13px;line-height:1.9;overflow-x:auto;white-space:nowrap}
+.rx-pool{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+.rx-step{border:1.6px solid var(--line2);background:var(--panel);border-radius:9px;padding:8px 11px;font-size:13px;cursor:pointer;text-align:left;color:var(--ink);min-height:44px}
+.rx-step:hover{border-color:var(--amber)}
+.rx-step .rx-mode{font-size:10.5px;font-weight:700;color:var(--muted);display:block}
+.rx-step.placed{border-color:var(--teal);background:var(--amber-soft)}
+.rx-fwpath{stroke:var(--line2);stroke-width:2;fill:none;stroke-dasharray:5 4}
+.rx-fwpath.on{stroke:var(--amber);stroke-width:3;stroke-dasharray:none}
+.rx-blocked{border-color:var(--red) !important;color:var(--red)}
+.rx-dead{border:1.6px solid var(--red);border-radius:9px;padding:9px 12px;color:var(--red);font-weight:700;margin:8px 0}
+input.rx-num{width:110px}
+select.rx-sel{max-width:100%}
+@media (max-width:480px){.rx-bits span{width:22px;height:28px;font-size:11px}.rx-disk{grid-template-columns:repeat(5,1fr)}}
+</style>
+<script>
+"use strict";
+/* ================================================================
+   ROUND X — module expansion (owner-approved next round):
+   Organization +6, Architecture +6, Operating Systems +6.
+   Every check below is graded by a model function in this block
+   (control table generated from the standard mapping, ALU decoder,
+   target arithmetic, slicing, performance formulas, register-file
+   timing model, pipeline cycle model, predictor state machines,
+   replacement policies, AMAT formula, page-table walker, exact
+   IEEE-754 integer significand math, a fork() execution model,
+   wait-for cycle detection, placement engines, allocation cost
+   functions, a semaphore state machine, and a syscall ordering
+   engine). Nothing is graded from a typed answer string.
+   All steppers start paused; nothing auto-runs.
+   ================================================================ */
+(function roundX() {
+  const $X = id => document.getElementById(id);
+  const escX = s => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+  function mulberryX(seed) { let a = seed >>> 0; return function () { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+  function jumpX(id) { const el = id && $X(id); if (el) setTimeout(() => el.scrollIntoView({ behavior: "smooth", block: "start" }), 60); }
+  function clickMenuKeyX(key) { const it = document.querySelector('#menuList .menu-item[data-key="' + key + '"]'); if (it) { it.click(); return true; } return false; }
+  const hexN = (v, n) => "0x" + (v >>> 0).toString(16).toUpperCase().padStart(n || 8, "0");
+  const binN = (v, n) => { let s = ""; for (let i = n - 1; i >= 0; i--) s += String((v >>> i) & 1); return s; };
+  function parseNum(s) { s = String(s == null ? "" : s).trim(); if (!s) return NaN; if (/^0x/i.test(s)) return parseInt(s, 16); if (/^[0-9a-f]+$/i.test(s) && /[a-f]/i.test(s)) return parseInt(s, 16); return parseFloat(s); }
+  function mkCard(hostId, id, title, what) {
+    const sec = document.createElement("section");
+    sec.className = "card stage-card"; sec.id = id; sec.style.marginTop = "16px"; sec.style.marginBottom = "16px";
+    sec.innerHTML = "<h2>" + title + "</h2>" + '<p class="what">' + what + "</p>";
+    const h = $X(hostId); if (h) h.appendChild(sec);
+    return sec;
+  }
+  function fbSet(el, ok, msg) { if (!el) return; el.textContent = (ok ? "✓ " : "✗ ") + msg; el.style.color = ok ? "var(--green)" : "var(--red)"; }
+  function optBtns(host, labels, onPick) {
+    host.innerHTML = "";
+    labels.forEach((lab, i) => {
+      const b = document.createElement("button"); b.type = "button"; b.className = "btn"; b.textContent = lab;
+      b.addEventListener("click", () => onPick(i, b));
+      host.appendChild(b);
+    });
+  }
+  function goSys(panelBtn, cardId) {
+    setTopArea("systems"); syncRail("systems");
+    const pb = document.querySelector('#sysPicker [data-sys="' + panelBtn + '"]'); if (pb) pb.click();
+    jumpX(cardId);
+  }
+  const XC = {}; /* verification handles, filled per activity */
+  window.__xCheck = XC;
+
+  /* ================================================================
+     O1 — CONTROL-SIGNAL DECODER
+     The table is the standard Patterson & Hennessy main-control
+     table, held as data the grader reads — the same table the
+     feedback explains from, per signal.
+     ================================================================ */
+  const SIGS = ["RegDst", "ALUSrc", "MemtoReg", "RegWrite", "MemRead", "MemWrite", "Branch", "ALUOp1", "ALUOp0"];
+  const SIG_DO = {
+    RegDst: "chooses which instruction field supplies the destination register number: 1 = rd field (bits 15–11), 0 = rt field (bits 20–16)",
+    ALUSrc: "chooses the ALU's second operand: 1 = the sign-extended immediate, 0 = the second register read",
+    MemtoReg: "chooses what is written back: 1 = the data-memory read value, 0 = the ALU result",
+    RegWrite: "enables writing the register file at the end of the cycle",
+    MemRead: "enables reading data memory",
+    MemWrite: "enables writing data memory",
+    Branch: "tells the PC logic to consider the branch target (taken when the ALU's Zero output is also set)",
+    ALUOp1: "the high bit of the 2-bit ALUOp the main control hands to the ALU control unit (see the ALU control lab)",
+    ALUOp0: "the low bit of ALUOp: ALUOp 00 = force add (lw/sw/addi), 01 = force subtract (beq), 1x = let the funct field decide (R-type)"
+  };
+  const CTRL = {
+    add:  { asm: "add $t0, $t1, $t2", kind: "R-type", v: { RegDst: 1, ALUSrc: 0, MemtoReg: 0, RegWrite: 1, MemRead: 0, MemWrite: 0, Branch: 0, ALUOp1: 1, ALUOp0: 0 } },
+    lw:   { asm: "lw $t0, 8($t1)", kind: "load", v: { RegDst: 0, ALUSrc: 1, MemtoReg: 1, RegWrite: 1, MemRead: 1, MemWrite: 0, Branch: 0, ALUOp1: 0, ALUOp0: 0 } },
+    sw:   { asm: "sw $t0, 8($t1)", kind: "store", v: { RegDst: "X", ALUSrc: 1, MemtoReg: "X", RegWrite: 0, MemRead: 0, MemWrite: 1, Branch: 0, ALUOp1: 0, ALUOp0: 0 } },
+    beq:  { asm: "beq $t0, $t1, label", kind: "branch", v: { RegDst: "X", ALUSrc: 0, MemtoReg: "X", RegWrite: 0, MemRead: 0, MemWrite: 0, Branch: 1, ALUOp1: 0, ALUOp0: 1 } },
+    addi: { asm: "addi $t0, $t1, -5", kind: "I-type ALU", v: { RegDst: 0, ALUSrc: 1, MemtoReg: 0, RegWrite: 1, MemRead: 0, MemWrite: 0, Branch: 0, ALUOp1: 0, ALUOp0: 0 } },
+    j:    { asm: "j label", kind: "jump", v: { RegDst: "X", ALUSrc: "X", MemtoReg: "X", RegWrite: 0, MemRead: 0, MemWrite: 0, Branch: 0, ALUOp1: "X", ALUOp0: "X" }, note: "Jump itself is steered by a separate Jump signal that is not one of these nine — the datapath takes the jump target from the instruction's low 26 bits, so most of the nine genuinely do not matter here. That is exactly what X means." }
+  };
+  function ctrlGrade(key, state) {
+    const want = CTRL[key].v, wrong = [];
+    SIGS.forEach(s => {
+      const w = want[s], g = state[s];
+      if (w === "X") return; /* don't care: any setting works */
+      if (String(g) !== String(w)) wrong.push({ sig: s, got: g, want: w });
+    });
+    return { ok: wrong.length === 0, wrong, total: SIGS.length };
+  }
+  XC.o1 = { table: CTRL, grade: ctrlGrade, signals: SIGS.slice() };
+  (function buildO1() {
+    const sec = mkCard("sysAssembly", "orgControlCard", "Control signals — set the nine switches for one instruction",
+      "Every instruction that crosses the single-cycle datapath is steered by <b>nine control signals</b> the control unit sets from the opcode alone. Pick an instruction, set each signal to <b>1</b>, <b>0</b> or <b>X</b> (don't care — the value genuinely cannot affect this instruction), then check yourself against the standard main-control table. Wrong signals are named, with what the wrong value would make the datapath do.");
+    sec.insertAdjacentHTML("beforeend",
+      '<div class="schematic-box"><svg viewBox="0 0 920 190" role="img" aria-label="Single-cycle datapath sketch: program counter, instruction memory, control unit, register file, ALU and data memory" style="display:block;width:100%;height:auto">' +
+      '<rect x="10" y="70" width="70" height="48" rx="6" style="fill:var(--panel);stroke:var(--line2)"/><text class="sh-lab" x="45" y="98" text-anchor="middle">PC</text>' +
+      '<path d="M80 94 H120" style="stroke:var(--ink);stroke-width:2"/>' +
+      '<rect x="120" y="60" width="130" height="68" rx="6" style="fill:var(--panel);stroke:var(--line2)"/><text class="sh-lab" x="185" y="90" text-anchor="middle">Instruction</text><text class="sh-lab" x="185" y="108" text-anchor="middle">memory</text>' +
+      '<path d="M250 94 H300" style="stroke:var(--ink);stroke-width:2"/>' +
+      '<rect x="300" y="30" width="130" height="52" rx="20" style="fill:var(--amber-soft);stroke:var(--amber)"/><text class="sh-lab" x="365" y="61" text-anchor="middle">Control unit</text>' +
+      '<rect x="300" y="106" width="150" height="68" rx="6" style="fill:var(--panel);stroke:var(--line2)"/><text class="sh-lab" x="375" y="136" text-anchor="middle">Register file</text><text class="sh-sub" x="375" y="154" text-anchor="middle">2 reads · 1 write</text>' +
+      '<path d="M365 82 V106" style="stroke:var(--amber);stroke-width:2"/>' +
+      '<path d="M450 140 H510" style="stroke:var(--ink);stroke-width:2"/>' +
+      '<rect x="510" y="106" width="110" height="68" rx="6" style="fill:var(--panel);stroke:var(--line2)"/><text class="sh-lab" x="565" y="136" text-anchor="middle">ALU</text><text class="sh-sub" x="565" y="154" text-anchor="middle">+ sign-extended imm</text>' +
+      '<path d="M620 140 H670" style="stroke:var(--ink);stroke-width:2"/>' +
+      '<rect x="670" y="106" width="130" height="68" rx="6" style="fill:var(--panel);stroke:var(--line2)"/><text class="sh-lab" x="735" y="136" text-anchor="middle">Data memory</text><text class="sh-sub" x="735" y="154" text-anchor="middle">MemRead · MemWrite</text>' +
+      '<path d="M735 106 V60 H440" style="stroke:var(--line2);stroke-width:1.6;fill:none"/><text class="sh-sub" x="590" y="52">write-back path (MemtoReg mux)</text>' +
+      '<text class="sh-sub" x="365" y="182" text-anchor="middle">the nine signals below all leave the control unit — set them as it would</text>' +
+      "</svg></div>" +
+      '<div class="tool-controls"><label>Instruction <span class="seg" role="group" aria-label="Instruction" id="c1Seg">' +
+      Object.keys(CTRL).map((k, i) => '<button type="button" data-c1="' + k + '" aria-pressed="' + (i === 0 ? "true" : "false") + '">' + k + "</button>").join("") +
+      '</span></label><span class="mono" id="c1Asm" style="font-size:14px"></span></div>' +
+      '<div id="c1Rows"></div>' +
+      '<div class="share-row"><button type="button" class="btn primary" id="c1Check">Check my nine signals</button>' +
+      '<button type="button" class="btn" id="c1Reset">Reset all to 0</button></div>' +
+      '<div class="decimal-line" id="c1Fb" aria-live="polite"></div>' +
+      '<p class="cp-formal adv-only">This is the main-control truth table for the single-cycle MIPS datapath (Patterson &amp; Hennessy): the outputs are pure combinational functions of the 6-bit opcode. X entries are genuine don\'t-cares — the corresponding datapath path is unused by that instruction, so a real control unit\'s minimised logic may output either value.</p>');
+    const state = {}; SIGS.forEach(s => state[s] = 0);
+    let cur = "add";
+    const rows = sec.querySelector("#c1Rows"); rows.innerHTML = "";
+    SIGS.forEach(s => {
+      const row = document.createElement("div"); row.className = "rx-sigrow";
+      row.innerHTML = '<span class="rx-signame"></span><button type="button" class="rx-tog" aria-label="Toggle ' + s + '">0</button><span class="rx-sigdo"></span>';
+      row.querySelector(".rx-signame").textContent = s;
+      row.querySelector(".rx-sigdo").textContent = SIG_DO[s];
+      const btn = row.querySelector(".rx-tog");
+      btn.addEventListener("click", () => {
+        state[s] = state[s] === 0 ? 1 : state[s] === 1 ? "X" : 0;
+        btn.textContent = String(state[s]);
+        btn.className = "rx-tog" + (state[s] === 1 ? " on" : state[s] === "X" ? " x" : "");
+      });
+      row.dataset.sig = s;
+      rows.appendChild(row);
+    });
+    function showInstr() {
+      sec.querySelector("#c1Asm").textContent = CTRL[cur].asm + "  ·  " + CTRL[cur].kind + (CTRL[cur].note ? " — " + CTRL[cur].note : "");
+      sec.querySelector("#c1Fb").textContent = "";
+    }
+    sec.querySelector("#c1Seg").querySelectorAll("[data-c1]").forEach(b => b.addEventListener("click", () => {
+      cur = b.dataset.c1;
+      sec.querySelector("#c1Seg").querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x === b ? "true" : "false"));
+      showInstr();
+    }));
+    sec.querySelector("#c1Reset").addEventListener("click", () => {
+      SIGS.forEach(s => state[s] = 0);
+      rows.querySelectorAll(".rx-tog").forEach(b => { b.textContent = "0"; b.className = "rx-tog"; });
+      sec.querySelector("#c1Fb").textContent = "";
+    });
+    sec.querySelector("#c1Check").addEventListener("click", () => {
+      const g = ctrlGrade(cur, state), fbEl = sec.querySelector("#c1Fb");
+      if (g.ok) { fbSet(fbEl, true, "All nine signals match the main-control table for " + CTRL[cur].asm + " — including the don't-cares, which you may set any way you like. Try the next instruction: the pattern of what changes is the whole lesson."); return; }
+      fbEl.style.color = "var(--red)";
+      fbEl.innerHTML = "✗ " + g.wrong.length + " signal" + (g.wrong.length === 1 ? "" : "s") + " wrong for <b>" + escX(CTRL[cur].asm) + "</b>:<br>" + g.wrong.map(w =>
+        "· <b>" + w.sig + "</b>: you set " + w.got + ", the table says " + w.want + ". " + escX(SIG_DO[w.sig]) + " — with your value, this instruction would take the wrong path there.").join("<br>");
+    });
+    showInstr();
+  })();
+
+  /* ================================================================
+     O2 — ALU CONTROL LAB
+     Decoder generated from the standard mapping:
+     ALUOp 00 -> add (0010) · 01 -> subtract (0110) ·
+     1x -> funct: 100000 add, 100010 sub, 100100 AND, 100101 OR,
+     101010 slt, 100111 NOR.
+     ================================================================ */
+  const ALU_OPS = { "0000": "AND", "0001": "OR", "0010": "add", "0110": "subtract", "0111": "set on less than", "1100": "NOR" };
+  const FUNCT_MAP = { "100000": "0010", "100010": "0110", "100100": "0000", "100101": "0001", "101010": "0111", "100111": "1100" };
+  function aluControl(aluOp, funct) {
+    if (aluOp === "00") return { ctrl: "0010", op: "add", why: "ALUOp = 00 is the load/store (and addi) case: the ALU must add to form the address base + offset, whatever the funct-looking bits hold — in a load/store word those bits are part of the immediate, not an operation code. The add is forced." };
+    if (aluOp === "01") return { ctrl: "0110", op: "subtract", why: "ALUOp = 01 is the branch case: beq subtracts the two registers and the Zero output of that subtraction is what Branch ANDs with. The subtract is forced." };
+    const c = FUNCT_MAP[funct];
+    return { ctrl: c, op: ALU_OPS[c], why: "ALUOp = 1x hands the decision to the funct field: funct " + funct + " decodes to " + c + " (" + ALU_OPS[c] + ") in the ALU control table." };
+  }
+  XC.o2 = { control: aluControl, verify: () => ["00", "01"].every(op => aluControl(op, "100000").ctrl === (op === "00" ? "0010" : "0110")) && Object.keys(FUNCT_MAP).every(f => aluControl("10", f).ctrl === FUNCT_MAP[f]) };
+  (function buildO2() {
+    const SCEN = [
+      { label: "lw $t0, 8($t1)", aluOp: "00", funct: null, note: "a load: the low 16 bits of this word are the offset 8 — there is no funct field to consult" },
+      { label: "sw $t0, 8($t1)", aluOp: "00", funct: null, note: "a store: same address math as lw" },
+      { label: "beq $t0, $t1, label", aluOp: "01", funct: null, note: "a branch: equality is tested by subtraction" },
+      { label: "add $t0, $t1, $t2", aluOp: "10", funct: "100000", note: "R-type: funct decides" },
+      { label: "sub $t0, $t1, $t2", aluOp: "10", funct: "100010", note: "R-type: funct decides" },
+      { label: "and $t0, $t1, $t2", aluOp: "10", funct: "100100", note: "R-type: funct decides" },
+      { label: "or $t0, $t1, $t2", aluOp: "10", funct: "100101", note: "R-type: funct decides" },
+      { label: "slt $t0, $t1, $t2", aluOp: "10", funct: "101010", note: "R-type: funct decides" },
+      { label: "nor $t0, $t1, $t2", aluOp: "10", funct: "100111", note: "R-type: funct decides" }
+    ];
+    const sec = mkCard("sysAssembly", "orgAluCard", "ALU control — two steps from ALUOp and funct to the four control lines",
+      "The main control unit does not drive the ALU directly. It hands the <b>ALU control</b> unit a 2-bit <b>ALUOp</b>, and for R-type instructions the <b>funct field</b> finishes the decode. Work it in the hardware's own order: first say what ALUOp alone forces, then pick the exact 4-bit control. The lw/sw case is the trap most students miss: ALUOp 00 <b>forces add</b>, even though the bits where funct would sit are busy being an address offset.");
+    sec.insertAdjacentHTML("beforeend",
+      '<div class="tool-controls"><label>Instruction <select id="acSel" class="rx-sel">' + SCEN.map((s, i) => '<option value="' + i + '">' + s.label + "</option>").join("") + "</select></label>" +
+      '<span class="mono" id="acBits" style="font-size:13px"></span></div>' +
+      '<div class="ctrl-label">Step 1 — what does ALUOp = <span class="mono" id="acOp"></span> by itself decide?</div>' +
+      '<div class="share-row" id="acStep1"></div><div class="decimal-line" id="acFb1" aria-live="polite"></div>' +
+      '<div class="ctrl-label" style="margin-top:10px">Step 2 — the exact 4-bit ALU control for this instruction</div>' +
+      '<div class="share-row" id="acStep2"></div><div class="decimal-line" id="acFb2" aria-live="polite"></div>' +
+      '<p class="cp-formal adv-only">ALU control is a small combinational decoder: control = f(ALUOp, funct[5:0]). Its six used outputs are AND 0000, OR 0001, add 0010, subtract 0110, slt 0111, NOR 1100; the remaining ten codes are unused in this ALU slice design.</p>');
+    let cur = SCEN[0];
+    function render() {
+      sec.querySelector("#acOp").textContent = cur.aluOp;
+      sec.querySelector("#acBits").textContent = cur.funct ? "funct = " + cur.funct + "  ·  " + cur.note : "no funct field  ·  " + cur.note;
+      sec.querySelector("#acFb1").textContent = ""; sec.querySelector("#acFb2").textContent = "";
+      optBtns(sec.querySelector("#acStep1"),
+        ["Force add — ALUOp 00 (address math)", "Force subtract — ALUOp 01 (branch compare)", "Defer to funct — ALUOp 1x (R-type)"],
+        i => {
+          const want = cur.aluOp === "00" ? 0 : cur.aluOp === "01" ? 1 : 2;
+          fbSet(sec.querySelector("#acFb1"), i === want, i === want ? aluControl(cur.aluOp, cur.funct).why : "Not this class — ALUOp = " + cur.aluOp + (cur.aluOp === "00" ? " always forces the address addition; the funct position is occupied by immediate bits here." : cur.aluOp === "01" ? " always forces the subtraction whose Zero output the branch tests." : " means the main control is deferring: only the funct field can pick the operation."));
+        });
+      optBtns(sec.querySelector("#acStep2"),
+        Object.keys(ALU_OPS).map(c => c + " · " + ALU_OPS[c]),
+        i => {
+          const want = aluControl(cur.aluOp, cur.funct), picked = Object.keys(ALU_OPS)[i];
+          fbSet(sec.querySelector("#acFb2"), picked === want.ctrl, picked === want.ctrl ? "Control " + want.ctrl + " = " + want.op + ". " + want.why : "That code is " + ALU_OPS[picked] + " — the decoder outputs " + want.ctrl + " (" + want.op + ") here. " + want.why);
+        });
+    }
+    sec.querySelector("#acSel").addEventListener("change", e => { cur = SCEN[+e.target.value]; render(); });
+    render();
+  })();
+
+  /* ================================================================
+     O3 — BRANCH & JUMP TARGET CALCULATOR
+     Targets computed from the word + PC by the two textbook rules.
+     ================================================================ */
+  function targetGen(seed) {
+    const rng = mulberryX(77000 + seed * 977);
+    const isJump = seed % 2 === 1;
+    const pc = (0x00400000 + 4 * Math.floor(rng() * 64)) >>> 0;
+    if (!isJump) {
+      let imm = Math.floor(rng() * 25) - 12; if (imm === 0) imm = 3;
+      const word = ((0x04 << 26) | (9 << 21) | (8 << 16) | (imm & 0xFFFF)) >>> 0;
+      const offsetBytes = imm << 2;
+      const target = (pc + 4 + offsetBytes) >>> 0;
+      return { type: "beq", pc, word, imm, offsetBytes, target, asm: "beq $t1, $t0, " + imm };
+    }
+    const field = (0x100000 + Math.floor(rng() * 0x400)) >>> 0;
+    const word = ((0x02 << 26) | field) >>> 0;
+    const target = ((((pc + 4) >>> 0) & 0xF0000000) | (field << 2)) >>> 0;
+    return { type: "j", pc, word, field, target, asm: "j " + hexN(target, 8) };
+  }
+  function targetOf(word, pc) {
+    const op = (word >>> 26) & 0x3F;
+    if (op === 0x04) { let imm = word & 0xFFFF; if (imm & 0x8000) imm -= 0x10000; return { type: "beq", imm, offsetBytes: imm << 2, target: (pc + 4 + (imm << 2)) >>> 0 }; }
+    if (op === 0x02 || op === 0x03) { const field = word & 0x3FFFFFF; return { type: "j", field, target: ((((pc + 4) >>> 0) & 0xF0000000) | (field << 2)) >>> 0 }; }
+    return null;
+  }
+  XC.o3 = { gen: targetGen, targetOf, verify: () => { for (let s = 0; s < 12; s++) { const g = targetGen(s); const t = targetOf(g.word, g.pc); if (!t || t.target !== g.target) return false; } return true; } };
+  (function buildO3() {
+    const sec = mkCard("sysAssembly", "orgTargetCard", "Branch & jump target calculator — where does the PC go?",
+      "Branches and jumps do not store an address — they store a <b>recipe</b> for one. A branch keeps a 16-bit signed word offset: sign-extend it, shift it left 2 (instructions are 4 bytes), add it to <b>PC + 4</b>. A jump keeps 26 bits: shift left 2 and take the top nibble from PC + 4. Slice the real word below, then enter each stage — every value is checked against the same arithmetic. The first problem is also worked in full, underneath.");
+    sec.insertAdjacentHTML("beforeend",
+      '<div class="seq-state" id="btInfo"></div>' +
+      '<div class="rx-bits" id="btBits" aria-label="Instruction word bits"></div>' +
+      '<div class="rx-grid2"><div class="rx-panel"><h3 id="btQ1T"></h3>' +
+      '<label class="fld">Your answer <input type="text" id="btIn1" class="rx-num" autocomplete="off" /></label> ' +
+      '<button type="button" class="btn" id="btCk1">Check step 1</button><div class="decimal-line" id="btFb1" aria-live="polite"></div></div>' +
+      '<div class="rx-panel"><h3>Step 2 — the target address (hex)</h3>' +
+      '<label class="fld">Target <input type="text" id="btIn2" class="rx-num" autocomplete="off" placeholder="0x…" /></label> ' +
+      '<button type="button" class="btn" id="btCk2">Check target</button><div class="decimal-line" id="btFb2" aria-live="polite"></div></div></div>' +
+      '<div class="share-row"><button type="button" class="btn primary" id="btNew">New problem</button>' +
+      '<button type="button" class="btn" id="btWork">Work this one through with me</button></div>' +
+      '<div class="decimal-line" id="btWorkOut" aria-live="polite"></div>' +
+      '<p class="cp-formal adv-only">Branch target = PC + 4 + sign_extend(imm16) × 4; the ×4 is why branch offsets are counted in instructions, and PC + 4 (not PC) because the PC has already advanced past the branch when the target is computed. Jump target = { (PC+4)[31:28], field26, 00 } — a jump can reach any instruction in the current 256 MB region, and no further.</p>');
+    let seed = 0, g = targetGen(0);
+    function bitsHtml() {
+      const host = sec.querySelector("#btBits"); host.innerHTML = "";
+      const groups = g.type === "beq" ? [[31, 26, "opcode", "f-op"], [25, 21, "rs", "f-a"], [20, 16, "rt", "f-b"], [15, 0, "imm16", "f-a"]] : [[31, 26, "opcode", "f-op"], [25, 0, "target field ×4", "f-a"]];
+      groups.forEach(([hi, lo, lab, cls]) => {
+        for (let i = hi; i >= lo; i--) {
+          const sp = document.createElement("span"); sp.className = cls;
+          sp.innerHTML = ((g.word >>> i) & 1) + (i === lo ? "<small>" + lab + "</small>" : "");
+          host.appendChild(sp);
+        }
+      });
+    }
+    function render() {
+      g = targetGen(seed);
+      sec.querySelector("#btInfo").innerHTML =
+        '<div class="seq-cell"><b>' + escX(g.asm) + '</b>instruction</div>' +
+        '<div class="seq-cell"><b>' + hexN(g.pc, 8) + '</b>sits at PC</div>' +
+        '<div class="seq-cell"><b>' + hexN(g.word, 8) + '</b>its 32-bit word</div>' +
+        '<div class="seq-cell"><b>' + hexN((g.pc + 4) >>> 0, 8) + '</b>PC + 4</div>';
+      bitsHtml();
+      sec.querySelector("#btQ1T").textContent = g.type === "beq" ? "Step 1 — the byte offset: sign-extend the immediate, then shift left 2 (decimal)" : "Step 1 — the 26-bit target field, exactly as stored (hex)";
+      sec.querySelector("#btIn1").value = ""; sec.querySelector("#btIn2").value = "";
+      sec.querySelector("#btFb1").textContent = ""; sec.querySelector("#btFb2").textContent = ""; sec.querySelector("#btWorkOut").textContent = "";
+    }
+    sec.querySelector("#btCk1").addEventListener("click", () => {
+      const v = parseNum(sec.querySelector("#btIn1").value), fbEl = sec.querySelector("#btFb1");
+      if (g.type === "beq") fbSet(fbEl, v === g.offsetBytes, v === g.offsetBytes ? "Right: imm = " + g.imm + ", and " + g.imm + " × 4 = " + g.offsetBytes + " bytes. Note the sign survived — a negative immediate branches backwards." : "Not yet — extract imm16 = " + g.imm + " (sign-extended from the bits above), then multiply by 4 because the offset counts instructions, not bytes. Expected " + g.offsetBytes + ".");
+      else fbSet(fbEl, v === g.field, v === g.field ? "Right: the field is " + hexN(g.field, 7) + " — still an instruction count, not yet an address." : "Not yet — the field is the low 26 bits of the word: " + hexN(g.field, 7) + ". Read them off the highlighted bits.");
+    });
+    sec.querySelector("#btCk2").addEventListener("click", () => {
+      const v = parseNum(sec.querySelector("#btIn2").value), fbEl = sec.querySelector("#btFb2");
+      const ok = (v >>> 0) === g.target;
+      fbSet(fbEl, ok, ok ? (g.type === "beq" ? "Target = PC + 4 + offset = " + hexN((g.pc + 4) >>> 0, 8) + " + (" + g.offsetBytes + ") = " + hexN(g.target, 8) + ". That is where the next fetch comes from if the branch is taken." : "Target = top nibble of PC + 4, then the field shifted left 2: " + hexN(g.target, 8) + ".") : "Not the target — " + (g.type === "beq" ? "add the byte offset from step 1 to PC + 4 (" + hexN((g.pc + 4) >>> 0, 8) + "), not to PC. The PC has already moved past this instruction." : "combine: ((PC + 4) & 0xF0000000) | (field << 2). The top four bits come from PC + 4 — the field alone is not the address.") + " The computed target is " + hexN(g.target, 8) + ".");
+    });
+    sec.querySelector("#btWork").addEventListener("click", () => {
+      const o = sec.querySelector("#btWorkOut");
+      if (g.type === "beq") o.textContent = "Worked: the low 16 bits hold " + binN(g.word & 0xFFFF, 16) + " = " + g.imm + " as a signed number (the top bit is 1, so it is negative — sign extension fills the high half with 1s, giving " + hexN(g.imm >>> 0, 8) + "). Shifted left 2: " + g.offsetBytes + " bytes. PC + 4 = " + hexN((g.pc + 4) >>> 0, 8) + ". Target = " + hexN((g.pc + 4) >>> 0, 8) + " + (" + g.offsetBytes + ") = " + hexN(g.target, 8) + ". Now enter both steps yourself — the checker uses these same numbers.";
+      else o.textContent = "Worked: the low 26 bits hold field " + hexN(g.field, 7) + ". Shifted left 2 it becomes " + hexN((g.field << 2) >>> 0, 8) + ". PC + 4 = " + hexN((g.pc + 4) >>> 0, 8) + ", whose top nibble is " + ((g.pc + 4) >>> 28) + " — it fills bits 31–28. Combined target: " + hexN(g.target, 8) + ". Now enter both steps yourself.";
+    });
+    sec.querySelector("#btNew").addEventListener("click", () => { seed++; render(); });
+    render();
+  })();
+
+  /* ================================================================
+     O4 — SIGN EXTENSION & IMMEDIATES
+     Fields sliced in code from the word; extension rule per opcode:
+     arithmetic/load immediates sign-extend, logical (andi/ori/xori)
+     zero-extend.
+     ================================================================ */
+  const slice = (word, hi, lo) => (word >>> lo) & ((1 << (hi - lo + 1)) - 1);
+  const signExt16 = v => (v & 0x8000) ? v - 0x10000 : v;
+  const LOGICAL_OPS = { 0x0C: "andi", 0x0D: "ori", 0x0E: "xori" };
+  function sliceScenario(i) {
+    const mkI = (op, rs, rt, imm) => (((op << 26) | (rs << 21) | (rt << 16) | (imm & 0xFFFF)) >>> 0);
+    const list = [
+      { name: "addi $t0, $t1, -5", word: mkI(0x08, 9, 8, -5), kind: "I" },
+      { name: "lw $v0, -16($sp)", word: mkI(0x23, 29, 2, -16), kind: "I" },
+      { name: "ori $t1, $t0, 0x8001", word: mkI(0x0D, 8, 9, 0x8001), kind: "I" },
+      { name: "jal 0x0040048C region", word: ((0x03 << 26) | 0x100123) >>> 0, kind: "J", pc: 0x00400010 }
+    ];
+    const s = list[i % list.length];
+    if (s.kind === "I") {
+      const op = slice(s.word, 31, 26), imm = slice(s.word, 15, 0);
+      const logical = !!LOGICAL_OPS[op];
+      s.fields = { opcode: op, rs: slice(s.word, 25, 21), rt: slice(s.word, 20, 16), imm };
+      s.extKind = logical ? "zero" : "sign";
+      s.extended = (logical ? imm : signExt16(imm)) >>> 0;
+      s.opName = logical ? LOGICAL_OPS[op] : (op === 0x08 ? "addi" : op === 0x23 ? "lw" : "op " + op);
+    } else {
+      s.fields = { opcode: slice(s.word, 31, 26), field: slice(s.word, 25, 0) };
+      s.target = ((((s.pc + 4) >>> 0) & 0xF0000000) | (s.fields.field << 2)) >>> 0;
+    }
+    return s;
+  }
+  XC.o4 = { slice, signExt16, scenario: sliceScenario };
+  (function buildO4() {
+    const sec = mkCard("sysAssembly", "orgSignCard", "Sign extension & immediates — slicing real instruction words",
+      "Every I-type word packs the same fields: <b>opcode · rs · rt · 16-bit immediate</b>. Slice them out of the word below — then extend the immediate to 32 bits. The catch this lab exists for: <b>arithmetic and load/store immediates sign-extend</b>, but the <b>logical immediates (andi, ori, xori) zero-extend</b>, because a bit pattern is not a negative number. One of the four words below is a logical case with its top immediate bit set — exactly where the two rules give different answers.");
+    sec.insertAdjacentHTML("beforeend",
+      '<div class="tool-controls"><label>Instruction word <span class="seg" role="group" aria-label="Scenario" id="seSeg">' +
+      [0, 1, 2, 3].map(i => '<button type="button" data-se="' + i + '" aria-pressed="' + (i === 0 ? "true" : "false") + '">' + ["addi −5", "lw −16", "ori 0x8001", "jal"][i] + "</button>").join("") + "</span></label>" +
+      '<span class="mono" id="seName" style="font-size:13.5px"></span></div>' +
+      '<div class="rx-bits" id="seBits"></div><div id="seQs"></div>' +
+      '<div class="share-row"><button type="button" class="btn primary" id="seCheck">Check my slicing</button></div>' +
+      '<div class="decimal-line" id="seFb" aria-live="polite"></div>' +
+      '<p class="cp-formal adv-only">Sign extension replicates bit 15 into bits 31–16, preserving the value of a two\'s-complement number; zero extension fills with 0s, preserving the value of an unsigned bit pattern. MIPS chooses per opcode: addi/addiu/lw/sw and branches sign-extend; andi/ori/xori zero-extend; lui does neither (it shifts the field into the top half).</p>');
+    let cur = sliceScenario(0);
+    function render() {
+      sec.querySelector("#seName").textContent = cur.name + "  ·  word " + hexN(cur.word, 8);
+      const host = sec.querySelector("#seBits"); host.innerHTML = "";
+      const groups = cur.kind === "I" ? [[31, 26, "opcode", "f-op"], [25, 21, "rs", "f-a"], [20, 16, "rt", "f-b"], [15, 0, "imm16", "f-a"]] : [[31, 26, "opcode", "f-op"], [25, 0, "address field", "f-a"]];
+      groups.forEach(([hi, lo, lab, cls]) => { for (let i = hi; i >= lo; i--) { const sp = document.createElement("span"); sp.className = cls; sp.innerHTML = ((cur.word >>> i) & 1) + (i === lo ? "<small>" + lab + "</small>" : ""); host.appendChild(sp); } });
+      const q = sec.querySelector("#seQs");
+      if (cur.kind === "I") {
+        q.innerHTML =
+          '<div class="rx-grid2"><div class="rx-panel"><h3>Slice the fields</h3>' +
+          '<label class="fld">opcode (decimal) <input type="text" id="seOp" class="rx-num" autocomplete="off" /></label><br>' +
+          '<label class="fld">rs (decimal) <input type="text" id="seRs" class="rx-num" autocomplete="off" /></label><br>' +
+          '<label class="fld">rt (decimal) <input type="text" id="seRt" class="rx-num" autocomplete="off" /></label><br>' +
+          '<label class="fld">immediate, as stored (hex) <input type="text" id="seImm" class="rx-num" autocomplete="off" placeholder="0x…" /></label></div>' +
+          '<div class="rx-panel"><h3>Extend it</h3>' +
+          '<div class="ctrl-label">For ' + escX(cur.opName) + ', the 16-bit immediate is…</div>' +
+          '<div class="share-row" id="seExtBtns"></div>' +
+          '<label class="fld">the 32-bit value the datapath actually uses (hex) <input type="text" id="seExt" class="rx-num" autocomplete="off" placeholder="0x…" /></label></div></div>';
+        optBtns(q.querySelector("#seExtBtns"), ["sign-extended", "zero-extended"], i => { q.dataset.extPick = i === 0 ? "sign" : "zero"; q.querySelectorAll("#seExtBtns .btn").forEach((b, j) => b.setAttribute("aria-pressed", j === i ? "true" : "false")); });
+      } else {
+        q.innerHTML =
+          '<div class="rx-grid2"><div class="rx-panel"><h3>Slice the fields</h3>' +
+          '<label class="fld">opcode (decimal) <input type="text" id="seOp" class="rx-num" autocomplete="off" /></label><br>' +
+          '<label class="fld">26-bit address field (hex) <input type="text" id="seImm" class="rx-num" autocomplete="off" placeholder="0x…" /></label></div>' +
+          '<div class="rx-panel"><h3>Assemble the target</h3>' +
+          '<p style="font-size:13px;margin:0 0 8px">This instruction sits at PC = ' + hexN(cur.pc, 8) + '. The jump target takes its top nibble from PC + 4 and the field shifted left 2.</p>' +
+          '<label class="fld">jump target (hex) <input type="text" id="seExt" class="rx-num" autocomplete="off" placeholder="0x…" /></label></div></div>';
+      }
+      sec.querySelector("#seFb").textContent = "";
+    }
+    sec.querySelector("#seSeg").querySelectorAll("[data-se]").forEach(b => b.addEventListener("click", () => {
+      sec.querySelector("#seSeg").querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x === b ? "true" : "false"));
+      cur = sliceScenario(+b.dataset.se); render();
+    }));
+    sec.querySelector("#seCheck").addEventListener("click", () => {
+      const fbEl = sec.querySelector("#seFb"), wrong = [];
+      const gv = id => { const el = sec.querySelector(id); return el ? parseNum(el.value) : NaN; };
+      if (gv("#seOp") !== cur.fields.opcode) wrong.push("opcode: bits 31–26 hold " + cur.fields.opcode + " (" + binN(cur.fields.opcode, 6) + "), not " + sec.querySelector("#seOp").value);
+      if (cur.kind === "I") {
+        if (gv("#seRs") !== cur.fields.rs) wrong.push("rs: bits 25–21 hold register " + cur.fields.rs);
+        if (gv("#seRt") !== cur.fields.rt) wrong.push("rt: bits 20–16 hold register " + cur.fields.rt);
+        if (gv("#seImm") !== cur.fields.imm) wrong.push("immediate as stored: the low 16 bits are " + hexN(cur.fields.imm, 4) + " — copy them exactly, before any extension");
+        const pick = sec.querySelector("#seQs").dataset.extPick;
+        if (pick !== cur.extKind) wrong.push("extension rule: " + cur.opName + " is a " + (cur.extKind === "zero" ? "logical operation, so its immediate ZERO-extends — the pattern is a mask, not a signed number" : "value operation, so its immediate SIGN-extends — bit 15 is the sign of a two's-complement number"));
+        if ((gv("#seExt") >>> 0) !== cur.extended) wrong.push("extended value: " + (cur.extKind === "sign" ? "sign-extending " + hexN(cur.fields.imm, 4) + " gives " + hexN(cur.extended, 8) + " (" + signExt16(cur.fields.imm) + " as a signed value — it must stay negative)" : "zero-extending " + hexN(cur.fields.imm, 4) + " gives " + hexN(cur.extended, 8) + " — sign extension would have wrongly produced 0xFFFF" + hexN(cur.fields.imm, 4).slice(2)));
+      } else {
+        if (gv("#seImm") !== cur.fields.field) wrong.push("address field: the low 26 bits are " + hexN(cur.fields.field, 7));
+        if ((gv("#seExt") >>> 0) !== cur.target) wrong.push("jump target: ((PC + 4) & 0xF0000000) | (field << 2) = " + hexN(cur.target, 8));
+      }
+      if (!wrong.length) fbSet(fbEl, true, "Every field and the extension are right for " + cur.name + " — sliced and extended from the same bits the hardware sees.");
+      else { fbEl.style.color = "var(--red)"; fbEl.innerHTML = "✗ " + wrong.map(w => "· " + escX(w)).join("<br>"); }
+    });
+    render();
+  })();
+
+  /* ================================================================
+     O5 — PERFORMANCE EQUATION & AMDAHL
+     CPU time = IC x CPI(avg built from the mix) / clock rate.
+     Amdahl fraction = the enhanced class's share of execution
+     TIME, computed from part 1's own mix.
+     ================================================================ */
+  function perfGen(seed) {
+    const rng = mulberryX(31000 + seed * 613);
+    const pick = arr => arr[Math.floor(rng() * arr.length)];
+    const classes = [
+      { name: "ALU / logic", count: 240 + Math.floor(rng() * 240), cpi: 1 },
+      { name: "Load / store", count: 70 + Math.floor(rng() * 90), cpi: pick([4, 5]) },
+      { name: "Branch", count: 50 + Math.floor(rng() * 70), cpi: pick([2, 3]) }
+    ];
+    const ghz = pick([2.5, 3.0, 3.4]);
+    const cyclesM = classes.reduce((s, c) => s + c.count * c.cpi, 0);
+    const time = cyclesM * 1e6 / (ghz * 1e9);
+    const lsShare = (classes[1].count * classes[1].cpi) / cyclesM;
+    const factor = pick([2, 4, 5]);
+    const speedup = 1 / ((1 - lsShare) + lsShare / factor);
+    return { classes, ghz, cyclesM, time, lsShare, factor, speedup, newTime: time / speedup };
+  }
+  const closeTol = (got, want, tol) => isFinite(got) && Math.abs(got - want) <= Math.max(tol * Math.abs(want), 1e-9);
+  XC.o5 = { gen: perfGen };
+  (function buildO5() {
+    const sec = mkCard("sysAssembly", "orgPerfCard", "Performance equation & Amdahl's law — pricing a program in seconds",
+      "One equation prices every machine on this page: <b>CPU time = instruction count × CPI × clock cycle time</b>. The scenario gives you a real instruction mix — per-class counts and CPIs — and a clock rate. Compute the execution time. Then Amdahl's law: the load/store path is made faster by a stated factor, but it only owns its <b>share of the time</b> (which you must take from part 1, not from its share of the instruction count) — compute the overall speedup and the new time.");
+    sec.insertAdjacentHTML("beforeend",
+      '<div class="tt-wrap" style="max-height:none"><table class="tt" id="pfTable"></table></div>' +
+      '<div class="seq-state" id="pfClock"></div>' +
+      '<div class="rx-grid2"><div class="rx-panel"><h3>Part 1 — execution time</h3>' +
+      '<label class="fld">CPU time (seconds) <input type="text" id="pfTime" class="rx-num" autocomplete="off" /></label> ' +
+      '<button type="button" class="btn" id="pfCk1">Check time</button><div class="decimal-line" id="pfFb1" aria-live="polite"></div></div>' +
+      '<div class="rx-panel"><h3>Part 2 — Amdahl: speed up load/store</h3>' +
+      '<p style="font-size:13px;margin:0 0 8px" id="pfAmdTxt"></p>' +
+      '<label class="fld">Overall speedup <input type="text" id="pfSp" class="rx-num" autocomplete="off" /></label> ' +
+      '<label class="fld">New CPU time (s) <input type="text" id="pfNt" class="rx-num" autocomplete="off" /></label> ' +
+      '<button type="button" class="btn" id="pfCk2">Check Amdahl</button><div class="decimal-line" id="pfFb2" aria-live="polite"></div></div></div>' +
+      '<div class="share-row"><button type="button" class="btn primary" id="pfNew">New scenario</button></div>' +
+      '<p class="cp-formal adv-only">Amdahl: speedup = 1 / ((1 − f) + f / s), where f is the fraction of the ORIGINAL execution time spent in the enhanced part. As s → ∞ the ceiling is 1 / (1 − f): the unenhanced remainder is the law\'s whole point, and it is also why the fraction must be a time share — a count share prices the wrong thing whenever CPIs differ.</p>');
+    let seed = 0, g = perfGen(0);
+    function render() {
+      g = perfGen(seed);
+      sec.querySelector("#pfTable").innerHTML = "<thead><tr><th>Class</th><th>Instructions</th><th>CPI</th><th>Cycles</th></tr></thead><tbody>" +
+        g.classes.map(c => "<tr><td style='text-align:left'>" + c.name + "</td><td>" + c.count + " M</td><td>" + c.cpi + "</td><td>work it out</td></tr>").join("") + "</tbody>";
+      sec.querySelector("#pfClock").innerHTML = '<div class="seq-cell"><b>' + g.ghz.toFixed(1) + ' GHz</b>clock rate</div><div class="seq-cell"><b>' + (1 / g.ghz).toFixed(3) + ' ns</b>per cycle</div>';
+      sec.querySelector("#pfAmdTxt").textContent = "Engineering speeds up the load/store path by " + g.factor + "× (better cache). By what factor does the whole program speed up — and what is its new running time?";
+      ["#pfTime", "#pfSp", "#pfNt"].forEach(id => sec.querySelector(id).value = "");
+      sec.querySelector("#pfFb1").textContent = ""; sec.querySelector("#pfFb2").textContent = "";
+    }
+    sec.querySelector("#pfCk1").addEventListener("click", () => {
+      const v = parseFloat(sec.querySelector("#pfTime").value), fbEl = sec.querySelector("#pfFb1");
+      fbSet(fbEl, closeTol(v, g.time, 0.02), closeTol(v, g.time, 0.02) ? "Right: cycles = " + g.classes.map(c => c.count + "×" + c.cpi).join(" + ") + " = " + g.cyclesM + " M cycles; time = " + g.cyclesM + "M / " + g.ghz.toFixed(1) + " GHz = " + g.time.toFixed(3) + " s." : "Not yet — total the cycles per class first: Σ count × CPI = " + g.cyclesM + " M cycles, then divide by the clock rate (" + g.ghz.toFixed(1) + " × 10⁹ cycles/s). The computed time is " + g.time.toFixed(3) + " s; check whether you divided by the rate or multiplied by the cycle time twice.");
+    });
+    sec.querySelector("#pfCk2").addEventListener("click", () => {
+      const sp = parseFloat(sec.querySelector("#pfSp").value), nt = parseFloat(sec.querySelector("#pfNt").value), fbEl = sec.querySelector("#pfFb2");
+      const okSp = closeTol(sp, g.speedup, 0.02), okNt = closeTol(nt, g.newTime, 0.02);
+      if (okSp && okNt) fbSet(fbEl, true, "Right on both: load/store owns f = " + (g.lsShare * 100).toFixed(1) + "% of the TIME (its cycle share from part 1), so speedup = 1 / ((1 − " + g.lsShare.toFixed(3) + ") + " + g.lsShare.toFixed(3) + " / " + g.factor + ") = " + g.speedup.toFixed(2) + "×, and the new time is " + g.newTime.toFixed(3) + " s. Even an infinitely fast load/store path would cap at " + (1 / (1 - g.lsShare)).toFixed(2) + "×.");
+      else fbSet(fbEl, false, (!okSp ? "Speedup: " : "") + (!okNt ? "New time: " : "") + "use f = the load/store share of execution TIME from part 1 = " + (g.lsShare * 100).toFixed(1) + "% (not its " + (g.classes[1].count / g.classes.reduce((s, c) => s + c.count, 0) * 100).toFixed(1) + "% share of instructions — CPIs differ, so the shares differ). Speedup = 1 / ((1 − f) + f / " + g.factor + ") = " + g.speedup.toFixed(2) + "×; new time = " + g.time.toFixed(3) + " / " + g.speedup.toFixed(2) + " = " + g.newTime.toFixed(3) + " s.");
+    });
+    sec.querySelector("#pfNew").addEventListener("click", () => { seed++; render(); });
+    render();
+  })();
+
+  /* ================================================================
+     O6 — REGISTER FILE TIMING
+     Model: writes land in the first half of the cycle, reads are
+     taken in the second half, so a same-cycle read of the written
+     register sees the NEW value. $zero ignores writes, reads 0.
+     ================================================================ */
+  const RF_INIT = { "$zero": 0, "$t0": 10, "$t1": 20, "$t2": 30, "$t3": 40 };
+  const RF_SCRIPT = [
+    { ra1: "$t0", ra2: "$t1", we: 0 },
+    { ra1: "$t0", ra2: "$t2", we: 1, wa: "$t0", wd: 99 },
+    { ra1: "$t1", ra2: "$zero", we: 1, wa: "$zero", wd: 55 },
+    { ra1: "$t2", ra2: "$t3", we: 1, wa: "$t3", wd: 77 }
+  ];
+  function rfRun() {
+    const regs = Object.assign({}, RF_INIT), out = [];
+    RF_SCRIPT.forEach(c => {
+      const before = [regs[c.ra1], regs[c.ra2]];
+      if (c.we && c.wa !== "$zero") regs[c.wa] = c.wd;
+      out.push({ cycle: c, before, after: [regs[c.ra1], regs[c.ra2]], regsAfter: Object.assign({}, regs) });
+    });
+    return out;
+  }
+  XC.o6 = { run: rfRun, script: RF_SCRIPT };
+  (function buildO6() {
+    const sec = mkCard("sysAssembly", "orgRegCard", "Register file timing — what do the read ports show around the edge?",
+      "The MIPS register file is built so one register can be <b>written and read in the same cycle</b>: the write lands in the <b>first half</b> of the cycle, the reads are taken in the <b>second half</b> — so a read of the register being written returns the <b>new</b> value. For each cycle: look at the reads shown <i>before</i> the edge, predict what the ports show <i>after</i> it, then apply the edge. Watch cycle 3: a write aimed at <b>$zero</b> simply vanishes — $zero is hardwired to 0.");
+    sec.insertAdjacentHTML("beforeend",
+      '<div class="seq-state" id="rfRegs"></div>' +
+      '<div class="rx-panel"><h3 id="rfCycT"></h3><div class="seq-state" id="rfPorts"></div>' +
+      '<div id="rfPredict"><label class="fld">After the edge, read port 1 shows <input type="text" id="rfP1" class="rx-num" autocomplete="off" /></label> ' +
+      '<label class="fld">read port 2 shows <input type="text" id="rfP2" class="rx-num" autocomplete="off" /></label> ' +
+      '<button type="button" class="btn primary" id="rfCk">Check prediction</button></div>' +
+      '<div class="decimal-line" id="rfFb" aria-live="polite"></div>' +
+      '<div class="share-row"><button type="button" class="btn" id="rfNext">Next cycle ▸</button><button type="button" class="btn" id="rfReset">Restart</button></div></div>' +
+      '<p class="cp-formal adv-only">This write-first-half / read-second-half convention is what lets a single-cycle datapath read a register in the same cycle an earlier phase wrote it, with no extra forwarding path. The alternative convention (read-first) would return the stale value — neither is "the truth", each is a contract the rest of the datapath is designed against. $zero is not a register with a write-protect bit: its read port is tied to 0 and its write port is simply not connected.</p>');
+    const run = rfRun();
+    let idx = 0, checked = false;
+    function regsHtml(regs) {
+      return Object.keys(RF_INIT).map(r => '<div class="seq-cell' + (r === "$zero" ? "" : " one") + '"><b>' + regs[r] + "</b>" + r + "</div>").join("");
+    }
+    function render() {
+      const step = run[idx], c = step.cycle;
+      const regsBefore = idx === 0 ? RF_INIT : run[idx - 1].regsAfter;
+      sec.querySelector("#rfRegs").innerHTML = regsHtml(checked ? step.regsAfter : regsBefore);
+      sec.querySelector("#rfCycT").textContent = "Cycle " + (idx + 1) + " of " + run.length + (c.we ? " — at the edge: write " + c.wd + " → " + c.wa : " — at the edge: no write");
+      sec.querySelector("#rfPorts").innerHTML =
+        '<div class="seq-cell"><b>' + step.before[0] + "</b>port 1 reads " + c.ra1 + " (before the edge)</div>" +
+        '<div class="seq-cell"><b>' + step.before[1] + "</b>port 2 reads " + c.ra2 + " (before the edge)</div>" +
+        (checked ? '<div class="seq-cell one"><b>' + step.after[0] + "</b>port 1 after the edge</div>" + '<div class="seq-cell one"><b>' + step.after[1] + "</b>port 2 after the edge</div>" : "");
+      sec.querySelector("#rfP1").value = ""; sec.querySelector("#rfP2").value = "";
+      sec.querySelector("#rfFb").textContent = "";
+      sec.querySelector("#rfNext").textContent = idx === run.length - 1 ? "Finish" : "Next cycle ▸";
+    }
+    sec.querySelector("#rfCk").addEventListener("click", () => {
+      const step = run[idx], c = step.cycle;
+      const p1 = parseNum(sec.querySelector("#rfP1").value), p2 = parseNum(sec.querySelector("#rfP2").value);
+      const ok = p1 === step.after[0] && p2 === step.after[1];
+      checked = true; render();
+      const fbEl = sec.querySelector("#rfFb");
+      let why;
+      if (c.we && c.wa === "$zero") why = "The write to $zero was ignored — $zero is hardwired to 0, so both ports read exactly what they read before: port 1 = " + step.after[0] + ", port 2 = " + step.after[1] + ". Code relies on this: $zero is the free constant 0 and the discard target.";
+      else if (c.we && (c.wa === c.ra1 || c.wa === c.ra2)) why = "The write landed in the first half of the cycle, so the port reading " + c.wa + " in the second half sees the NEW value " + c.wd + ": port 1 = " + step.after[0] + ", port 2 = " + step.after[1] + ". Predicting the old value is the classic mistake this convention exists to prevent.";
+      else if (c.we) why = "The write updated " + c.wa + " to " + c.wd + ", but neither port reads it this cycle, so both ports keep their before-edge values: " + step.after[0] + " and " + step.after[1] + ".";
+      else why = "No write this cycle, so nothing changes at the edge: " + step.after[0] + " and " + step.after[1] + ".";
+      fbSet(fbEl, ok, (ok ? "Prediction right. " : "Prediction off — the register file now shows the after-edge values above. ") + why);
+      checked = true;
+    });
+    sec.querySelector("#rfNext").addEventListener("click", () => {
+      if (idx === run.length - 1) { sec.querySelector("#rfFb").textContent = "That was the last cycle — Restart replays the same four edges. The two rules to keep: same-cycle read of a written register returns the new value; $zero swallows writes and always reads 0."; return; }
+      idx++; checked = false; render();
+    });
+    sec.querySelector("#rfReset").addEventListener("click", () => { idx = 0; checked = false; render(); });
+    render();
+  })();
+
+  /* ================================================================
+     A1 — FORWARDING PATHS VISUALIZER (extends #sys-pipeline)
+     Cycle model, consistent with the site simulator's convention:
+     no forwarding -> a consumer's ID must follow the producer's
+     WB, so its start >= producer start + 4 (that is what makes
+     the existing table total 11 cycles on the ALU sequence).
+     Forwarding -> ALU result is in the EX/MEM register in time
+     for a consumer starting one cycle later (start >= +1);
+     a LOAD's result only exists after MEM, in the MEM/WB
+     register, so a dependent consumer starts at >= +2:
+     exactly one stall remains — the load-use stall.
+     ================================================================ */
+  function pipeModel(instrs, fwd) {
+    const starts = [];
+    instrs.forEach((ins, i) => {
+      let st = i; if (i > 0) st = Math.max(st, starts[i - 1] + 1);
+      (ins.reads || []).forEach(r => {
+        for (let j = i - 1; j >= 0; j--) if (instrs[j].writes === r) {
+          st = Math.max(st, fwd ? starts[j] + (instrs[j].load ? 2 : 1) : starts[j] + 4);
+          break;
+        }
+      });
+      starts.push(st);
+    });
+    const total = Math.max.apply(null, starts) + 5;
+    return { starts, total, bubbles: total - (instrs.length + 4) };
+  }
+  const PIPE_SEQ1 = [
+    { text: "add $t0, $t1, $t2", writes: "$t0", reads: ["$t1", "$t2"] },
+    { text: "sub $t3, $t0, $t4", writes: "$t3", reads: ["$t0", "$t4"] },
+    { text: "and $t5, $t6, $t7", writes: "$t5", reads: ["$t6", "$t7"] },
+    { text: "or $t8, $t9, $s0", writes: "$t8", reads: ["$t9", "$s0"] }
+  ];
+  const PIPE_SEQ2 = [
+    { text: "lw $t0, 0($t1)", writes: "$t0", reads: ["$t1"], load: true },
+    { text: "add $t2, $t0, $t3", writes: "$t2", reads: ["$t0", "$t3"] },
+    { text: "sub $t4, $t5, $t6", writes: "$t4", reads: ["$t5", "$t6"] }
+  ];
+  XC.a1 = { model: pipeModel, seq1: PIPE_SEQ1, seq2: PIPE_SEQ2,
+    totals: () => ({ s1off: pipeModel(PIPE_SEQ1, false).total, s1on: pipeModel(PIPE_SEQ1, true).total, s2off: pipeModel(PIPE_SEQ2, false).total, s2on: pipeModel(PIPE_SEQ2, true).total }) };
+  (function buildA1() {
+    const host = $X("sys-pipeline"); if (!host) return;
+    const panel = document.createElement("div");
+    panel.id = "fwdPanel"; panel.style.cssText = "margin-top:16px;border-top:1px solid var(--line);padding-top:12px";
+    const t = XC.a1.totals();
+    panel.innerHTML =
+      '<div class="ctrl-label">Forwarding — the same pipeline, with the bypass paths switched on</div>' +
+      '<p style="font-size:13.5px;margin:0 0 8px">The table above is this machine <b>without</b> forwarding: a result only exists once it is written back, so the dependent instruction waits — on this card\'s own sequence that is <b>' + t.s1off + ' cycles</b>. Forwarding adds two wires: the <b>EX/MEM</b> register and the <b>MEM/WB</b> register can feed the ALU inputs directly, so a consumer can use a result the cycle after it is produced instead of waiting for the register file. One hazard survives: a <b>load</b> produces its value only at the end of MEM — too late for the very next instruction\'s EX — so <b>load-use keeps exactly one stall</b>, and no wiring can remove it.</p>' +
+      '<div class="tool-controls"><label>Sequence <span class="seg" role="group" aria-label="Sequence" id="fwSeqSeg">' +
+      '<button type="button" data-fwseq="1" aria-pressed="true">ALU sequence (the one above)</button>' +
+      '<button type="button" data-fwseq="2" aria-pressed="false">Load sequence (lw feeds add)</button></span></label>' +
+      '<label>Forwarding <span class="seg" role="group" aria-label="Forwarding" id="fwSeg">' +
+      '<button type="button" data-fw="off" aria-pressed="true">Off — register file only</button>' +
+      '<button type="button" data-fw="on" aria-pressed="false">On — bypass paths live</button></span></label></div>' +
+      '<div class="schematic-box"><svg id="fwSvg" viewBox="0 0 920 210" role="img" aria-label="Forwarding paths: EX/MEM and MEM/WB registers feeding back to the ALU input muxes" style="display:block;width:100%;height:auto"></svg></div>' +
+      '<div class="tt-wrap" style="max-height:none;margin-top:10px"><table class="tt" id="fwTable"></table></div>' +
+      '<div class="decimal-line" id="fwMsg" aria-live="polite"></div>' +
+      '<div class="tt-wrap" style="max-height:none"><table class="tt" id="fwTotals"></table></div>' +
+      '<div class="lab-check"><span class="lab-check-q" id="fwQ"></span><span id="fwOpts" style="display:flex;gap:6px;flex-wrap:wrap"></span><span class="lab-check-fb" id="fwFb" aria-live="polite"></span></div>' +
+      '<p class="cp-formal adv-only">Forwarding (bypassing) resolves ALU→ALU RAW hazards completely: the producer\'s EX/MEM pipeline register holds the result during the cycle the consumer is in EX. Load-use is different in kind, not degree: at the moment the consumer needs the operand (its EX), the load is only entering MEM — the data does not exist anywhere yet, so one bubble is information-theoretically forced. Compilers hide it by moving an independent instruction into the slot.</p>';
+    host.appendChild(panel);
+    let seq = PIPE_SEQ1, fwd = false;
+    function drawSvg() {
+      const on = fwd;
+      const box = (x, y, w, lab, fill) => '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="34" rx="6" style="fill:' + (fill || "var(--panel)") + ';stroke:var(--line2)"/><text class="sh-lab" x="' + (x + w / 2) + '" y="' + (y + 21) + '" text-anchor="middle">' + lab + "</text>";
+      panel.querySelector("#fwSvg").innerHTML =
+        '<text class="sh-sub" x="10" y="26">producer (add / lw)</text>' + '<text class="sh-sub" x="10" y="126">consumer (sub / add)</text>' +
+        box(120, 8, 70, "IF") + box(210, 8, 70, "ID") + box(300, 8, 70, "EX") + box(390, 8, 80, "MEM") + box(490, 8, 70, "WB") +
+        box(120, 108, 70, "IF") + box(210, 108, 70, "ID") + box(300, 108, 80, "EX · ALU") + box(400, 108, 70, "MEM") + box(490, 108, 70, "WB") +
+        '<rect x="372" y="4" width="16" height="42" style="fill:var(--amber-soft);stroke:var(--amber)"/><text class="sh-sub" x="380" y="60" text-anchor="middle">EX/MEM</text>' +
+        '<rect x="472" y="4" width="16" height="42" style="fill:var(--amber-soft);stroke:var(--amber)"/><text class="sh-sub" x="480" y="60" text-anchor="middle">MEM/WB</text>' +
+        '<path class="rx-fwpath' + (on ? " on" : "") + '" d="M380 46 V84 H322 V104"/>' +
+        '<path class="rx-fwpath' + (on ? " on" : "") + '" d="M480 46 V96 H368 V104"/>' +
+        '<text class="sh-sub" x="600" y="30">' + (on ? "bypass paths LIVE: results flow back to the ALU inputs" : "bypass paths fitted but OFF: values travel only via the register file") + "</text>" +
+        '<text class="sh-sub" x="600" y="52">' + (on ? "consumer's EX can use a result produced last cycle" : "consumer must wait for WB, then read in ID") + "</text>" +
+        '<text class="sh-sub" x="600" y="130">register file path (always present): WB → ID</text>' +
+        '<path d="M525 142 V186 H245 V146" style="stroke:var(--line2);stroke-width:2;fill:none"/>';
+    }
+    function render() {
+      drawSvg();
+      const m = pipeModel(seq, fwd), stages = ["IF", "ID", "EX", "MEM", "WB"];
+      let html = "<thead><tr><th>Instruction</th>" + Array.from({ length: m.total }, (_, c) => "<th>C" + (c + 1) + "</th>").join("") + "</tr></thead><tbody>";
+      seq.forEach((ins, i) => {
+        html += "<tr><td style='text-align:left'>" + ins.text + "</td>";
+        for (let c = 0; c < m.total; c++) { const off = c - m.starts[i]; html += "<td>" + (off >= 0 && off < 5 ? stages[off] : (off < 0 && c >= (i ? m.starts[i - 1] : 0) ? "·" : "")) + "</td>"; }
+        html += "</tr>";
+      });
+      panel.querySelector("#fwTable").innerHTML = html + "</tbody>";
+      const other = pipeModel(seq, !fwd);
+      panel.querySelector("#fwMsg").textContent = "Forwarding " + (fwd ? "ON" : "OFF") + ": this sequence takes " + m.total + " cycles (" + m.bubbles + " bubble" + (m.bubbles === 1 ? "" : "s") + "). With forwarding " + (!fwd ? "ON" : "OFF") + " the same sequence takes " + other.total + " cycles." + (fwd && seq === PIPE_SEQ2 ? " The one remaining bubble is the load-use stall: when add reaches EX, lw is only in MEM — the loaded value does not exist yet, so exactly one cycle must pass." : "") + (!fwd && seq === PIPE_SEQ1 ? " Compare the table above: identical " + m.total + " cycles — this panel's model and the simulator's agree, because both count the same no-forwarding machine." : "");
+      const tt = XC.a1.totals();
+      panel.querySelector("#fwTotals").innerHTML = "<thead><tr><th>Sequence</th><th>Forwarding off</th><th>Forwarding on</th><th>Cycles saved</th></tr></thead><tbody>" +
+        "<tr><td style='text-align:left'>ALU sequence (4 instructions)</td><td>" + tt.s1off + "</td><td>" + tt.s1on + "</td><td>" + (tt.s1off - tt.s1on) + "</td></tr>" +
+        "<tr><td style='text-align:left'>Load sequence (3 instructions)</td><td>" + tt.s2off + "</td><td>" + tt.s2on + "</td><td>" + (tt.s2off - tt.s2on) + "</td></tr></tbody>";
+      const want = pipeModel(PIPE_SEQ2, true).total;
+      panel.querySelector("#fwQ").textContent = "Prediction check: with forwarding ON, the LOAD sequence takes how many cycles in total?";
+      optBtns(panel.querySelector("#fwOpts"), [String(want - 1), String(want), String(pipeModel(PIPE_SEQ2, false).total), String(PIPE_SEQ2.length + 4)].filter((v, i, a) => a.indexOf(v) === i).sort((x, y) => x - y).map(v => v + " cycles"),
+        (i, b) => {
+          const picked = parseInt(b.textContent, 10), fbEl = panel.querySelector("#fwFb");
+          fbSet(fbEl, picked === want, picked === want ? "Right — " + want + " cycles. Forwarding removes every stall except one: the load-use bubble, because when the add reaches EX the lw is still in MEM and the data does not exist yet. " + (PIPE_SEQ2.length + 4) + " cycles (zero bubbles) is impossible for this sequence, and " + pipeModel(PIPE_SEQ2, false).total + " is the no-forwarding count." : "Not " + picked + " — run the load sequence above with forwarding ON and count the table's columns: the model gives " + want + ". Remember the load-use bubble survives forwarding; every other stall does not.");
+        });
+    }
+    panel.querySelector("#fwSeqSeg").querySelectorAll("[data-fwseq]").forEach(b => b.addEventListener("click", () => {
+      seq = b.dataset.fwseq === "2" ? PIPE_SEQ2 : PIPE_SEQ1;
+      panel.querySelector("#fwSeqSeg").querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x === b ? "true" : "false"));
+      render();
+    }));
+    panel.querySelector("#fwSeg").querySelectorAll("[data-fw]").forEach(b => b.addEventListener("click", () => {
+      fwd = b.dataset.fw === "on";
+      panel.querySelector("#fwSeg").querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x === b ? "true" : "false"));
+      render();
+    }));
+    XC.a1.setForwarding = on => {
+      fwd = !!on;
+      panel.querySelector("#fwSeg").querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", (x.dataset.fw === "on") === fwd ? "true" : "false"));
+      render();
+    };
+    render();
+  })();
+
+  /* ================================================================
+     A2 — BRANCH PREDICTION: 1-bit vs 2-bit saturating counter.
+     Trace generated in code: a loop branch (taken 9 of 10, twice)
+     plus a seeded irregular branch.
+     ================================================================ */
+  function bpTrace(seed) {
+    const ev = [];
+    for (let rep = 0; rep < 2; rep++) for (let i = 0; i < 10; i++) ev.push({ br: "A", actual: i < 9 ? 1 : 0 });
+    const rng = mulberryX(51000 + seed * 389);
+    let made = 0, guard = 0;
+    const bOut = [];
+    while (made < 12 && guard++ < 200) { const v = rng() < 0.5 ? 1 : 0; if (bOut.filter(x => x === v).length >= 9) continue; bOut.push(v); made++; }
+    const out = [];
+    ev.forEach((e, i) => { out.push(e); if (i < bOut.length) out.push({ br: "B", actual: bOut[i] }); });
+    return out;
+  }
+  const pred1Step = (st, actual) => ({ predict: st, next: actual });
+  const pred2Step = (st, actual) => ({ predict: st >= 2 ? 1 : 0, next: Math.max(0, Math.min(3, st + (actual ? 1 : -1))) });
+  function bpRun(seed) {
+    const tr = bpTrace(seed);
+    const res = { A: { p1: { miss: 0, n: 0 }, p2: { miss: 0, n: 0 } }, B: { p1: { miss: 0, n: 0 }, p2: { miss: 0, n: 0 } } };
+    const st = { A1: 0, A2: 1, B1: 0, B2: 1 };
+    tr.forEach(e => {
+      const k1 = e.br + "1", k2 = e.br + "2", r = res[e.br];
+      const s1 = pred1Step(st[k1], e.actual); if (s1.predict !== e.actual) r.p1.miss++; r.p1.n++;
+      const s2 = pred2Step(st[k2], e.actual); if (s2.predict !== e.actual) r.p2.miss++; r.p2.n++;
+      st[k1] = s1.next; st[k2] = s2.next;
+    });
+    return { trace: tr, res };
+  }
+  XC.a2 = { trace: bpTrace, run: bpRun, pred1Step, pred2Step };
+  (function buildA2() {
+    const sec = mkCard("sysArch", "archPredCard", "Branch prediction — 1-bit vs 2-bit, learning the same trace",
+      "Every branch is a guess the hardware makes before it knows the answer. Two predictors learn the trace below: a <b>1-bit</b> predictor that simply repeats the last outcome, and a <b>2-bit saturating counter</b> that needs two surprises in a row to change its mind. The trace mixes a <b>loop branch</b> (taken 9 times out of 10 — its single not-taken exit is where 1-bit pays double) with an <b>irregular branch</b>. Predict each outcome yourself before the reveal, then read both predictors' final scores — all counted by the state machines, not by an answer key.");
+    sec.insertAdjacentHTML("beforeend",
+      '<div class="seq-state" id="bpState"></div>' +
+      '<div class="ctrl-label">The next branch event — your prediction first</div>' +
+      '<div class="seq-state" id="bpNext"></div>' +
+      '<div class="share-row"><button type="button" class="btn" id="bpPredT">I predict: TAKEN</button>' +
+      '<button type="button" class="btn" id="bpPredN">I predict: NOT taken</button>' +
+      '<button type="button" class="btn primary" id="bpStep" disabled>Reveal &amp; step ▸</button>' +
+      '<button type="button" class="btn" id="bpRun">Run the rest without me</button>' +
+      '<button type="button" class="btn" id="bpReset">New trace</button></div>' +
+      '<div class="decimal-line" id="bpMsg" aria-live="polite"></div>' +
+      '<div class="tt-wrap" style="max-height:none"><table class="tt" id="bpScore"></table></div>' +
+      '<p class="cp-formal adv-only">The 2-bit counter has four states — strongly not-taken, weakly not-taken, weakly taken, strongly taken — and predicts taken in the top two. Hysteresis is the entire design: a loop exit moves it one step (strongly taken → weakly taken), so re-entering the loop it still predicts taken, where the 1-bit predictor has flipped and will miss on entry AND on the next exit. Your score is kept against the actual outcomes only; the predictors are graded against the same outcomes by the same step functions.</p>');
+    let seed = 0;
+    let S;
+    function fresh() {
+      const run = bpRun(seed);
+      S = { trace: run.trace, i: 0, st: { A1: 0, A2: 1, B1: 0, B2: 1 }, tally: { A: { p1: 0, p2: 0, n: 0 }, B: { p1: 0, p2: 0, n: 0 } }, mine: { right: 0, n: 0 }, myPred: null, done: false };
+      render("New trace ready: " + S.trace.length + " branch events. Predict the first one.");
+    }
+    function stateNames(st2) { return ["strongly NOT", "weakly NOT", "weakly taken", "strongly taken"][st2]; }
+    function render(msg) {
+      const e = S.trace[S.i];
+      sec.querySelector("#bpState").innerHTML =
+        '<div class="seq-cell"><b>' + (S.i) + " / " + S.trace.length + '</b>events revealed</div>' +
+        '<div class="seq-cell"><b>' + (S.st.A1 ? "taken" : "NOT") + '</b>A · 1-bit last outcome</div>' +
+        '<div class="seq-cell"><b>' + stateNames(S.st.A2) + '</b>A · 2-bit state</div>' +
+        '<div class="seq-cell"><b>' + (S.st.B1 ? "taken" : "NOT") + '</b>B · 1-bit last outcome</div>' +
+        '<div class="seq-cell"><b>' + stateNames(S.st.B2) + '</b>B · 2-bit state</div>' +
+        '<div class="seq-cell"><b>' + S.mine.right + " / " + S.mine.n + '</b>your predictions</div>';
+      sec.querySelector("#bpNext").innerHTML = S.done ? '<div class="seq-cell one"><b>trace complete</b>read the scores below</div>' :
+        '<div class="seq-cell one"><b>Branch ' + e.br + "</b>" + (e.br === "A" ? "the loop branch" : "the irregular branch") + " — outcome hidden</div>";
+      sec.querySelector("#bpStep").disabled = S.done || S.myPred === null;
+      sec.querySelector("#bpPredT").disabled = S.done; sec.querySelector("#bpPredN").disabled = S.done;
+      const r = { A: S.tally.A, B: S.tally.B };
+      const tot = { p1: r.A.p1 + r.B.p1, p2: r.A.p2 + r.B.p2, n: r.A.n + r.B.n };
+      sec.querySelector("#bpScore").innerHTML = "<thead><tr><th>Predictor</th><th>Loop branch A mispredicts</th><th>Irregular branch B mispredicts</th><th>Total</th><th>Rate so far</th></tr></thead><tbody>" +
+        "<tr><td style='text-align:left'>1-bit (last outcome)</td><td>" + r.A.p1 + " / " + r.A.n + "</td><td>" + r.B.p1 + " / " + r.B.n + "</td><td>" + tot.p1 + " / " + tot.n + "</td><td>" + (tot.n ? Math.round(tot.p1 / tot.n * 100) + "%" : "—") + "</td></tr>" +
+        "<tr><td style='text-align:left'>2-bit (saturating counter)</td><td>" + r.A.p2 + " / " + r.A.n + "</td><td>" + r.B.p2 + " / " + r.B.n + "</td><td>" + tot.p2 + " / " + tot.n + "</td><td>" + (tot.n ? Math.round(tot.p2 / tot.n * 100) + "%" : "—") + "</td></tr></tbody>";
+      if (msg !== undefined) sec.querySelector("#bpMsg").textContent = msg;
+    }
+    function step() {
+      const e = S.trace[S.i]; if (!e) return;
+      const k1 = e.br + "1", k2 = e.br + "2";
+      const s1 = pred1Step(S.st[k1], e.actual), s2 = pred2Step(S.st[k2], e.actual);
+      if (s1.predict !== e.actual) S.tally[e.br].p1++;
+      if (s2.predict !== e.actual) S.tally[e.br].p2++;
+      S.tally[e.br].n++;
+      S.st[k1] = s1.next; S.st[k2] = s2.next;
+      let mineTxt = "";
+      if (S.myPred !== null) { S.mine.n++; if (S.myPred === e.actual) { S.mine.right++; mineTxt = "You called it " + (e.actual ? "TAKEN" : "NOT taken") + " — right. "; } else mineTxt = "You predicted " + (S.myPred ? "TAKEN" : "NOT taken") + " — it went " + (e.actual ? "TAKEN" : "NOT taken") + ". "; S.myPred = null; }
+      S.i++; if (S.i >= S.trace.length) S.done = true;
+      render(mineTxt + "Branch " + e.br + " was " + (e.actual ? "TAKEN" : "NOT taken") + ": 1-bit predicted " + (s1.predict ? "taken" : "NOT") + (s1.predict === e.actual ? " ✓" : " ✗") + ", 2-bit predicted " + (s2.predict ? "taken" : "NOT") + (s2.predict === e.actual ? " ✓" : " ✗") + "." + (S.done ? " Trace complete — compare the totals: the 2-bit counter's hysteresis is worth the most exactly where the loop exits and re-enters." : ""));
+    }
+    sec.querySelector("#bpPredT").addEventListener("click", () => { S.myPred = 1; sec.querySelector("#bpStep").disabled = false; sec.querySelector("#bpMsg").textContent = "You predict TAKEN. Reveal when ready."; });
+    sec.querySelector("#bpPredN").addEventListener("click", () => { S.myPred = 0; sec.querySelector("#bpStep").disabled = false; sec.querySelector("#bpMsg").textContent = "You predict NOT taken. Reveal when ready."; });
+    sec.querySelector("#bpStep").addEventListener("click", step);
+    sec.querySelector("#bpRun").addEventListener("click", () => { while (!S.done) { S.myPred = null; step(); } });
+    sec.querySelector("#bpReset").addEventListener("click", () => { seed++; fresh(); });
+    fresh();
+  })();
+
+  /* ================================================================
+     A3 — CACHE REPLACEMENT SHOOTOUT
+     One set of 4 block frames (fully associative for this lab —
+     the variable under test is the victim choice, not the index).
+     Trace built in code; LRU / FIFO / seeded-random engines.
+     ================================================================ */
+  const REPL_TRACE = [1, 2, 3, 4, 1, 2, 5, 1, 2, 5, 1, 2, 3, 4, 1, 2];
+  const REPL_CAP = 4;
+  function replNew(policy, seed) { return { policy, slots: [null, null, null, null], age: [0, 0, 0, 0], born: [0, 0, 0, 0], clock: 0, hits: 0, n: 0, rng: mulberryX(seed == null ? 7 : seed) }; }
+  function replAccess(c, b) {
+    c.n++; c.clock++;
+    const i = c.slots.indexOf(b);
+    if (i >= 0) { c.hits++; c.age[i] = c.clock; return { hit: true, slot: i }; }
+    let v = c.slots.indexOf(null);
+    if (v < 0) {
+      if (c.policy === "lru") { v = 0; for (let k = 1; k < c.slots.length; k++) if (c.age[k] < c.age[v]) v = k; }
+      else if (c.policy === "fifo") { v = 0; for (let k = 1; k < c.slots.length; k++) if (c.born[k] < c.born[v]) v = k; }
+      else v = Math.floor(c.rng() * c.slots.length);
+    }
+    c.slots[v] = b; c.age[v] = c.clock; c.born[v] = c.clock;
+    return { hit: false, slot: v };
+  }
+  function replRun(seed) {
+    const out = {};
+    ["lru", "fifo", "random"].forEach(p => { const c = replNew(p, seed); REPL_TRACE.forEach(b => replAccess(c, b)); out[p] = { hits: c.hits, n: c.n, slots: c.slots.slice() }; });
+    return out;
+  }
+  XC.a3 = { trace: REPL_TRACE, run: replRun, newCache: replNew, access: replAccess };
+  (function buildA3() {
+    const sec = mkCard("sysArch", "archReplCard", "Cache replacement shootout — LRU vs FIFO vs random on one trace",
+      "Same trace, same four frames, three victim-choosers. The trace revisits blocks <b>1 and 2</b> constantly while a five-block loop (1–5) keeps overflowing the four frames — so <i>which</i> block you evict is the whole game. <b>LRU</b> evicts the least recently used; <b>FIFO</b> evicts the oldest arrival, however hot it is; <b>random</b> rolls dice (seeded, so its result is reproducible and honestly counted). Step the trace and watch the tallies separate.");
+    sec.insertAdjacentHTML("beforeend",
+      '<div class="seq-state" id="crNext"></div>' +
+      '<div class="rx-grid2" style="grid-template-columns:1fr 1fr 1fr" id="crPanels"></div>' +
+      '<div class="share-row"><button type="button" class="btn primary" id="crStep">Step the trace ▸</button>' +
+      '<button type="button" class="btn" id="crRun">Run it all</button><button type="button" class="btn" id="crReset">Reset</button></div>' +
+      '<div class="decimal-line" id="crMsg" aria-live="polite"></div>' +
+      '<div class="lab-check"><span class="lab-check-q" id="crQ"></span><span id="crOpts" style="display:flex;gap:6px;flex-wrap:wrap"></span><span class="lab-check-fb" id="crFb" aria-live="polite"></span></div>' +
+      '<p class="cp-formal adv-only">On a pure cyclic trace whose working set exceeds capacity, LRU and FIFO both miss every reference — recency and arrival order carry the same (useless) information there. This trace is not pure: the short reuse distance of blocks 1–2 is exactly the signal LRU reads and FIFO is blind to. Random\'s expected hit rate sits between: it sometimes keeps a hot block by luck, and its score here is a property of the stated seed, which is why the seed is printed rather than hidden.</p>');
+    const panels = {};
+    const host = sec.querySelector("#crPanels"); host.innerHTML = "";
+    ["lru", "fifo", "random"].forEach(p => {
+      const d = document.createElement("div"); d.className = "rx-panel";
+      d.innerHTML = "<h3>" + p.toUpperCase() + '</h3><div class="rx-slots" id="crSlots-' + p + '"></div><div class="decimal-line" id="crTally-' + p + '"></div>';
+      host.appendChild(d);
+      panels[p] = replNew(p, 7);
+    });
+    let i = 0, lastRes = {};
+    function render(msg) {
+      sec.querySelector("#crNext").innerHTML = i < REPL_TRACE.length ?
+        '<div class="seq-cell one"><b>block ' + REPL_TRACE[i] + "</b>next reference (" + (i + 1) + " of " + REPL_TRACE.length + ")</div>" +
+        '<div class="seq-cell"><b>' + REPL_TRACE.slice(0, i).join(" ") + "</b>already referenced</div>" :
+        '<div class="seq-cell one"><b>trace complete</b>' + REPL_TRACE.length + " references</div>";
+      ["lru", "fifo", "random"].forEach(p => {
+        const c = panels[p];
+        sec.querySelector("#crSlots-" + p).innerHTML = c.slots.map((s, k) => '<div class="rx-slot' + (lastRes[p] && lastRes[p].slot === k ? (lastRes[p].hit ? " hit" : " miss") : "") + '"><span>' + (s === null ? "—" : "blk " + s) + "</span><small>frame " + k + "</small></div>").join("");
+        sec.querySelector("#crTally-" + p).textContent = c.n ? "hits " + c.hits + " / " + c.n + " · " + Math.round(c.hits / c.n * 100) + "%" : "no references yet";
+      });
+      if (msg !== undefined) sec.querySelector("#crMsg").textContent = msg;
+      if (i >= REPL_TRACE.length) {
+        const fin = { lru: panels.lru.hits, fifo: panels.fifo.hits, random: panels.random.hits };
+        const win = Object.keys(fin).sort((a, b) => fin[b] - fin[a])[0];
+        sec.querySelector("#crQ").textContent = "Final check: which policy won this trace — and the reason is the point. (LRU " + fin.lru + " · FIFO " + fin.fifo + " · random " + fin.random + " hits, counted by the engines above.)";
+        optBtns(sec.querySelector("#crOpts"), ["LRU — it protects blocks 1–2, whose reuse comes soon after each touch", "FIFO — oldest-first is fairest, so it wins", "Random — dice beat both policies here"], idx => {
+          const want = win === "lru" ? 0 : win === "fifo" ? 1 : 2;
+          fbSet(sec.querySelector("#crFb"), idx === want, idx === want ? "Right — the engines counted LRU " + fin.lru + ", FIFO " + fin.fifo + ", random " + fin.random + ". Blocks 1–2 are re-referenced at short distance all through the trace: LRU's recency order keeps them resident, while FIFO evicts block 1 for no crime except arriving early, and pays a miss to reload it. Policy is not a detail — on this trace it is worth " + (fin.lru - fin.fifo) + " hits over FIFO." : "The engines' own tallies say otherwise: LRU " + fin.lru + " · FIFO " + fin.fifo + " · random " + fin.random + ". Look at which frames still hold blocks 1 and 2 at the end, and which policy kept them there.");
+        });
+      }
+    }
+    function step() {
+      if (i >= REPL_TRACE.length) return;
+      const b = REPL_TRACE[i]; lastRes = {};
+      ["lru", "fifo", "random"].forEach(p => { lastRes[p] = replAccess(panels[p], b); });
+      i++;
+      render("Block " + b + ": " + ["lru", "fifo", "random"].map(p => p.toUpperCase() + (lastRes[p].hit ? " hit" : " missed (frame " + lastRes[p].slot + ")")).join(" · ") + ".");
+    }
+    sec.querySelector("#crStep").addEventListener("click", step);
+    sec.querySelector("#crRun").addEventListener("click", () => { while (i < REPL_TRACE.length) step(); });
+    sec.querySelector("#crReset").addEventListener("click", () => { ["lru", "fifo", "random"].forEach(p => panels[p] = replNew(p, 7)); i = 0; lastRes = {}; sec.querySelector("#crOpts").innerHTML = ""; sec.querySelector("#crQ").textContent = ""; sec.querySelector("#crFb").textContent = ""; render("Reset — same trace, same seeded dice."); });
+    render("Four frames per cache, all empty. Step the trace.");
+  })();
+
+  /* ================================================================
+     A4 — AMAT / MULTILEVEL CACHE
+     AMAT = htL1 + mrL1 x (htL2 + mrL2local x memPenalty).
+     Design mode: size -> miss-rate tables held in code.
+     ================================================================ */
+  function amatCalc(ht1, mr1, ht2, mr2, mem) { return ht1 + mr1 * (ht2 + mr2 * mem); }
+  const AMAT_L1 = [{ kb: 4, mr: 0.12 }, { kb: 8, mr: 0.09 }, { kb: 16, mr: 0.06 }, { kb: 32, mr: 0.04 }, { kb: 64, mr: 0.025 }];
+  const AMAT_L2 = [{ kb: 64, mr: 0.60 }, { kb: 128, mr: 0.50 }, { kb: 256, mr: 0.40 }, { kb: 512, mr: 0.30 }, { kb: 1024, mr: 0.20 }];
+  const AMAT_DESIGN = { ht1: 1, ht2: 12, mem: 180, budgetKB: 600, target: 3.0 };
+  XC.a4 = { amat: amatCalc, l1: AMAT_L1, l2: AMAT_L2, design: AMAT_DESIGN,
+    designAmat: (i, j) => amatCalc(AMAT_DESIGN.ht1, AMAT_L1[i].mr, AMAT_DESIGN.ht2, AMAT_L2[j].mr, AMAT_DESIGN.mem),
+    solutions: () => { const out = []; AMAT_L1.forEach((a, i) => AMAT_L2.forEach((b, j) => { if (a.kb + b.kb <= AMAT_DESIGN.budgetKB && amatCalc(AMAT_DESIGN.ht1, a.mr, AMAT_DESIGN.ht2, b.mr, AMAT_DESIGN.mem) <= AMAT_DESIGN.target) out.push([i, j]); })); return out; } };
+  (function buildA4() {
+    const sec = mkCard("sysArch", "archAmatCard", "AMAT — pricing the memory hierarchy, then designing one",
+      "<b>Average Memory Access Time</b> folds the whole hierarchy into one number: AMAT = L1 hit time + L1 miss rate × (L2 hit time + L2 <i>local</i> miss rate × memory penalty). Work part 1 level by level — the cost of an L1 miss first, then the AMAT. Then part 2 hands you the design problem: pick L1 and L2 sizes (the miss rates come from the table the sizes index into) and meet a target AMAT inside a total-size budget.");
+    const sc = { ht1: 1, mr1: 0.05, ht2: 12, mr2: 0.4, mem: 200 };
+    const missCost = sc.ht2 + sc.mr2 * sc.mem, amat = amatCalc(sc.ht1, sc.mr1, sc.ht2, sc.mr2, sc.mem);
+    sec.insertAdjacentHTML("beforeend",
+      '<div class="seq-state">' +
+      '<div class="seq-cell"><b>1 cycle</b>L1 hit time</div><div class="seq-cell"><b>5%</b>L1 miss rate</div>' +
+      '<div class="seq-cell"><b>12 cycles</b>L2 hit time</div><div class="seq-cell"><b>40%</b>L2 local miss rate</div>' +
+      '<div class="seq-cell"><b>200 cycles</b>memory penalty</div></div>' +
+      '<div class="rx-grid2"><div class="rx-panel"><h3>Step 1 — what does one L1 miss cost?</h3>' +
+      '<label class="fld">L2 hit time + L2 miss rate × memory (cycles) <input type="text" id="amC" class="rx-num" autocomplete="off" /></label> ' +
+      '<button type="button" class="btn" id="amCk1">Check</button><div class="decimal-line" id="amFb1" aria-live="polite"></div></div>' +
+      '<div class="rx-panel"><h3>Step 2 — the AMAT (cycles)</h3>' +
+      '<label class="fld">AMAT <input type="text" id="amA" class="rx-num" autocomplete="off" /></label> ' +
+      '<button type="button" class="btn" id="amCk2">Check</button><div class="decimal-line" id="amFb2" aria-live="polite"></div></div></div>' +
+      '<div class="rx-panel" style="margin-top:12px"><h3>Design mode — meet AMAT ≤ ' + AMAT_DESIGN.target.toFixed(1) + ' cycles within ' + AMAT_DESIGN.budgetKB + ' KB total</h3>' +
+      '<label class="fld">L1 size <input type="range" id="amL1" min="0" max="4" step="1" value="1" /> <span class="mono" id="amL1V"></span></label><br>' +
+      '<label class="fld">L2 size <input type="range" id="amL2" min="0" max="4" step="1" value="1" /> <span class="mono" id="amL2V"></span></label>' +
+      '<div class="seq-state" id="amDesign"></div>' +
+      '<button type="button" class="btn primary" id="amCkD">Check this design</button><div class="decimal-line" id="amFbD" aria-live="polite"></div></div>' +
+      '<p class="cp-formal adv-only">The L2 miss rate in the AMAT formula is the LOCAL rate — misses per L2 access — not the global rate (misses per original reference), which is mrL1 × mrL2local. Confusing the two is the standard way to underprice a hierarchy by an order of magnitude. The design tables encode diminishing returns: doubling a cache buys a smaller miss-rate cut each time, which is why the target is a trade-off and not a maximisation.</p>');
+    sec.querySelector("#amCk1").addEventListener("click", () => {
+      const v = parseFloat(sec.querySelector("#amC").value);
+      fbSet(sec.querySelector("#amFb1"), closeTol(v, missCost, 0.01), closeTol(v, missCost, 0.01) ? "Right: 12 + 0.40 × 200 = " + missCost + " cycles is the average price of an L1 miss — most L1 misses are rescued by L2, the rest go all the way to memory." : "An L1 miss costs the L2 hit time (12) plus, for the fraction that also miss L2 (40%), the memory penalty (200): 12 + 0.40 × 200 = " + missCost + " cycles.");
+    });
+    sec.querySelector("#amCk2").addEventListener("click", () => {
+      const v = parseFloat(sec.querySelector("#amA").value);
+      fbSet(sec.querySelector("#amFb2"), closeTol(v, amat, 0.01), closeTol(v, amat, 0.01) ? "Right: AMAT = 1 + 0.05 × " + missCost + " = " + amat.toFixed(2) + " cycles. The 5% miss rate is small, but each miss is so expensive that misses contribute " + (sc.mr1 * missCost).toFixed(2) + " of the " + amat.toFixed(2) + " — the hierarchy's price is set by its failures, not its hits." : "AMAT = L1 hit time + L1 miss rate × (cost of a miss from step 1) = 1 + 0.05 × " + missCost + " = " + amat.toFixed(2) + " cycles. If you used the memory penalty alone inside the bracket, you priced every L1 miss as an L2 miss too.");
+    });
+    function designRender() {
+      const i = +sec.querySelector("#amL1").value, j = +sec.querySelector("#amL2").value;
+      const a = AMAT_L1[i], b = AMAT_L2[j], v = XC.a4.designAmat(i, j), tot = a.kb + b.kb;
+      sec.querySelector("#amL1V").textContent = a.kb + " KB → miss rate " + (a.mr * 100) + "%";
+      sec.querySelector("#amL2V").textContent = b.kb + " KB → local miss rate " + (b.mr * 100) + "%";
+      sec.querySelector("#amDesign").innerHTML =
+        '<div class="seq-cell"><b>' + tot + " KB</b>of " + AMAT_DESIGN.budgetKB + " KB budget</div>" +
+        '<div class="seq-cell"><b>' + v.toFixed(2) + " cycles</b>AMAT of this design</div>" +
+        '<div class="seq-cell' + (v <= AMAT_DESIGN.target && tot <= AMAT_DESIGN.budgetKB ? " one" : "") + '"><b>' + (v <= AMAT_DESIGN.target && tot <= AMAT_DESIGN.budgetKB ? "meets both" : v > AMAT_DESIGN.target ? "AMAT too high" : "over budget") + "</b>target ≤ " + AMAT_DESIGN.target.toFixed(1) + "</div>";
+      return { i, j, v, tot };
+    }
+    sec.querySelector("#amL1").addEventListener("input", designRender);
+    sec.querySelector("#amL2").addEventListener("input", designRender);
+    sec.querySelector("#amCkD").addEventListener("click", () => {
+      const d = designRender(), fbEl = sec.querySelector("#amFbD");
+      const ok = d.v <= AMAT_DESIGN.target && d.tot <= AMAT_DESIGN.budgetKB;
+      fbSet(fbEl, ok, ok ? "Design accepted: " + AMAT_L1[d.i].kb + " KB L1 + " + AMAT_L2[d.j].kb + " KB L2 = " + d.tot + " KB, AMAT = 1 + " + AMAT_L1[d.i].mr + " × (12 + " + AMAT_L2[d.j].mr + " × 180) = " + d.v.toFixed(2) + " ≤ " + AMAT_DESIGN.target.toFixed(1) + ". Note what did it: the L1 miss rate is the multiplier on the whole bracket, so L1 size is the lever with leverage." : "Not yet: this design gives AMAT " + d.v.toFixed(2) + " cycles at " + d.tot + " KB. " + (d.tot > AMAT_DESIGN.budgetKB ? "It is over the size budget — trade L2 kilobytes for L1 kilobytes. " : "") + "Shrink the L1 miss rate first: it multiplies everything inside the bracket, L2 hit time and memory penalty alike.");
+    });
+    designRender();
+  })();
+
+  /* ================================================================
+     A5 — PAGE-TABLE WALK (two levels, TLB first, refs counted)
+     VA: [L1 idx 4 | L2 idx 4 | offset 8], page = 256 bytes.
+     ================================================================ */
+  function walkTables() {
+    const L1 = {}; const L2 = { T1: {}, T2: {} };
+    L1[3] = "T1"; L1[7] = "T2";
+    L2.T1[5] = 0x2A; L2.T1[9] = null;
+    L2.T2[1] = 0x07; L2.T2[4] = 0x11;
+    return { L1, L2 };
+  }
+  function ptWalk(va, tables, tlb) {
+    const l1 = (va >>> 12) & 0xF, l2 = (va >>> 8) & 0xF, off = va & 0xFF;
+    const key = l1 + ":" + l2;
+    if (tlb && tlb[key] != null) return { l1, l2, off, tlbHit: true, frame: tlb[key], pa: ((tlb[key] << 8) | off) >>> 0, refs: 1, fault: false, steps: ["TLB hit — frame " + hexN(tlb[key], 2) + " is already cached; no table reads at all", "data access at the physical address"] };
+    const steps = ["TLB miss — the walk begins"];
+    let refs = 0;
+    const t = tables.L1[l1]; refs++;
+    steps.push("memory read 1: level-1 entry " + l1 + (t ? " → level-2 table " + t : " → invalid: no level-2 table"));
+    if (!t) return { l1, l2, off, tlbHit: false, frame: null, pa: null, refs, fault: true, steps };
+    const fr = tables.L2[t][l2]; refs++;
+    steps.push("memory read 2: level-2 entry " + l2 + (fr == null ? " → INVALID — page fault" : " → frame " + hexN(fr, 2)));
+    if (fr == null) return { l1, l2, off, tlbHit: false, frame: null, pa: null, refs, fault: true, steps };
+    refs++;
+    steps.push("memory read 3: the data itself, in frame " + hexN(fr, 2));
+    return { l1, l2, off, tlbHit: false, frame: fr, pa: ((fr << 8) | off) >>> 0, refs, fault: false, steps };
+  }
+  const PT_SCEN = [
+    { name: "Warm TLB", va: (3 << 12) | (5 << 8) | 0x42, tlb: { "3:5": 0x2A }, story: "This translation was used a moment ago and sits in the TLB." },
+    { name: "Cold TLB, valid page", va: (7 << 12) | (1 << 8) | 0x10, tlb: {}, story: "First touch of this page: the TLB has nothing, the tables must be walked." },
+    { name: "The fault", va: (3 << 12) | (9 << 8) | 0x00, tlb: {}, story: "This page was never mapped. Walk it and find out what the machine does instead of producing an address." }
+  ];
+  XC.a5 = { walk: ptWalk, tables: walkTables, scenarios: PT_SCEN };
+  (function buildA5() {
+    const sec = mkCard("sysArch", "archWalkCard", "Page-table walk — two levels, every memory reference counted",
+      "The OS module's TLB simulator watches hit ratios; this lab is the walk underneath one translation. A 16-bit virtual address splits as <b>4 bits level-1 index · 4 bits level-2 index · 8 bits offset</b> (256-byte pages). Step the walk: <b>TLB first</b>; on a miss, read the level-1 entry, then the level-2 entry, then — only if both are valid — the data. Count every memory reference as you go: that count, multiplied by memory latency, is the real price of virtual memory. One of the three scenarios ends in a <b>page fault</b>, where producing an address is exactly what must NOT happen.");
+    sec.insertAdjacentHTML("beforeend",
+      '<div class="tool-controls"><label>Scenario <span class="seg" role="group" aria-label="Scenario" id="pwSeg">' +
+      PT_SCEN.map((s, i) => '<button type="button" data-pw="' + i + '" aria-pressed="' + (i === 0 ? "true" : "false") + '">' + s.name + "</button>").join("") + "</span></label></div>" +
+      '<p style="font-size:13.5px;margin:0 0 6px" id="pwStory"></p>' +
+      '<div class="rx-bits" id="pwBits"></div>' +
+      '<div class="share-row"><button type="button" class="btn primary" id="pwStep">Walk one step ▸</button><button type="button" class="btn" id="pwReset">Reset the walk</button></div>' +
+      '<div class="decimal-line" id="pwMsg" aria-live="polite"></div>' +
+      '<div class="rx-grid2"><div class="rx-panel"><h3>Physical address (hex) — or pick "page fault"</h3>' +
+      '<label class="fld">PA <input type="text" id="pwPA" class="rx-num" autocomplete="off" placeholder="0x…" /></label> ' +
+      '<label class="testme-toggle"><input type="checkbox" id="pwFault" /> it faults — no PA exists</label></div>' +
+      '<div class="rx-panel"><h3>Total memory references for this access</h3>' +
+      '<label class="fld">Count <input type="text" id="pwRefs" class="rx-num" autocomplete="off" /></label></div></div>' +
+      '<div class="share-row"><button type="button" class="btn primary" id="pwCheck">Check the walk</button></div>' +
+      '<div class="decimal-line" id="pwFb" aria-live="polite"></div>' +
+      '<p class="cp-formal adv-only">Reference accounting used here: a TLB hit costs 1 memory reference total (the data access itself — the TLB is on-chip). A TLB miss with a two-level table costs 3: two table reads plus the data. A faulting walk stops after the table reads (2 here): the data access never happens, and the reference count is precisely what the fault handler has spent when it takes over. Deeper tables (x86-64 walks four levels) raise the miss path to 5 references — the TLB exists because that number is unpayable on every access.</p>');
+    const tables = walkTables();
+    let cur = PT_SCEN[0], res = ptWalk(cur.va, tables, cur.tlb), shown = 0;
+    function render() {
+      res = ptWalk(cur.va, tables, cur.tlb); shown = 0;
+      sec.querySelector("#pwStory").textContent = cur.story + "  Virtual address " + hexN(cur.va, 4) + " — split: level-1 index " + res.l1 + " · level-2 index " + res.l2 + " · offset " + hexN(res.off, 2) + ".";
+      const host = sec.querySelector("#pwBits"); host.innerHTML = "";
+      const groups = [[15, 12, "L1 idx", "f-op"], [11, 8, "L2 idx", "f-a"], [7, 0, "offset", "f-b"]];
+      groups.forEach(([hi, lo, lab, cls]) => { for (let i = hi; i >= lo; i--) { const sp = document.createElement("span"); sp.className = cls; sp.innerHTML = ((cur.va >>> i) & 1) + (i === lo ? "<small>" + lab + "</small>" : ""); host.appendChild(sp); } });
+      sec.querySelector("#pwMsg").textContent = "Walk not started. TLB first — always.";
+      sec.querySelector("#pwPA").value = ""; sec.querySelector("#pwRefs").value = ""; sec.querySelector("#pwFault").checked = false;
+      sec.querySelector("#pwFb").textContent = "";
+    }
+    sec.querySelector("#pwSeg").querySelectorAll("[data-pw]").forEach(b => b.addEventListener("click", () => {
+      sec.querySelector("#pwSeg").querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x === b ? "true" : "false"));
+      cur = PT_SCEN[+b.dataset.pw]; render();
+    }));
+    sec.querySelector("#pwReset").addEventListener("click", render);
+    sec.querySelector("#pwStep").addEventListener("click", () => {
+      if (shown >= res.steps.length) { sec.querySelector("#pwMsg").textContent = "Walk complete: " + (res.fault ? "page fault after " + res.refs + " reference(s) — no data access happened." : res.refs + " memory reference(s) total" + (res.tlbHit ? " (TLB hit path)" : " (full walk)") + ", physical address " + hexN(res.pa, 4) + ". Now enter the results."); return; }
+      sec.querySelector("#pwMsg").textContent = "Step " + (shown + 1) + ": " + res.steps[shown];
+      shown++;
+    });
+    sec.querySelector("#pwCheck").addEventListener("click", () => {
+      const fbEl = sec.querySelector("#pwFb");
+      const paV = parseNum(sec.querySelector("#pwPA").value), refsV = parseNum(sec.querySelector("#pwRefs").value), faultPick = sec.querySelector("#pwFault").checked;
+      const wrong = [];
+      if (res.fault) { if (!faultPick) wrong.push("this walk FAULTS: level-2 entry " + res.l2 + " is invalid, so there is no physical address — the correct answer is the fault, and any PA you invented is an address the machine must never touch"); }
+      else {
+        if (faultPick) wrong.push("this walk does not fault — both entries are valid and the frame is " + hexN(res.frame, 2));
+        else if ((paV >>> 0) !== res.pa) wrong.push("physical address: frame " + hexN(res.frame, 2) + " shifted into the top byte, offset " + hexN(res.off, 2) + " unchanged underneath: PA = " + hexN(res.pa, 4) + " (offsets are never translated — that is what makes paging work)");
+      }
+      if (refsV !== res.refs) wrong.push("reference count: this path spends " + res.refs + " — " + (res.tlbHit ? "the TLB hit means the only memory reference is the data access itself" : res.fault ? "two table reads, then the fault stops the walk before any data access" : "two table reads plus the data access"));
+      if (!wrong.length) fbSet(fbEl, true, "Walk and count both right for " + cur.name + ": " + (res.fault ? "fault correctly identified, " + res.refs + " references spent getting there." : "PA " + hexN(res.pa, 4) + " in " + res.refs + " reference" + (res.refs === 1 ? "" : "s") + "."));
+      else { fbEl.style.color = "var(--red)"; fbEl.innerHTML = "✗ " + wrong.map(w => "· " + escX(w)).join("<br>"); }
+    });
+    render();
+  })();
+
+  /* ================================================================
+     A6 — IEEE 754 ADDITION STEPPER
+     Exact integer math: each operand becomes (sign, exp, sig24)
+     from its float32 bits; significands are scaled x8 (3 extra
+     bits) as BigInt so alignment + round-to-nearest-even are
+     exact. Verified against Math.fround(a + b) in the self-test.
+     ================================================================ */
+  function f32bits(x) { const dv = new DataView(new ArrayBuffer(4)); dv.setFloat32(0, x); return dv.getUint32(0); }
+  function f32decomp(x) {
+    const b = f32bits(x), sign = (b >>> 31) & 1, ef = (b >>> 23) & 0xFF, frac = b & 0x7FFFFF;
+    if (ef === 0 && frac === 0) return { sign, exp: -126, sig: 0n, zero: true };
+    if (ef === 0) return { sign, exp: -126, sig: BigInt(frac), zero: false, sub: true };
+    return { sign, exp: ef - 127, sig: BigInt(frac | 0x800000), zero: false };
+  }
+  function fpAdd(a, b) {
+    const A = f32decomp(a), B = f32decomp(b);
+    if (A.zero && B.zero) return { bits: (A.sign && B.sign) ? 0x80000000 : 0, steps: null };
+    if (A.zero) return { bits: f32bits(b), steps: null };
+    if (B.zero) return { bits: f32bits(a), steps: null };
+    const hi = A.exp >= B.exp ? A : B, lo = A.exp >= B.exp ? B : A;
+    const d = hi.exp - lo.exp;
+    const S = 8n; /* x8 scaling: sig has 27 bits, low 3 are G/R/S room */
+    const hiSig = hi.sig * S;
+    let loAligned = (lo.sig * S) >> BigInt(d);
+    const shiftedOut = (lo.sig * S) - (loAligned << BigInt(d));
+    const sticky = shiftedOut > 0n ? 1n : 0n;
+    loAligned = loAligned | sticky; /* sticky folded into bit 0 of the aligned value's guard room — exact for RNE decisions */
+    let sumSig, resSign = hi.sign;
+    if (A.sign === B.sign) sumSig = hiSig + loAligned;
+    else { sumSig = hiSig - loAligned; if (sumSig < 0n) { sumSig = -sumSig; resSign = lo.sign; } }
+    let exp = hi.exp;
+    if (sumSig === 0n) return { bits: 0, steps: { d, hiSig, loAligned, sumSig, exp, sticky: sticky === 1n }, hi, lo };
+    while (sumSig >= (1n << 27n)) { const st = (sumSig & 1n) === 1n; sumSig = (sumSig >> 1n) | (st ? 1n : 0n); exp++; }
+    while (sumSig < (1n << 26n)) { sumSig = sumSig << 1n; exp--; }
+    /* now 27 bits: 24 wanted + 3 rounding bits */
+    let keep = sumSig >> 3n;
+    const rem = sumSig & 7n;
+    if (rem > 4n || (rem === 4n && (keep & 1n) === 1n)) keep = keep + 1n;
+    if (keep >= (1n << 24n)) { keep = keep >> 1n; exp++; }
+    const bits = (((resSign << 31) | ((exp + 127) << 23) | Number(keep & 0x7FFFFFn)) >>> 0);
+    return { bits, steps: { d, hiSig, loAligned, sumSig, exp, sticky: sticky === 1n }, hi, lo };
+  }
+  const FP_PAIRS = [
+    { a: 1.5, b: 2.25, why: "same sign, gentle alignment" },
+    { a: 2.5, b: 0.75, why: "alignment by 2, exact result" },
+    { a: 1.0, b: Math.pow(2, -24), why: "the tie: exactly half an ulp — round-to-nearest-EVEN must decide" },
+    { a: -1.25, b: 0.5, why: "different signs: subtraction of significands" },
+    { a: 3.5, b: -1.25, why: "subtraction needing renormalisation" }
+  ];
+  XC.a6 = { add: fpAdd, bits: f32bits, pairs: FP_PAIRS,
+    verify: () => {
+      let ok = true;
+      FP_PAIRS.forEach(p => { if (fpAdd(p.a, p.b).bits !== f32bits(Math.fround(p.a + p.b))) ok = false; });
+      const rng = mulberryX(1234);
+      for (let i = 0; i < 300 && ok; i++) {
+        const a = (Math.floor(rng() * 2000) - 1000) / Math.pow(2, Math.floor(rng() * 8));
+        const b = (Math.floor(rng() * 2000) - 1000) / Math.pow(2, Math.floor(rng() * 8));
+        if (fpAdd(a, b).bits !== f32bits(Math.fround(a + b))) ok = false;
+      }
+      return ok;
+    } };
+  (function buildA6() {
+    const sec = mkCard("sysArch", "archFpCard", "Adding floats — IEEE 754, one honest step at a time",
+      "Float addition is not decimal addition with extra steps — it is <b>integer</b> addition of significands after an alignment that throws bits away, plus a rounding rule for what was thrown. Pick a pair and work the five steps: each is checked against exact integer significand math done by this page, and the assembled result is verified against the machine's own float32 addition. The third pair is the famous one: the true sum sits <i>exactly halfway</i> between two floats, and only round-to-nearest-even can settle it.");
+    sec.insertAdjacentHTML("beforeend",
+      '<div class="tool-controls"><label>Operand pair <select id="fpSel" class="rx-sel">' +
+      FP_PAIRS.map((p, i) => '<option value="' + i + '">' + p.a + " + (" + p.b + ") — " + p.why + "</option>").join("") +
+      '<option value="gen">Generate a pair for me</option></select></label><span class="mono" id="fpBits" style="font-size:12.5px"></span></div>' +
+      '<div id="fpSteps"></div>' +
+      '<p class="cp-formal adv-only">Single precision: 1 sign bit, 8 exponent bits (bias 127), 23 stored fraction bits with an implicit leading 1 (the hidden bit) for normals. Alignment shifts the smaller operand\'s significand right; the bits that fall off become guard/round/sticky information, and round-to-nearest-even resolves exact ties toward the candidate whose last kept bit is 0 — which is what keeps long sums statistically unbiased.</p>');
+    let cur = FP_PAIRS[0];
+    function fmtBin(big, n) { let s = big.toString(2); while (s.length < n) s = "0" + s; return s; }
+    function render() {
+      const r = fpAdd(cur.a, cur.b), st = r.steps;
+      const dv = new DataView(new ArrayBuffer(4)); dv.setUint32(0, r.bits); const dec = dv.getFloat32(0);
+      sec.querySelector("#fpBits").textContent = "a = " + hexN(f32bits(cur.a), 8) + " · b = " + hexN(f32bits(cur.b), 8);
+      const host = sec.querySelector("#fpSteps"); host.innerHTML = "";
+      if (!st) { host.innerHTML = '<div class="decimal-line">A zero operand: the sum is the other operand, bit for bit — no alignment ever happens.</div>'; return; }
+      const A = f32decomp(cur.a), B = f32decomp(cur.b);
+      const steps = [];
+      steps.push({ q: "Step 1 — the smaller exponent belongs to " + (A.exp <= B.exp ? "a (" + cur.a + ")" : "b (" + cur.b + ")") + ", and its significand must shift right by how many places to align with exponent " + r.hi.exp + "?",
+        opts: [String(Math.max(0, st.d - 1)), String(st.d), String(st.d + 1), String(st.d + 2)], want: String(st.d),
+        good: "Shift = exponent difference = " + st.d + ". Alignment is the destructive step: those " + st.d + " low bits leave the 24-bit significand and survive only as rounding information.",
+        bad: "The shift is the exponent DIFFERENCE: " + Math.max(A.exp, B.exp) + " − " + Math.min(A.exp, B.exp) + " = " + st.d + "." });
+      const alignedStr = fmtBin(st.loAligned, 27);
+      steps.push({ q: "Step 2 — the smaller significand, aligned (27 bits shown: 24 + 3 rounding bits; the hidden 1 is included). Which is it?",
+        opts: [fmtBin(st.hiSig, 27), alignedStr, fmtBin(st.loAligned << 1n > (1n << 28n) ? st.loAligned : st.loAligned << 1n, 27), fmtBin(r.lo.sig * 8n, 27)], want: alignedStr,
+        good: "That is the shifted significand — compare its top bits with the unshifted one and you can see the " + st.d + "-place slide, with the sticky bit folded into the last place if anything non-zero fell off.",
+        bad: "Find the unshifted significand ×8 in the list — then slide it right " + st.d + " places in your head: leading zeros appear at the top, low bits leave at the bottom. The correct string starts with the slid pattern, and its last bit is the sticky flag when anything fell off." });
+      const sumStr = fmtBin(st.sumSig, 28);
+      steps.push({ q: "Step 3 — " + (A.sign === B.sign ? "add" : "subtract") + " the aligned significands (the larger is already aligned). The result, before normalisation?",
+        opts: [sumStr, fmtBin(st.hiSig, 28), fmtBin(st.hiSig + (r.lo.sig * 8n), 28), fmtBin(st.loAligned, 28)], want: sumStr,
+        good: "Significand arithmetic done: " + sumStr + " — this is still an integer at the common exponent, not yet a float.",
+        bad: A.sign === B.sign ? "Add the ALIGNED smaller significand (step 2's result), not the unshifted one — adding unshifted is the classic float bug, and it is one of the options here so you can see how plausible it looks." : "With different signs this is a subtraction: larger aligned minus smaller aligned. Adding instead is one of the options — and it is what a careless implementation would produce." });
+      const trunc = (() => { const keep0 = st.sumSig >> 3n; let e0 = st.exp, k0 = keep0; return ((( (A.sign === B.sign ? A.sign : (st.sumSig >= 0n ? r.hi.sign : 0)) << 31) | ((e0 + 127) << 23) | Number(k0 & 0x7FFFFFn)) >>> 0); })();
+      const opts4 = [hexN(r.bits, 8), hexN((r.bits + 0x800000) >>> 0, 8), hexN((r.bits - 0x800000) >>> 0, 8), hexN(trunc, 8)].filter((v, i, arr) => arr.indexOf(v) === i);
+      steps.push({ q: "Step 4 — normalise, round-to-nearest-even, assemble. The final 32-bit pattern?",
+        opts: opts4, want: hexN(r.bits, 8),
+        good: "Assembled and verified: this pattern is bit-for-bit what the machine's own float32 addition of " + cur.a + " + (" + cur.b + ") produces" + (cur.a === 1.0 && cur.b === Math.pow(2, -24) ? " — and note the tie broke DOWN to the even neighbour: the exact sum was halfway, the kept significand was even, so it stayed" : "") + ".",
+        bad: "Assemble carefully: sign, then exponent + 127 in 8 bits, then the TOP 23 fraction bits after rounding — the exponent-off-by-one patterns are both in this list, and so is the truncated (unrounded) one. The model's exact assembly is " + hexN(r.bits, 8) + "." });
+      steps.push({ q: "Step 5 — and as a decimal, the stored result is…",
+        opts: [String(dec), String(cur.a + cur.b), String(Math.fround(cur.a + cur.b))].filter((v, i, arr) => arr.indexOf(v) === i), want: String(dec),
+        good: "The stored float is " + dec + (String(cur.a + cur.b) !== String(dec) ? " — while the exact mathematical sum is " + (cur.a + cur.b) + ". The gap between them is the rounding this whole lab is about: floats store neighbours of the truth, never the truth itself, once the truth needs more than 24 bits." : " — here the exact sum fits in 24 bits, so float and truth agree; the earlier steps were still the price of knowing that."),
+        bad: "The stored value is the float32 nearest the exact sum: " + dec + ". Decimal " + (cur.a + cur.b) + " is the exact sum — a different number whenever rounding bites." });
+      steps.forEach((s, si) => {
+        const d = document.createElement("div"); d.className = "rx-panel"; d.style.marginTop = "10px";
+        d.innerHTML = '<div class="lab-check-q"></div><span class="fp-opts" style="display:flex;gap:6px;flex-wrap:wrap"></span><span class="lab-check-fb" aria-live="polite"></span>';
+        d.querySelector(".lab-check-q").textContent = s.q;
+        const fbEl = d.querySelector(".lab-check-fb");
+        optBtns(d.querySelector(".fp-opts"), s.opts, (i, b) => {
+          const okOpt = b.textContent === s.want;
+          fbSet(fbEl, okOpt, okOpt ? s.good : s.bad);
+        });
+        host.appendChild(d);
+      });
+    }
+    sec.querySelector("#fpSel").addEventListener("change", e => {
+      if (e.target.value === "gen") {
+        const rng = mulberryX(9000 + Math.floor(Math.random() * 100000));
+        const a = (Math.floor(rng() * 160) - 40) / 8, b = (Math.floor(rng() * 160) - 80) / 16;
+        cur = { a: a === 0 ? 0.5 : a, b: b === 0 ? 0.25 : b, why: "generated" };
+      } else cur = FP_PAIRS[+e.target.value];
+      render();
+    });
+    render();
+  })();
+
+  /* ================================================================
+     S1 — FORK TREE PREDICTOR
+     An execution MODEL of the snippet structure: fork duplicates
+     every live process (child gets pid-var 0), ifChild runs its
+     body for pid-var==0 processes only, print counts once per
+     live process. Counts come from the model's traversal.
+     ================================================================ */
+  const FORK_SNIPS = [
+    { title: "Two forks in a row", code: "fork();\nfork();\nprintf(\"hi\\n\");", prog: [{ op: "fork" }, { op: "fork" }, { op: "print", text: "hi" }] },
+    { title: "Fork inside a loop (3 turns)", code: "for (i = 0; i < 3; i++) {\n    fork();\n    printf(\"x\\n\");\n}", prog: [{ op: "loop", times: 3, body: [{ op: "fork" }, { op: "print", text: "x" }] }] },
+    { title: "Only the child forks again", code: "pid = fork();\nif (pid == 0) {\n    fork();\n}\nprintf(\"y\\n\");", prog: [{ op: "fork", store: 1 }, { op: "ifChild", body: [{ op: "fork" }] }, { op: "print", text: "y" }] }
+  ];
+  function forkExec(prog) {
+    let nextId = 1;
+    const procs = [{ id: 0, parent: null, pidVar: null, depth: 0 }];
+    const nodes = [{ id: 0, parent: null, depth: 0 }];
+    let prints = 0;
+    const snaps = [{ label: "start: one process, P0", procs: 1, prints: 0, nodes: nodes.slice() }];
+    function doFork(members, store, label) {
+      const kids = [];
+      members.slice().forEach(p => {
+        const child = { id: nextId++, parent: p.id, pidVar: 0, depth: p.depth + 1 };
+        if (store) p.pidVar = child.id;
+        kids.push(child); nodes.push({ id: child.id, parent: p.id, depth: child.depth });
+        procs.push(child);
+      });
+      snaps.push({ label, procs: procs.length, prints, nodes: nodes.slice() });
+      return kids;
+    }
+    function run(ops, members, prefix) {
+      let cur = members;
+      ops.forEach(o => {
+        if (o.op === "fork") { const kids = doFork(cur, o.store, prefix + "fork() — every process in scope splits in two"); cur = cur.concat(kids); }
+        else if (o.op === "print") { prints += cur.length; snaps.push({ label: prefix + "printf(\"" + o.text + "\") — runs once per live process in scope (" + cur.length + ")", procs: procs.length, prints, nodes: nodes.slice() }); }
+        else if (o.op === "loop") { for (let t = 0; t < o.times; t++) cur = run(o.body, cur, prefix + "loop turn " + (t + 1) + ": "); }
+        else if (o.op === "ifChild") { const before = procs.length; run(o.body, cur.filter(p => p.pidVar === 0), prefix + "inside if (pid == 0), children only: "); cur = cur.concat(procs.slice(before)); }
+      });
+      return cur;
+    }
+    run(prog, procs.slice(), "");
+    return { procs: procs.length, prints, nodes, snaps };
+  }
+  XC.s1 = { snips: FORK_SNIPS, run: i => forkExec(FORK_SNIPS[i].prog) };
+  (function buildS1() {
+    const sec = mkCard("sysOs", "osForkCard", "Fork tree predictor — how many processes does this make?",
+      "<span class=\"mono\">fork()</span> is the most miscounted call in operating systems, because it returns <i>twice</i>: once in the parent, once in a brand-new child that continues from the same line with a copy of everything. Predict first — <b>total processes alive at the end</b> and <b>total lines printed</b> — then grow the tree step by step and watch the model's own execution settle it. The loop snippet is the one to get wrong: the print is <i>inside</i> the loop, so early processes print again on every later turn.");
+    sec.insertAdjacentHTML("beforeend",
+      '<div class="tool-controls"><label>Snippet <span class="seg" role="group" aria-label="Snippet" id="fkSeg">' +
+      FORK_SNIPS.map((s, i) => '<button type="button" data-fk="' + i + '" aria-pressed="' + (i === 0 ? "true" : "false") + '">' + (i + 1) + "</button>").join("") + '</span></label><span id="fkTitle" style="font-weight:700"></span></div>' +
+      '<pre class="sketch" id="fkCode" aria-label="Snippet source"></pre>' +
+      '<div class="rx-grid2"><div class="rx-panel"><h3>Your prediction</h3>' +
+      '<label class="fld">Processes alive at the end <input type="text" id="fkNP" class="rx-num" autocomplete="off" /></label><br>' +
+      '<label class="fld">Lines printed, total <input type="text" id="fkNL" class="rx-num" autocomplete="off" /></label><br>' +
+      '<button type="button" class="btn primary" id="fkCk">Check prediction</button><div class="decimal-line" id="fkFb" aria-live="polite"></div></div>' +
+      '<div class="rx-panel"><h3>The tree, growing</h3><div class="rx-tree" id="fkTree"></div>' +
+      '<div class="seq-state" id="fkCount"></div>' +
+      '<div class="decimal-line" id="fkStepLab"></div>' +
+      '<div class="share-row"><button type="button" class="btn" id="fkStepBtn">Step the execution ▸</button><button type="button" class="btn" id="fkResetBtn">Restart</button></div></div></div>' +
+      '<p class="cp-formal adv-only">The model executes the snippet\'s structure, not a recording: fork() clones the live-process set (the child\'s pid-variable is 0, the parent\'s is the child\'s pid — that asymmetry is the only reason if (pid == 0) can select children); a loop body re-enters for every process alive at that point, including ones born inside earlier turns. Counts are the traversal\'s own tallies, which is why the checker and the animation can never disagree.</p>');
+    let cur = 0, run = forkExec(FORK_SNIPS[0].prog), snapI = 0;
+    function treeHtml(nodes) {
+      return nodes.map(n => '<div style="padding-left:' + (n.depth * 22) + 'px">' + (n.parent === null ? "● P0 — the original process" : "└ P" + n.id + " — forked by P" + n.parent) + "</div>").join("");
+    }
+    function render() {
+      run = forkExec(FORK_SNIPS[cur].prog); snapI = 0;
+      sec.querySelector("#fkTitle").textContent = FORK_SNIPS[cur].title;
+      sec.querySelector("#fkCode").textContent = FORK_SNIPS[cur].code;
+      sec.querySelector("#fkNP").value = ""; sec.querySelector("#fkNL").value = ""; sec.querySelector("#fkFb").textContent = "";
+      showSnap();
+    }
+    function showSnap() {
+      const s = run.snaps[snapI];
+      sec.querySelector("#fkTree").innerHTML = treeHtml(s.nodes);
+      sec.querySelector("#fkCount").innerHTML = '<div class="seq-cell"><b>' + s.procs + "</b>processes alive</div>" + '<div class="seq-cell"><b>' + s.prints + "</b>lines printed so far</div>";
+      sec.querySelector("#fkStepLab").textContent = s.label + (snapI === run.snaps.length - 1 ? " — execution complete." : "");
+      sec.querySelector("#fkStepBtn").disabled = snapI >= run.snaps.length - 1;
+    }
+    sec.querySelector("#fkSeg").querySelectorAll("[data-fk]").forEach(b => b.addEventListener("click", () => {
+      sec.querySelector("#fkSeg").querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x === b ? "true" : "false"));
+      cur = +b.dataset.fk; render();
+    }));
+    sec.querySelector("#fkStepBtn").addEventListener("click", () => { if (snapI < run.snaps.length - 1) { snapI++; showSnap(); } });
+    sec.querySelector("#fkResetBtn").addEventListener("click", () => { snapI = 0; showSnap(); });
+    sec.querySelector("#fkCk").addEventListener("click", () => {
+      const p = parseNum(sec.querySelector("#fkNP").value), l = parseNum(sec.querySelector("#fkNL").value), fbEl = sec.querySelector("#fkFb");
+      const ok = p === run.procs && l === run.prints;
+      fbSet(fbEl, ok, ok ? "Both numbers right — the model counts " + run.procs + " processes and " + run.prints + " printed lines for this snippet. Step the tree and watch where each one comes from." :
+        "The model's traversal counts " + run.procs + " processes alive at the end and " + run.prints + " lines printed" + (p !== run.procs ? "; processes first: every fork() doubles the processes that REACH it — including children born earlier in the same snippet" : "; processes you have — now the prints: a printf prints once per process that reaches it, and processes born early reach it on every later loop turn too") + ". Grow the tree with Step and recount from the picture.");
+    });
+    render();
+  })();
+
+  /* ================================================================
+     S2 — DEADLOCK DETECTION (wait-for graph, DFS cycle finding)
+     ================================================================ */
+  function findCycle(edges) {
+    const adj = {};
+    edges.forEach(([a, b]) => { (adj[a] = adj[a] || []).push(b); });
+    const state = {}, stack = [];
+    function dfs(u) {
+      state[u] = 1; stack.push(u);
+      for (const v of (adj[u] || [])) {
+        if (state[v] === 1) return stack.slice(stack.indexOf(v)).concat([v]);
+        if (!state[v]) { const r = dfs(v); if (r) return r; }
+      }
+      stack.pop(); state[u] = 2; return null;
+    }
+    const nodes = Array.from(new Set(edges.flatMap(e => e)));
+    for (const n of nodes) if (!state[n]) { const r = dfs(n); if (r) return r; }
+    return null;
+  }
+  const DD_SCEN = [
+    { name: "The full circle", holds: { P1: "R1", P2: "R2", P3: "R3", P4: "R4" }, waits: { P1: "R2", P2: "R3", P3: "R4", P4: "R1" }, story: "Four processes, four single-instance resources, everyone waiting on the next one round the ring." },
+    { name: "The near-miss chain", holds: { P1: "R1", P2: "R2", P3: "R3", P4: "R4" }, waits: { P1: "R2", P2: "R3", P3: null, P4: "R3" }, story: "It looks circular at a glance — but P3 is waiting for nothing: it will finish, release R3, and the chain unwinds. Detection, not vibes." },
+    { name: "Two locked in a pair", holds: { P1: "R1", P2: "R2", P3: "R3", P4: "R4" }, waits: { P1: "R2", P2: "R1", P3: "R1", P4: null }, story: "P1 and P2 hold each other's next resource. P3 also waits — on P1 — but waiting on a deadlocked process is not the same as being in the cycle." }
+  ];
+  function ddTrueEdges(sc) {
+    const holderOf = {}; Object.keys(sc.holds).forEach(p => holderOf[sc.holds[p]] = p);
+    const edges = [];
+    Object.keys(sc.waits).forEach(p => { const r = sc.waits[p]; if (r) edges.push([p, holderOf[r]]); });
+    return edges;
+  }
+  XC.s2 = { findCycle, scenarios: DD_SCEN, trueEdges: ddTrueEdges, truths: () => DD_SCEN.map(sc => findCycle(ddTrueEdges(sc))) };
+  (function buildS2() {
+    const sec = mkCard("sysOs", "osDeadCard", "Deadlock detection — build the wait-for graph, find the cycle",
+      "The Banker's lab avoids deadlock; this one <b>detects</b> it. With single-instance resources, deadlock is exactly a <b>cycle in the wait-for graph</b>: P<sub>i</sub> → P<sub>j</sub> means \"P<sub>i</sub> waits for a resource P<sub>j</sub> holds\". Read the scenario, tell the graph who each waiting process is actually waiting <i>on</i>, and run the detector (a real DFS, run on the graph you built). If it finds a cycle, recover the way an OS does: <b>abort one process in the cycle</b> — its resources free up and the graph is re-checked. One scenario has no cycle at all, and \"no deadlock\" is the correct finding there.");
+    sec.insertAdjacentHTML("beforeend",
+      '<div class="tool-controls"><label>Scenario <span class="seg" role="group" aria-label="Scenario" id="ddSeg">' +
+      DD_SCEN.map((s, i) => '<button type="button" data-dd="' + i + '" aria-pressed="' + (i === 0 ? "true" : "false") + '">' + (i + 1) + "</button>").join("") + '</span></label><span id="ddName" style="font-weight:700"></span></div>' +
+      '<p style="font-size:13.5px;margin:0 0 8px" id="ddStory"></p><div id="ddRows"></div>' +
+      '<div class="share-row"><button type="button" class="btn primary" id="ddRun">Run cycle detection on my graph</button></div>' +
+      '<div class="decimal-line" id="ddFb" aria-live="polite"></div>' +
+      '<div id="ddRecovery" hidden><div class="ctrl-label">Recovery — abort one process in the cycle (it releases everything it holds)</div>' +
+      '<div class="share-row" id="ddAbortOpts"></div><div class="decimal-line" id="ddFb2" aria-live="polite"></div></div>' +
+      '<p class="cp-formal adv-only">Detection and avoidance are different tools: Banker\'s (in the panel above) refuses to enter unsafe states and needs every process\'s maximum claim in advance; detection assumes nothing, runs periodically (or on a stall), and pays for recovery — aborted work is lost work, and choosing the victim (cheapest restart, fewest resources, least progress lost) is a policy decision the cycle itself cannot make. With multi-instance resources a cycle is necessary but not sufficient for deadlock; single-instance is the case where cycle ⟺ deadlock, which is why this lab stays there.</p>');
+    let cur = DD_SCEN[0];
+    function render() {
+      sec.querySelector("#ddName").textContent = cur.name;
+      sec.querySelector("#ddStory").textContent = cur.story + " Holdings: " + Object.keys(cur.holds).map(p => p + " holds " + cur.holds[p]).join(" · ") + ".";
+      const rows = sec.querySelector("#ddRows"); rows.innerHTML = "";
+      Object.keys(cur.waits).forEach(p => {
+        const r = cur.waits[p];
+        const row = document.createElement("div"); row.className = "rx-sigrow";
+        if (!r) { row.innerHTML = '<span class="rx-signame">' + p + '</span><span class="rx-sigdo">' + p + " waits for nothing — it can run to completion.</span>"; }
+        else {
+          row.innerHTML = '<span class="rx-signame">' + p + '</span><span class="rx-sigdo">' + p + " waits for " + r + " (held by one of the processes). " + p + " is waiting on:</span>";
+          const sel = document.createElement("select"); sel.className = "rx-sel"; sel.id = "ddSel-" + p;
+          sel.innerHTML = '<option value="">— choose the holder —</option>' + Object.keys(cur.holds).map(h => '<option value="' + h + '">' + h + "</option>").join("");
+          row.appendChild(sel);
+        }
+        rows.appendChild(row);
+      });
+      sec.querySelector("#ddFb").textContent = ""; sec.querySelector("#ddFb2").textContent = "";
+      sec.querySelector("#ddRecovery").hidden = true;
+    }
+    sec.querySelector("#ddSeg").querySelectorAll("[data-dd]").forEach(b => b.addEventListener("click", () => {
+      sec.querySelector("#ddSeg").querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x === b ? "true" : "false"));
+      cur = DD_SCEN[+b.dataset.dd]; render();
+    }));
+    sec.querySelector("#ddRun").addEventListener("click", () => {
+      const fbEl = sec.querySelector("#ddFb");
+      const trueE = ddTrueEdges(cur), holderOf = {}; Object.keys(cur.holds).forEach(p => holderOf[cur.holds[p]] = p);
+      const mine = []; let wrongEdge = null;
+      Object.keys(cur.waits).forEach(p => {
+        const r = cur.waits[p]; if (!r) return;
+        const sel = sec.querySelector("#ddSel-" + p);
+        const pick = sel ? sel.value : "";
+        if (pick) mine.push([p, pick]);
+        if (pick !== holderOf[r] && !wrongEdge) wrongEdge = { p, r, want: holderOf[r], got: pick || "(nobody chosen)" };
+      });
+      if (wrongEdge) {
+        fbSet(fbEl, false, "One edge is wrong before detection even runs: " + wrongEdge.p + " waits for " + wrongEdge.r + ", which is held by " + wrongEdge.want + " — you pointed " + wrongEdge.p + " at " + wrongEdge.got + ". A wait-for edge always lands on the HOLDER of the waited-for resource.");
+        sec.querySelector("#ddRecovery").hidden = true; return;
+      }
+      const myCycle = findCycle(mine), trueCycle = findCycle(trueE);
+      if (!trueCycle) {
+        fbSet(fbEl, true, "Your graph is right, and detection agrees: DFS finds NO cycle — the waits form a chain that ends at a process waiting for nothing, which finishes and releases its resource, unwinding the rest. No deadlock here, however circular it looked. That is the finding.");
+        sec.querySelector("#ddRecovery").hidden = true; return;
+      }
+      fbSet(fbEl, true, "Your graph is right, and detection finds the cycle: " + (myCycle || trueCycle).join(" → ") + ". Those processes can never proceed — each waits on the next. Now recover: abort ONE process that is actually in the cycle.");
+      const rec = sec.querySelector("#ddRecovery"); rec.hidden = false;
+      optBtns(sec.querySelector("#ddAbortOpts"), Object.keys(cur.holds).map(p => "Abort " + p), i => {
+        const victim = Object.keys(cur.holds)[i], fb2 = sec.querySelector("#ddFb2");
+        if (trueCycle.indexOf(victim) < 0) { fbSet(fb2, false, victim + " is not in the cycle " + trueCycle.join(" → ") + " — aborting it frees resources nobody in the cycle is waiting for, and the cycle survives intact. The victim must be a member of the cycle."); return; }
+        const after = trueE.filter(([a, b]) => a !== victim && b !== victim);
+        const still = findCycle(after);
+        fbSet(fb2, !still, !still ? "Recovery complete: " + victim + " aborted, " + cur.holds[victim] + " released — the detector re-runs on the remaining graph and finds no cycle. The survivors can now proceed in some order; the cost of the recovery is exactly " + victim + "'s lost work." : "The detector still finds " + still.join(" → ") + " — that should not happen after removing a true cycle member; report it.");
+      });
+    });
+    render();
+  })();
+
+  /* ================================================================
+     S3 — MEMORY ALLOCATION STRATEGIES
+     Placement engines over a block list; script fixed by design:
+     initial map, release B and D, requests 10, 16, 6, probe 14.
+     ================================================================ */
+  function allocPlace(blocks, size, strat) {
+    let best = -1;
+    blocks.forEach((bl, i) => {
+      if (bl.type !== "free" || bl.size < size) return;
+      if (best < 0) { best = i; if (strat === "first") return; }
+      if (strat === "best" && bl.size < blocks[best].size) best = i;
+      if (strat === "worst" && bl.size > blocks[best].size) best = i;
+    });
+    if (strat === "first") { const i = blocks.findIndex(bl => bl.type === "free" && bl.size >= size); best = i; }
+    if (best < 0) return null;
+    const out = blocks.map(b => Object.assign({}, b));
+    const hole = out[best];
+    const placed = { type: "used", name: "R", size };
+    if (hole.size === size) out[best] = placed;
+    else out.splice(best, 1, placed, { type: "free", size: hole.size - size });
+    return out;
+  }
+  function allocInit() {
+    let blocks = [{ type: "used", name: "A", size: 20 }, { type: "used", name: "B", size: 18 }, { type: "used", name: "C", size: 22 }, { type: "used", name: "D", size: 12 }, { type: "used", name: "E", size: 8 }, { type: "free", size: 20 }];
+    blocks = blocks.map(b => (b.name === "B" || b.name === "D") ? { type: "free", size: b.size } : b);
+    return blocks;
+  }
+  const ALLOC_SCRIPT = [10, 16, 6], ALLOC_PROBE = 14;
+  function allocRun(strat) {
+    let blocks = allocInit(); const log = [];
+    ALLOC_SCRIPT.forEach(sz => { const nb = allocPlace(blocks, sz, strat); if (nb) { blocks = nb; log.push(sz + " placed"); } else log.push(sz + " FAILED"); });
+    const free = blocks.filter(b => b.type === "free");
+    const totalFree = free.reduce((s, b) => s + b.size, 0), largest = free.length ? Math.max.apply(null, free.map(b => b.size)) : 0;
+    const probe = allocPlace(blocks, ALLOC_PROBE, strat);
+    return { blocks, log, totalFree, largest, frag: totalFree - largest, probeOk: !!probe };
+  }
+  XC.s3 = { run: allocRun, place: allocPlace, init: allocInit, script: ALLOC_SCRIPT, probe: ALLOC_PROBE };
+  (function buildS3() {
+    const sec = mkCard("sysOs", "osAllocCard", "Allocation shootout — first-fit, best-fit, worst-fit on one script",
+      "The panel above lets you place processes by hand, one policy at a time. This lab runs the <b>same script through all three policies at once</b>: memory starts with processes A–E loaded, B and D finish and leave holes of <b>18, 12 and 20</b>, then requests for <b>10, 16 and 6</b> arrive — and finally a probe request for <b>14</b>. Every map ends with the same total free memory. Whether the probe fits anyway is pure fragmentation: free memory in the wrong-shaped holes is memory the system owns but cannot use.");
+    sec.insertAdjacentHTML("beforeend",
+      '<div id="maMaps"></div>' +
+      '<div class="share-row"><button type="button" class="btn primary" id="maStep">Next request ▸</button>' +
+      '<button type="button" class="btn" id="maProbe" disabled>Try the 14-unit probe</button>' +
+      '<button type="button" class="btn" id="maReset">Reset</button></div>' +
+      '<div class="decimal-line" id="maMsg" aria-live="polite"></div>' +
+      '<div class="lab-check"><span class="lab-check-q" id="maQ"></span><span id="maOpts" style="display:flex;gap:6px;flex-wrap:wrap"></span><span class="lab-check-fb" id="maFb" aria-live="polite"></span></div>' +
+      '<p class="cp-formal adv-only">External fragmentation is measured here as total free minus largest free block: the part of free memory that cannot serve the largest satisfiable request. First-fit splinters the front of memory, best-fit manufactures tiny slivers while keeping one big hole intact (the 50-percent rule\'s home turf), worst-fit spends the big hole early to keep remainders usable. No policy dominates — the script is the argument, and a different script would crown a different winner, which is precisely the examinable point.</p>');
+    const STRATS = [["first", "First-fit"], ["best", "Best-fit"], ["worst", "Worst-fit"]];
+    let maps, stepI, probed;
+    function freshMaps() { maps = {}; STRATS.forEach(([k]) => maps[k] = allocInit()); stepI = 0; probed = false; }
+    function barHtml(blocks, stratKey) {
+      return '<div class="rx-membar">' + blocks.map(b => '<i class="' + (b.type === "free" ? "f" : "u") + '" style="width:' + b.size + '%">' + (b.size >= 9 ? (b.type === "free" ? "hole " + b.size : (b.name || "R") + " · " + b.size) : "") + "</i>").join("") + "</div>";
+    }
+    function metrics(k) {
+      const blocks = maps[k], free = blocks.filter(b => b.type === "free");
+      const tf = free.reduce((s, b) => s + b.size, 0), lg = free.length ? Math.max.apply(null, free.map(b => b.size)) : 0;
+      return { tf, lg, frag: tf - lg };
+    }
+    function render(msg) {
+      const host = sec.querySelector("#maMaps"); host.innerHTML = "";
+      STRATS.forEach(([k, name]) => {
+        const m = metrics(k);
+        const d = document.createElement("div"); d.style.marginBottom = "10px";
+        d.innerHTML = '<div class="ctrl-label">' + name + ' — free ' + m.tf + " · largest hole " + m.lg + " · fragmented away " + m.frag + "</div>" + barHtml(maps[k], k);
+        host.appendChild(d);
+      });
+      sec.querySelector("#maProbe").disabled = !(stepI >= ALLOC_SCRIPT.length && !probed);
+      sec.querySelector("#maStep").disabled = stepI >= ALLOC_SCRIPT.length;
+      if (msg !== undefined) sec.querySelector("#maMsg").textContent = msg;
+      if (probed) {
+        const res = {}; STRATS.forEach(([k]) => res[k] = allocRun(k));
+        sec.querySelector("#maQ").textContent = "Final check: the 14-unit probe failed under first-fit and worst-fit even though every map held the same total free memory. The correct explanation is…";
+        optBtns(sec.querySelector("#maOpts"), [
+          "the free memory was fragmented — no single hole reached 14 under those two policies",
+          "the probe was larger than the whole of memory",
+          "best-fit cheated by using more total memory than the others"
+        ], i => {
+          fbSet(sec.querySelector("#maFb"), i === 0, i === 0 ? "Right — every map ends with " + res.first.totalFree + " units free in total; the difference is shape, not amount. Best-fit kept a " + res.best.largest + "-unit hole intact and placed the probe; first-fit's largest hole was " + res.first.largest + " and worst-fit's " + res.worst.largest + ", so both refused a request they collectively had room for. That refusal-with-room is the definition of external fragmentation." : "Check the bars: all three maps report the same total free (" + res.first.totalFree + " units) and the probe (14) is far smaller than memory (100). The only difference between the maps is how the free memory is divided among holes.");
+        });
+      }
+    }
+    freshMaps();
+    sec.querySelector("#maStep").addEventListener("click", () => {
+      if (stepI >= ALLOC_SCRIPT.length) return;
+      const sz = ALLOC_SCRIPT[stepI], notes = [];
+      STRATS.forEach(([k, name]) => {
+        const nb = allocPlace(maps[k], sz, k);
+        if (nb) { maps[k] = nb; notes.push(name + " placed " + sz); } else notes.push(name + " could not place " + sz);
+      });
+      stepI++;
+      render("Request " + sz + ": " + notes.join(" · ") + "." + (stepI >= ALLOC_SCRIPT.length ? " All script requests placed under every policy — same totals, different shapes. Now the probe." : ""));
+    });
+    sec.querySelector("#maProbe").addEventListener("click", () => {
+      const notes = [];
+      STRATS.forEach(([k, name]) => {
+        const nb = allocPlace(maps[k], ALLOC_PROBE, k);
+        if (nb) { maps[k] = nb.map(b => b.name === "R" && b.size === ALLOC_PROBE ? { type: "used", name: "P14", size: ALLOC_PROBE } : b); notes.push(name + " PLACED the probe"); }
+        else notes.push(name + " REFUSED the probe (largest hole " + metrics(k).lg + " < 14, though " + metrics(k).tf + " free in total)");
+      });
+      probed = true;
+      render("Probe (14 units): " + notes.join(" · ") + ".");
+    });
+    sec.querySelector("#maReset").addEventListener("click", () => { freshMaps(); sec.querySelector("#maOpts").innerHTML = ""; sec.querySelector("#maQ").textContent = ""; sec.querySelector("#maFb").textContent = ""; render("Reset — B and D have released their blocks; holes are 18, 12 and 20."); });
+    render("Holes after B and D finish: 18, 12, 20. Requests coming: 10, then 16, then 6 — then the probe.");
+  })();
+
+  /* ================================================================
+     S4 — FILE ALLOCATION COMPARISON
+     Disk 0..39; other files occupy a fixed set. The file grows to
+     12 blocks under three placement models; access cost:
+     contiguous 1, linked k+1 (chain walk), indexed 2.
+     ================================================================ */
+  const FILE_OTHER = [0, 1, 5, 6, 24, 25, 30, 36, 37];
+  const FILE_LEN = 12, FILE_INDEX_BLOCK = 3;
+  function fileAlloc(method) {
+    const used = new Set(FILE_OTHER);
+    if (method === "indexed") used.add(FILE_INDEX_BLOCK);
+    const blocks = [];
+    if (method === "contiguous") {
+      let start = -1;
+      for (let s = 0; s + FILE_LEN <= 40 && start < 0; s++) { let okRun = true; for (let k = 0; k < FILE_LEN; k++) if (used.has(s + k) || s + k === FILE_INDEX_BLOCK && false) okRun = false; if (okRun) start = s; }
+      for (let k = 0; k < FILE_LEN; k++) blocks.push(start + k);
+      return { blocks, start };
+    }
+    if (method === "indexed") { let cand = 2; while (blocks.length < FILE_LEN) { if (!used.has(cand) && cand !== FILE_INDEX_BLOCK) { blocks.push(cand); used.add(cand); } cand++; } return { blocks }; }
+    /* linked: free-list order shuffled deterministically in code */
+    const free = []; for (let i = 0; i < 40; i++) if (!used.has(i)) free.push(i);
+    const rng = mulberryX(4242);
+    for (let i = free.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); const t = free[i]; free[i] = free[j]; free[j] = t; }
+    return { blocks: free.slice(0, FILE_LEN) };
+  }
+  function fileCost(method, k) { return method === "contiguous" ? 1 : method === "indexed" ? 2 : k + 1; }
+  XC.s4 = { alloc: fileAlloc, cost: fileCost, other: FILE_OTHER, len: FILE_LEN };
+  (function buildS4() {
+    const sec = mkCard("sysOs", "osFileCard", "File allocation — contiguous, linked, indexed: what does block 9 cost?",
+      "One file, grown to <b>12 blocks</b> on the same 40-block disk, three ways. <b>Contiguous</b>: all blocks in one run — reaching any block is arithmetic, not searching. <b>Linked</b>: each block carries a pointer to the next, scattered wherever the free list had room — reaching block <i>k</i> means reading blocks 0…k first. <b>Indexed</b>: one index block holds all the pointers — pay one extra read, then go straight there. Ask for a block and each method's true disk-access count is computed from its own structure, not quoted.");
+    sec.insertAdjacentHTML("beforeend",
+      '<div class="tool-controls"><label>Method <span class="seg" role="group" aria-label="Method" id="flSeg">' +
+      '<button type="button" data-fl="contiguous" aria-pressed="true">Contiguous</button><button type="button" data-fl="linked" aria-pressed="false">Linked</button><button type="button" data-fl="indexed" aria-pressed="false">Indexed</button></span></label>' +
+      '<label class="fld">File block to read (1–12) <input type="number" id="flK" value="9" min="1" max="12" style="width:74px" /></label>' +
+      '<button type="button" class="btn primary" id="flGo">Read it — count the accesses</button></div>' +
+      '<div class="rx-disk" id="flGrid"></div>' +
+      '<div class="decimal-line" id="flOut" aria-live="polite"></div>' +
+      '<div class="rx-panel"><h3>Check — one block, three prices</h3>' +
+      '<p style="font-size:13px;margin:0 0 8px" id="flQT"></p>' +
+      '<label class="fld">contiguous <input type="text" id="flC1" class="rx-num" autocomplete="off" /></label> ' +
+      '<label class="fld">linked <input type="text" id="flC2" class="rx-num" autocomplete="off" /></label> ' +
+      '<label class="fld">indexed <input type="text" id="flC3" class="rx-num" autocomplete="off" /></label> ' +
+      '<button type="button" class="btn" id="flCk">Check the three counts</button>' +
+      '<div class="decimal-line" id="flFb" aria-live="polite"></div></div>' +
+      '<p class="cp-formal adv-only">The asymmetry is the whole file-systems unit in one line: contiguous makes random access O(1) and growth nearly impossible (the run must be reserved or the file moved); linked makes growth trivial and random access O(n) — reading the last block of a 10⁶-block file costs 10⁶ reads; indexed pays one dedicated block per file to buy O(1)-ish access AND growability, which is why real systems (Unix inodes) are indexed, with direct pointers for small files so the common case skips even the index read.</p>');
+    let method = "contiguous";
+    const CHECK_K = 6; /* 0-based: file block 7 */
+    sec.querySelector("#flQT").textContent = "To read file block 7 (the 7th block of the file), how many disk accesses does each method need?";
+    function render(accessedK) {
+      const a = fileAlloc(method);
+      const grid = sec.querySelector("#flGrid"); grid.innerHTML = "";
+      for (let i = 0; i < 40; i++) {
+        const sp = document.createElement("span");
+        const fi = a.blocks.indexOf(i);
+        if (FILE_OTHER.indexOf(i) >= 0) { sp.className = "other"; sp.textContent = i; }
+        else if (method === "indexed" && i === FILE_INDEX_BLOCK) { sp.className = "idx"; sp.innerHTML = i + "<small>IDX</small>"; }
+        else if (fi >= 0) { sp.className = "file" + (accessedK === fi ? " acc" : ""); sp.innerHTML = i + "<small>file #" + (fi + 1) + "</small>"; }
+        else sp.textContent = i;
+        grid.appendChild(sp);
+      }
+      return a;
+    }
+    function go() {
+      const k = Math.max(1, Math.min(FILE_LEN, +sec.querySelector("#flK").value || 1)) - 1;
+      const a = render(k), out = sec.querySelector("#flOut");
+      const cost = fileCost(method, k);
+      if (method === "contiguous") out.textContent = "Contiguous: the file starts at block " + a.start + ", so block #" + (k + 1) + " lives at disk block " + (a.start + k) + " — computed, not searched. " + cost + " disk access total.";
+      else if (method === "linked") out.textContent = "Linked: the chain runs " + a.blocks.slice(0, k + 1).join(" → ") + " — to reach block #" + (k + 1) + " you must read every block before it, following pointers: " + cost + " disk accesses.";
+      else out.textContent = "Indexed: read the index block (" + FILE_INDEX_BLOCK + ") — its entry #" + (k + 1) + " says block " + a.blocks[k] + " — then read that block. " + cost + " disk accesses, whatever k is.";
+    }
+    sec.querySelector("#flSeg").querySelectorAll("[data-fl]").forEach(b => b.addEventListener("click", () => {
+      method = b.dataset.fl;
+      sec.querySelector("#flSeg").querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x === b ? "true" : "false"));
+      go();
+    }));
+    sec.querySelector("#flGo").addEventListener("click", go);
+    sec.querySelector("#flCk").addEventListener("click", () => {
+      const want = [fileCost("contiguous", CHECK_K), fileCost("linked", CHECK_K), fileCost("indexed", CHECK_K)];
+      const got = [parseNum(sec.querySelector("#flC1").value), parseNum(sec.querySelector("#flC2").value), parseNum(sec.querySelector("#flC3").value)];
+      const ok = want.every((w, i) => got[i] === w), fbEl = sec.querySelector("#flFb");
+      fbSet(fbEl, ok, ok ? "All three counts right: contiguous " + want[0] + " (pure offset arithmetic), linked " + want[1] + " (read blocks 1–7 in chain order), indexed " + want[2] + " (index block, then data). Block 7 is mid-file — ask the reader above for block 12 and watch linked climb to 12 while the other two do not move." : "The counts the structures themselves give for block 7: contiguous " + want[0] + ", linked " + want[1] + " (one access per chain hop, target included), indexed " + want[2] + " (the index read plus the data read). Use the reader above with block 7 under each method and count the steps it names.");
+    });
+    render(-1); go();
+  })();
+
+  /* ================================================================
+     S5 — PRODUCER–CONSUMER SEMAPHORE STEPPER
+     State machine: semaphores empty/full/mutex, buffer slots,
+     per-actor micro-op programs; wait blocks, signal hands off.
+     Deadlock := both actors blocked (signals can now never come).
+     ================================================================ */
+  const PC_CAP = 3;
+  function pcNew(wrongOrder) {
+    const prod = wrongOrder ? ["wait(mutex)", "wait(empty)", "add item", "signal(full)", "signal(mutex)"] : ["wait(empty)", "wait(mutex)", "add item", "signal(mutex)", "signal(full)"];
+    const cons = wrongOrder ? ["wait(mutex)", "wait(full)", "take item", "signal(empty)", "signal(mutex)"] : ["wait(full)", "wait(mutex)", "take item", "signal(mutex)", "signal(empty)"];
+    return { wrong: !!wrongOrder, empty: PC_CAP, full: 0, mutex: 1, holder: null, buffer: [], prod, cons, pI: 0, cI: 0, pBlocked: null, cBlocked: null, items: 0, log: [] };
+  }
+  function pcSem(st, who) { return who === "empty" ? st.empty : who === "full" ? st.full : st.mutex; }
+  function pcSetSem(st, who, v) { if (who === "empty") st.empty = v; else if (who === "full") st.full = v; else st.mutex = v; }
+  function pcWait(st, actor, sem) {
+    if (pcSem(st, sem) > 0) { pcSetSem(st, sem, pcSem(st, sem) - 1); if (sem === "mutex") st.holder = actor; return true; }
+    if (actor === "P") st.pBlocked = sem; else st.cBlocked = sem;
+    return false;
+  }
+  function pcSignal(st, actor, sem) {
+    const waiter = sem === "mutex" ? (st.pBlocked === "mutex" ? "P" : st.cBlocked === "mutex" ? "C" : null) : sem === "empty" ? (st.pBlocked === "empty" ? "P" : null) : (st.cBlocked === "full" ? "C" : null);
+    if (sem === "mutex" && st.holder === actor) st.holder = null;
+    if (waiter) {
+      if (waiter === "P") { st.pBlocked = null; st.pI++; if (sem === "mutex") st.holder = "P"; }
+      else { st.cBlocked = null; st.cI++; if (sem === "mutex") st.holder = "C"; }
+      st.log.push("handoff: " + sem + " passed straight to " + (waiter === "P" ? "producer" : "consumer"));
+    } else pcSetSem(st, sem, pcSem(st, sem) + 1);
+  }
+  function pcStepActor(st, actor) {
+    const prog = actor === "P" ? st.prod : st.cons;
+    let idx = actor === "P" ? st.pI : st.cI;
+    if ((actor === "P" && st.pBlocked) || (actor === "C" && st.cBlocked)) { st.log.push(actor === "P" ? "producer is blocked — it cannot move" : "consumer is blocked — it cannot move"); return false; }
+    if (idx >= prog.length) { if (actor === "P") st.pI = 0; else st.cI = 0; idx = 0; }
+    const op = prog[idx];
+    const m = op.match(/^(wait|signal)\((\w+)\)$/);
+    if (m) {
+      const okW = m[1] === "wait" ? pcWait(st, actor, m[2]) : (pcSignal(st, actor, m[2]), true);
+      if (okW) { if (actor === "P") st.pI = idx + 1 >= prog.length ? 0 : idx + 1; else st.cI = idx + 1 >= prog.length ? 0 : idx + 1; st.log.push((actor === "P" ? "producer" : "consumer") + ": " + op); return true; }
+      st.log.push((actor === "P" ? "producer" : "consumer") + " BLOCKS on " + op + " — the count is 0");
+      return false;
+    }
+    if (op === "add item") { st.buffer.push(++st.items); st.log.push("producer adds item " + st.items + " — buffer " + st.buffer.length + "/" + PC_CAP); }
+    if (op === "take item") { const v = st.buffer.shift(); st.log.push("consumer takes item " + v + " — buffer " + st.buffer.length + "/" + PC_CAP); }
+    if (actor === "P") st.pI = idx + 1 >= prog.length ? 0 : idx + 1; else st.cI = idx + 1 >= prog.length ? 0 : idx + 1;
+    return true;
+  }
+  const pcDeadlocked = st => !!(st.pBlocked && st.cBlocked);
+  XC.s5 = { newState: pcNew, step: pcStepActor, deadlocked: pcDeadlocked, cap: PC_CAP };
+  (function buildS5() {
+    const sec = mkCard("sysOs", "osPcCard", "Producer–consumer — semaphores in the right order, then the wrong one",
+      "A bounded buffer of <b>3 slots</b>, guarded by three semaphores: <b>empty</b> (slots free, starts 3), <b>full</b> (items ready, starts 0) and <b>mutex</b> (the buffer itself, starts 1). Step the producer and consumer micro-op by micro-op and watch the counts move. Then flip the <b>wrong-order toggle</b>: each side grabs the <b>mutex before</b> waiting on empty/full. Fill the buffer, try one more produce, then try to consume — and the state machine will show you a deadlock it detects itself, not one described in prose.");
+    sec.insertAdjacentHTML("beforeend",
+      '<div class="tool-controls"><label>Wait order <span class="seg" role="group" aria-label="Order" id="pcSeg">' +
+      '<button type="button" data-pc="right" aria-pressed="true">Correct: resource first, then mutex</button>' +
+      '<button type="button" data-pc="wrong" aria-pressed="false">Wrong: mutex first</button></span></label></div>' +
+      '<div class="seq-state" id="pcSems"></div><div class="rx-slots" id="pcBuf"></div>' +
+      '<div class="rx-grid2"><div class="rx-panel"><h3>Producer</h3><div class="decimal-line" id="pcPState"></div>' +
+      '<div class="share-row"><button type="button" class="btn primary" id="pcPStep">Producer: one micro-op ▸</button><button type="button" class="btn" id="pcPMacro">Produce one whole item</button></div></div>' +
+      '<div class="rx-panel"><h3>Consumer</h3><div class="decimal-line" id="pcCState"></div>' +
+      '<div class="share-row"><button type="button" class="btn primary" id="pcCStep">Consumer: one micro-op ▸</button><button type="button" class="btn" id="pcCMacro">Consume one whole item</button></div></div></div>' +
+      '<div id="pcDead"></div>' +
+      '<div class="decimal-line" id="pcLog" aria-live="polite"></div>' +
+      '<div class="share-row"><button type="button" class="btn" id="pcFill">Story: fill the buffer</button><button type="button" class="btn" id="pcReset">Reset</button></div>' +
+      '<div class="lab-check"><span class="lab-check-q">Check: with the WRONG order and a full buffer, why exactly is the resulting state a deadlock?</span><span id="pcOpts" style="display:flex;gap:6px;flex-wrap:wrap"></span><span class="lab-check-fb" id="pcFb" aria-live="polite"></span></div>' +
+      '<p class="cp-formal adv-only">The invariant the correct order protects: never block while holding the mutex. Waiting on empty/full is waiting on a condition only the OTHER side can change, and the other side needs the mutex to change it — so mutex-first converts a benign wait into a cycle of holds and wants. Detection in this model is exact, not heuristic: if both actors are blocked, every future signal would have to come from one of them, so none can ever arrive.</p>');
+    let st = pcNew(false);
+    function render() {
+      sec.querySelector("#pcSems").innerHTML =
+        '<div class="seq-cell"><b>' + st.empty + "</b>empty (free slots)</div>" +
+        '<div class="seq-cell"><b>' + st.full + "</b>full (items ready)</div>" +
+        '<div class="seq-cell"><b>' + st.mutex + "</b>mutex" + (st.holder ? " — held by " + (st.holder === "P" ? "producer" : "consumer") : "") + "</div>" +
+        '<div class="seq-cell"><b>' + (st.empty + st.full) + "</b>empty + full (always " + PC_CAP + ")</div>";
+      sec.querySelector("#pcBuf").innerHTML = [0, 1, 2].map(i => '<div class="rx-slot' + (st.buffer[i] != null ? " cur" : "") + '"><span>' + (st.buffer[i] != null ? "item " + st.buffer[i] : "—") + "</span><small>slot " + i + "</small></div>").join("");
+      sec.querySelector("#pcPState").textContent = st.pBlocked ? "BLOCKED on wait(" + st.pBlocked + ") — holding " + (st.holder === "P" ? "the MUTEX" : "nothing") : "next micro-op: " + st.prod[st.pI];
+      sec.querySelector("#pcCState").textContent = st.cBlocked ? "BLOCKED on wait(" + st.cBlocked + ") — holding " + (st.holder === "C" ? "the MUTEX" : "nothing") : "next micro-op: " + st.cons[st.cI];
+      sec.querySelector("#pcDead").innerHTML = pcDeadlocked(st) ? '<div class="rx-dead">DEADLOCK — detected by the state machine: both actors are blocked, so no signal can ever be sent again. The producer holds the mutex and waits for empty; the consumer waits for the mutex it needs in order to make empty. Reset and run the same steps in the correct order: the producer blocks on empty WITHOUT the mutex, and the consumer walks straight in.</div>' : "";
+      const lg = sec.querySelector("#pcLog");
+      lg.textContent = st.log.length ? st.log[st.log.length - 1] : "Fresh buffer: 3 empty slots, nothing produced yet.";
+    }
+    function macro(actor) {
+      let guard = 0;
+      /* run micro-ops until the actor's program wraps to its first op
+         (one whole item) or it blocks — never stop mid-item */
+      do { if (!pcStepActor(st, actor)) break; } while (((actor === "P" ? st.pI : st.cI) !== 0) && guard++ < 12);
+      render();
+    }
+    sec.querySelector("#pcPStep").addEventListener("click", () => { pcStepActor(st, "P"); render(); });
+    sec.querySelector("#pcCStep").addEventListener("click", () => { pcStepActor(st, "C"); render(); });
+    sec.querySelector("#pcPMacro").addEventListener("click", () => macro("P"));
+    sec.querySelector("#pcCMacro").addEventListener("click", () => macro("C"));
+    sec.querySelector("#pcFill").addEventListener("click", () => { let g = 0; while ((st.buffer.length < PC_CAP || st.pI !== 0) && g++ < 60) { if (!pcStepActor(st, "P") && st.pBlocked) break; } render(); });
+    sec.querySelector("#pcReset").addEventListener("click", () => { st = pcNew(st.wrong); render(); });
+    sec.querySelector("#pcSeg").querySelectorAll("[data-pc]").forEach(b => b.addEventListener("click", () => {
+      sec.querySelector("#pcSeg").querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x === b ? "true" : "false"));
+      st = pcNew(b.dataset.pc === "wrong"); render();
+    }));
+    optBtns(sec.querySelector("#pcOpts"), [
+      "The producer holds the mutex while blocked on empty — and only the consumer can signal empty, but it needs the mutex first",
+      "The buffer is simply full, so nothing more can ever happen",
+      "Both semaphores empty and full are 0 at the same time, which is illegal"
+    ], i => {
+      fbSet(sec.querySelector("#pcFb"), i === 0, i === 0 ? "Exactly the cycle: holds-and-waits in a ring. Fullness alone is not deadlock — in the correct order the producer blocks on empty WITHOUT holding the mutex, the consumer enters, consumes, and its signal(empty) is the producer's wake-up. Order is the whole fix; no extra machinery was added." : "Not the mechanism — check who HOLDS what in the state above: the deadlock is a cycle of holding and waiting (mutex held by a blocked producer; consumer waiting for that same mutex), not the buffer being full (the correct order survives a full buffer routinely) and not the counts (empty + full is still " + PC_CAP + " here, as the readout shows).");
+    });
+    render();
+  })();
+
+  /* ================================================================
+     S6 — SYSCALL JOURNEY (order-the-steps, read + write variants)
+     ================================================================ */
+  const SJ_VARIANTS = {
+    read: [
+      { t: "User code calls read(fd, buf, n) — an ordinary function call in your process", mode: "User" },
+      { t: "The library wrapper loads the syscall number and executes the syscall instruction — the trap", mode: "User → Kernel" },
+      { t: "Kernel entry: the CPU is now in kernel mode and the syscall table dispatches to the read handler", mode: "Kernel" },
+      { t: "The file layer turns the fd into a file object and issues a request to the device driver", mode: "Kernel" },
+      { t: "The device (via DMA) transfers the requested bytes into a kernel buffer", mode: "Kernel" },
+      { t: "The kernel copies the bytes from the kernel buffer into your user buffer buf", mode: "Kernel" },
+      { t: "The return value — the number of bytes read — is placed in the return register", mode: "Kernel" },
+      { t: "Return from the trap: your code resumes in user mode, one instruction after the call", mode: "Kernel → User" }
+    ],
+    write: [
+      { t: "User code calls write(fd, buf, n) — an ordinary function call in your process", mode: "User" },
+      { t: "The library wrapper loads the syscall number and executes the syscall instruction — the trap", mode: "User → Kernel" },
+      { t: "Kernel entry: the CPU is now in kernel mode and the syscall table dispatches to the write handler", mode: "Kernel" },
+      { t: "The kernel copies your bytes from the user buffer buf into a kernel buffer", mode: "Kernel" },
+      { t: "The file layer turns the fd into a file object and issues the request to the device driver", mode: "Kernel" },
+      { t: "The device (via DMA) takes the bytes from the kernel buffer and writes them out", mode: "Kernel" },
+      { t: "The return value — the number of bytes written — is placed in the return register", mode: "Kernel" },
+      { t: "Return from the trap: your code resumes in user mode, one instruction after the call", mode: "Kernel → User" }
+    ]
+  };
+  function sjGrade(variant, orderIds) {
+    const want = SJ_VARIANTS[variant].map((_, i) => i);
+    for (let pos = 0; pos < want.length; pos++) {
+      if (orderIds[pos] !== want[pos]) {
+        const stepIdx = orderIds[pos];
+        return { ok: false, firstWrongPos: pos, stepIdx, correctPos: want.indexOf(stepIdx), after: pos > 0 ? SJ_VARIANTS[variant][want[pos - 1]] : null, expectedHere: SJ_VARIANTS[variant][want[pos]] };
+      }
+    }
+    return { ok: true };
+  }
+  XC.s6 = { variants: SJ_VARIANTS, grade: sjGrade };
+  (function buildS6() {
+    const sec = mkCard("sysOs", "osSysCard", "Syscall journey — follow a read() across the border and back",
+      "A system call is a controlled border crossing. Below are the <b>eight steps</b> of a <span class=\"mono\">read()</span>, shuffled: click them in the order they actually happen. Each placed step shows its <b>mode</b> — user or kernel — and the two privilege changes (the trap going in, the return coming out) are the moments the whole design exists to control. Get one wrong and the checker names the step and where it truly belongs. The <span class=\"mono\">write()</span> journey reuses the same road with the copy running the other way.");
+    sec.insertAdjacentHTML("beforeend",
+      '<div class="tool-controls"><label>Journey <span class="seg" role="group" aria-label="Variant" id="sjSeg">' +
+      '<button type="button" data-sj="read" aria-pressed="true">read()</button><button type="button" data-sj="write" aria-pressed="false">write()</button></span></label></div>' +
+      '<div class="ctrl-label">The steps, shuffled — click to place the next one</div><div class="rx-pool" id="sjPool"></div>' +
+      '<div class="ctrl-label">Your order (click a placed step to send it back)</div><div class="rx-pool" id="sjPlaced"></div>' +
+      '<div class="share-row"><button type="button" class="btn primary" id="sjCheck">Check my order</button><button type="button" class="btn" id="sjClear">Start over</button></div>' +
+      '<div class="decimal-line" id="sjFb" aria-live="polite"></div>' +
+      '<p class="cp-formal adv-only">The trap is not a function call: it is a hardware mode switch through a gate the kernel alone configures (the syscall table\'s handler addresses live in kernel memory, unreachable from user mode). That is why the journey has this shape — the user side can name a NUMBER (which service) but never an ADDRESS (where the code is). The two mode crossings are also where the cost lives: a syscall is measured in hundreds of cycles before any driver work begins, which is why buffered I/O exists to cross rarely.</p>');
+    let variant = "read", placed = [];
+    function shuffled() {
+      const ids = SJ_VARIANTS[variant].map((_, i) => i);
+      const rng = mulberryX(variant === "read" ? 2024 : 909);
+      for (let i = ids.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); const t = ids[i]; ids[i] = ids[j]; ids[j] = t; }
+      if (ids.every((v, i) => v === i)) { const t = ids[0]; ids[0] = ids[1]; ids[1] = t; }
+      return ids;
+    }
+    let pool = shuffled();
+    function render() {
+      const poolEl = sec.querySelector("#sjPool"); poolEl.innerHTML = "";
+      pool.forEach(id => {
+        const b = document.createElement("button"); b.type = "button"; b.className = "rx-step";
+        b.innerHTML = escX(SJ_VARIANTS[variant][id].t);
+        b.addEventListener("click", () => { pool = pool.filter(x => x !== id); placed.push(id); render(); });
+        poolEl.appendChild(b);
+      });
+      const plEl = sec.querySelector("#sjPlaced"); plEl.innerHTML = placed.length ? "" : '<span style="font-size:13px;color:var(--muted)">Nothing placed yet.</span>';
+      placed.forEach((id, pos) => {
+        const b = document.createElement("button"); b.type = "button"; b.className = "rx-step placed";
+        b.innerHTML = "<span class=\"rx-mode\">" + (pos + 1) + " · runs in: " + SJ_VARIANTS[variant][id].mode + " mode</span>" + escX(SJ_VARIANTS[variant][id].t);
+        b.addEventListener("click", () => { placed = placed.filter(x => x !== id); pool.push(id); render(); });
+        plEl.appendChild(b);
+      });
+    }
+    sec.querySelector("#sjSeg").querySelectorAll("[data-sj]").forEach(b => b.addEventListener("click", () => {
+      sec.querySelector("#sjSeg").querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x === b ? "true" : "false"));
+      variant = b.dataset.sj; placed = []; pool = shuffled(); sec.querySelector("#sjFb").textContent = ""; render();
+    }));
+    sec.querySelector("#sjClear").addEventListener("click", () => { placed = []; pool = shuffled(); sec.querySelector("#sjFb").textContent = ""; render(); });
+    sec.querySelector("#sjCheck").addEventListener("click", () => {
+      const fbEl = sec.querySelector("#sjFb");
+      if (placed.length < SJ_VARIANTS[variant].length) { fbSet(fbEl, false, "Place all " + SJ_VARIANTS[variant].length + " steps first — " + placed.length + " placed so far."); return; }
+      const g = sjGrade(variant, placed);
+      if (g.ok) {
+        const modes = SJ_VARIANTS[variant].map(s => s.mode);
+        fbSet(fbEl, true, "The full journey, in order. Privilege changed exactly twice: up at step 2 (the trap — the only door in) and down at step 8 (the return). Everything between ran in kernel mode on your behalf, which is why the kernel — never your code — touches the device and does the copying.");
+      } else {
+        fbSet(fbEl, false, "First misplaced step: at your position " + (g.firstWrongPos + 1) + " you put \"" + SJ_VARIANTS[variant][g.stepIdx].t.split(" — ")[0] + "\" — that step actually belongs at position " + (g.correctPos + 1) + (g.correctPos > 0 ? ", right after \"" + SJ_VARIANTS[variant][g.correctPos - 1].t.split(" — ")[0] + "\"" : ", at the very start") + ". The step that belongs at position " + (g.firstWrongPos + 1) + " is \"" + g.expectedHere.t.split(" — ")[0] + "\". Send the misplaced step back and rebuild from there.");
+      }
+    });
+    render();
+  })();
+
+  /* ================================================================
+     MENU REGISTRATION + COUNT REBUILD (Round V pattern)
+     ================================================================ */
+  function addMenuItemX(groupName, afterKey, spec) {
+    const list = $X("menuList"); if (!list) return false;
+    if (list.querySelector('[data-key="' + spec.key + '"]')) return false;
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "menu-item"; b.dataset.key = spec.key;
+    b.dataset.search = (spec.label + " " + spec.hint + " " + spec.search).toLowerCase();
+    if (spec.level) b.dataset.uxlevel = spec.level;
+    b.innerHTML = '<span class="mi-dot" aria-hidden="true"></span><span class="mi-label"></span><small></small>';
+    b.querySelector(".mi-label").textContent = spec.label;
+    b.querySelector("small").textContent = spec.hint;
+    b.addEventListener("click", () => { const p = $X("menuPanel"); if (p) p.hidden = true; const mb = $X("menuBtn"); if (mb) mb.setAttribute("aria-expanded", "false"); spec.go(); });
+    if (afterKey) {
+      const anchor = list.querySelector('[data-key="' + afterKey + '"]');
+      if (anchor) { anchor.parentNode.insertBefore(b, anchor.nextSibling); return true; }
+    }
+    let sib = null, inGroup = false;
+    Array.prototype.slice.call(list.children).forEach(el => {
+      if (el.classList.contains("menu-group")) inGroup = (el.dataset.group || "").trim() === groupName;
+      else if (inGroup && el.classList.contains("menu-item")) sib = el;
+    });
+    if (sib) sib.parentNode.insertBefore(b, sib.nextSibling); else list.appendChild(b);
+    return true;
+  }
+  const ORG_GO = card => () => goSys("assembly", card);
+  const ARCH_GO = card => () => goSys("arch", card);
+  const OS_GO = card => () => goSys("os", card);
+  [
+    { group: "Computer Organization", after: null, key: "org-control", label: "Control signals — set the nine switches", hint: "Pick an instruction, set RegDst to ALUOp, and get marked against the real main-control table", search: "control signals decoder main control regdst alusrc memtoreg regwrite memread memwrite branch aluop datapath single cycle instruction patterson hennessy simulator", level: "intermediate", go: ORG_GO("orgControlCard") },
+    { group: "Computer Organization", after: null, key: "org-alucontrol", label: "ALU control — ALUOp and funct to four lines", hint: "Two-step decode: ALUOp picks the class, funct picks the operation — and lw/sw force add", search: "alu control decoder aluop funct field add subtract and or slt nor operation lines lw sw force add simulator", level: "intermediate", go: ORG_GO("orgAluCard") },
+    { group: "Computer Organization", after: null, key: "org-targets", label: "Branch & jump target calculator", hint: "Slice the word, extend, shift, add PC+4 — branch and jump targets computed step by step", search: "branch target jump target calculator beq jal pc+4 sign extended offset shifted left instruction word simulator", level: "intermediate", go: ORG_GO("orgTargetCard") },
+    { group: "Computer Organization", after: null, key: "org-signext", label: "Sign extension & immediates", hint: "Slice rs, rt and the immediate out of real words — and catch the case that zero-extends instead", search: "sign extension immediate zero extension andi ori slicing fields rs rt opcode instruction word negative simulator", level: "beginner", go: ORG_GO("orgSignCard") },
+    { group: "Computer Organization", after: null, key: "org-perf", label: "Performance equation & Amdahl's law", hint: "Price a program in seconds from counts, CPIs and clock rate, then compute the speedup ceiling", search: "performance equation cpu time instruction count cpi clock rate amdahl speedup execution time calculator simulator", level: "beginner", go: ORG_GO("orgPerfCard") },
+    { group: "Computer Organization", after: null, key: "org-regfile", label: "Register file timing — same-cycle read & write", hint: "Write lands in the first half, reads sample in the second: predict the ports around the clock edge", search: "register file timing clock edge read write same cycle write first half read second half zero hardwired simulator", level: "intermediate", go: ORG_GO("orgRegCard") },
+    { group: "Computer Architecture", after: "sys-pipeline", key: "arch-forwarding", label: "Forwarding paths — make the stalls disappear", hint: "Toggle forwarding on the pipeline view: bypass paths feed the ALU, load-use keeps its one stall", search: "forwarding paths pipeline hazard stall bypass ex mem wb alu inputs load use data hazard simulator visualizer", level: "intermediate", go: () => { goSys("arch", "fwdPanel"); if (XC.a1 && XC.a1.setForwarding) XC.a1.setForwarding(true); } },
+    { group: "Computer Architecture", after: null, key: "arch-branchpred", label: "Branch prediction — 1-bit vs 2-bit", hint: "Predict each branch yourself, then watch both predictors learn the same loop trace", search: "branch prediction predictor one bit two bit saturating counter misprediction loop trace guess taken simulator", level: "intermediate", go: ARCH_GO("archPredCard") },
+    { group: "Computer Architecture", after: null, key: "arch-repl", label: "Cache replacement shootout — LRU, FIFO, random", hint: "One trace, three caches: the victim choice decides the hit count", search: "cache replacement shootout lru fifo random eviction victim hit rate trace policy simulator", level: "intermediate", go: ARCH_GO("archReplCard") },
+    { group: "Computer Architecture", after: null, key: "arch-amat", label: "AMAT — price it, then design to a target", hint: "Build average memory access time level by level, then size L1 and L2 to beat a target in budget", search: "amat average memory access time multilevel cache l1 l2 miss rate hit time memory penalty design budget simulator", level: "intermediate", go: ARCH_GO("archAmatCard") },
+    { group: "Computer Architecture", after: null, key: "arch-ptwalk", label: "Page-table walk — two levels, counted", hint: "TLB first, then two table levels to the frame — counting every memory reference, fault included", search: "page table walk two level translation tlb hit miss page fault frame physical address reference count simulator", level: "intermediate", go: ARCH_GO("archWalkCard") },
+    { group: "Computer Architecture", after: null, key: "arch-fpadd", label: "Adding floats — IEEE 754 step by step", hint: "Align, add, normalise, round-to-nearest-even: assemble a real 32-bit float sum", search: "ieee 754 floating point addition float add align exponents significand hidden bit normalize round nearest even stepper simulator", level: "intermediate", go: ARCH_GO("archFpCard") },
+    { group: "Operating Systems", after: null, key: "os-fork", label: "Fork tree predictor — how many processes?", hint: "Predict the process count and the print count, then grow the tree line by line", search: "fork tree predictor processes created printf prints loop conditional child parent process simulator operating systems", level: "beginner", go: OS_GO("osForkCard") },
+    { group: "Operating Systems", after: null, key: "os-deadlock", label: "Deadlock detection — find the cycle", hint: "Build the wait-for graph, run cycle detection, then break it by aborting a process in the cycle", search: "deadlock detection wait for graph cycle dfs recovery abort resource single instance circular wait simulator", level: "intermediate", go: OS_GO("osDeadCard") },
+    { group: "Operating Systems", after: null, key: "os-alloc3", label: "Allocation shootout — first, best & worst fit", hint: "One request script, three memory maps: fragmentation decides who fails the final request", search: "memory allocation strategies first fit best fit worst fit fragmentation holes external simulator shootout", level: "beginner", go: OS_GO("osAllocCard") },
+    { group: "Operating Systems", after: null, key: "os-filealloc", label: "File allocation — contiguous, linked, indexed", hint: "Grow one file three ways and count the disk accesses to reach a random block", search: "file allocation contiguous linked indexed disk access count block chain index block inode simulator", level: "beginner", go: OS_GO("osFileCard") },
+    { group: "Operating Systems", after: null, key: "os-prodcons", label: "Producer–consumer — semaphores in order", hint: "Step empty, full and mutex by hand — then swap the wait order and watch it deadlock", search: "producer consumer semaphore bounded buffer empty full mutex wrong order deadlock stepper simulator", level: "intermediate", go: OS_GO("osPcCard") },
+    { group: "Operating Systems", after: null, key: "os-syscall", label: "Syscall journey — follow a read() into the kernel", hint: "Put the eight steps of a system call in order: user code, the trap, the kernel, and back", search: "syscall system call journey read write trap kernel mode syscall table driver dma copy order steps simulator", level: "beginner", go: OS_GO("osSysCard") }
+  ].forEach(s => addMenuItemX(s.group, s.after, s));
+  (function rebuildCountsX() {
+    const RJ = window.__uxRoundJ; if (!RJ) return;
+    const groups = RJ.menuGroups(); const counts = {}; let total = 0;
+    groups.forEach(g => {
+      counts[g.name] = g.items.length; total += g.items.length;
+      const c = g.header.querySelector(".mi-count"); if (c) c.textContent = g.items.length;
+    });
+    window.LAB_MENU = { groups: groups.map(g => ({ name: g.name, items: g.items.map(b => { const l = b.querySelector(".mi-label"); return l ? l.textContent : ""; }) })), count: total };
+    window.LAB_MODULES = { modules: groups.map(g => ({ name: g.name, count: g.items.length })), total };
+    RJ.buildRailAndList(counts);
+    RJ.buildGallery();
+    ["boards", "arch", "os", "org"].forEach(id => {
+      const h = document.querySelector("#module-" + id + " .mh-count");
+      if (!h) return;
+      const name = { boards: "Boards, Modulation & Projects", arch: "Computer Architecture", os: "Operating Systems", org: "Computer Organization" }[id];
+      if (counts[name]) h.textContent = counts[name] + " items";
+    });
+    window.__countsX = { total, counts };
+  })();
+
+  /* ================= load-time self-tests (evidence handles) ================= */
+  try {
+    XC.selfTest = {
+      o1: ctrlGrade("lw", CTRL.lw.v).ok && !ctrlGrade("lw", Object.assign({}, CTRL.lw.v, { MemWrite: 1 })).ok,
+      o2: XC.o2.verify(),
+      o3: XC.o3.verify(),
+      o4: (() => { const s = sliceScenario(0); return s.extended === (0xFFFFFFFB >>> 0) && sliceScenario(2).extKind === "zero" && sliceScenario(2).extended === 0x8001; })(),
+      o5: (() => { const g = perfGen(0); return closeTol(g.time, g.cyclesM * 1e6 / (g.ghz * 1e9), 1e-9) && g.speedup > 1 && g.newTime < g.time; })(),
+      o6: (() => { const r = rfRun(); return r[1].after[0] === 99 && r[2].after[1] === 0 && r[3].after[1] === 77; })(),
+      a1: (() => { const t = XC.a1.totals(); return t.s1off === 11 && t.s1on === 8 && t.s2off === 10 && t.s2on === 8; })(),
+      a2: (() => { const r = bpRun(0); return r.res.A.p1.n === 20 && r.res.B.p1.n === 12; })(),
+      a3: (() => { const r = replRun(7); return r.lru.hits > r.fifo.hits && r.lru.hits >= r.random.hits; })(),
+      a4: XC.a4.solutions().length > 0,
+      a5: (() => { const tb = walkTables(); return ptWalk(PT_SCEN[0].va, tb, PT_SCEN[0].tlb).refs === 1 && ptWalk(PT_SCEN[1].va, tb, {}).refs === 3 && ptWalk(PT_SCEN[2].va, tb, {}).fault === true; })(),
+      a6: XC.a6.verify(),
+      s1: (() => { const a = XC.s1.run(0), b = XC.s1.run(1), c = XC.s1.run(2); return a.procs === 4 && a.prints === 4 && b.procs === 8 && b.prints === 14 && c.procs === 3 && c.prints === 3; })(),
+      s2: (() => { const t = XC.s2.truths(); return !!t[0] && t[1] === null && !!t[2] && t[2].indexOf("P3") < 0; })(),
+      s3: (() => { const f = allocRun("first"), b = allocRun("best"), w = allocRun("worst"); return !f.probeOk && b.probeOk && !w.probeOk && f.totalFree === b.totalFree && b.totalFree === w.totalFree; })(),
+      s4: fileCost("contiguous", 6) === 1 && fileCost("linked", 6) === 7 && fileCost("indexed", 6) === 2 && fileAlloc("linked").blocks.length === 12,
+      s5: (() => {
+        const finishItem = st => { let h = 0; while (st.pI !== 0 && h++ < 8) pcStepActor(st, "P"); };
+        const okSt = pcNew(false); let g = 0;
+        while (okSt.buffer.length < 3 && g++ < 40) pcStepActor(okSt, "P");
+        finishItem(okSt);
+        pcStepActor(okSt, "P"); /* blocks on empty, mutex free */
+        const blockedClean = okSt.pBlocked === "empty" && okSt.holder !== "P";
+        const wSt = pcNew(true); g = 0;
+        while (wSt.buffer.length < 3 && g++ < 40) pcStepActor(wSt, "P");
+        finishItem(wSt);
+        pcStepActor(wSt, "P"); /* wait(mutex) succeeds — producer now holds it */
+        pcStepActor(wSt, "P"); /* blocks on empty, still holding the mutex */
+        pcStepActor(wSt, "C"); /* blocks on mutex — the ring is closed */
+        return blockedClean && pcDeadlocked(wSt) === true && pcDeadlocked(okSt) === false && okSt.empty + okSt.full === PC_CAP;
+      })(),
+      s6: sjGrade("read", [0, 1, 2, 3, 4, 5, 6, 7]).ok && !sjGrade("read", [1, 0, 2, 3, 4, 5, 6, 7]).ok && sjGrade("write", [0, 1, 2, 3, 4, 5, 6, 7]).ok
+    };
+  } catch (e) { XC.selfTest = { error: String(e && e.message || e) }; }
+})();
+</script>
