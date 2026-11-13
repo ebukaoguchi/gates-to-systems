@@ -445,7 +445,7 @@ footer.site{margin-top:22px;color:var(--muted);font-size:12.5px;text-align:cente
   .controls{gap:12px}
 }
 @media (prefers-reduced-motion: reduce){
-  .wire.pulse,.bb-glow.pulse{animation:none}
+  .wire.pulse,.bb-glow.pulse,.sb-wire.pulse{animation:none}
   *{transition:none !important}
 }
 
@@ -5793,8 +5793,16 @@ const CONCEPTS = {
         wire.style.filter = "drop-shadow(0 0 " + Math.min(10, I * 6) + "px rgba(245,158,11,.8))";
         const dots = el.querySelector(".cv-dots");
         const dur = Math.max(0.5, 2.6 - I * 1.1);
-        dots.innerHTML = [0, 1, 2, 3, 4, 5].map(i =>
-          '<circle r="4.5" fill="#1c2321"><animateMotion dur="' + dur + 's" begin="-' + (i * dur / 6) + 's" repeatCount="indefinite" path="M45 57 a34 39 0 1 1 240 0 a34 39 0 1 1 -240 0"/></circle>').join("");
+        /* prefers-reduced-motion: a still frame of the same loop —
+           the six electrons rest on the wire at the same six stations
+           the animation passes through; the numbers below still run */
+        if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+          dots.innerHTML = [[285, 57], [225, 91], [105, 91], [45, 57], [105, 23], [225, 23]].map(pt =>
+            '<circle r="4.5" fill="#1c2321" cx="' + pt[0] + '" cy="' + pt[1] + '"/>').join("");
+        } else {
+          dots.innerHTML = [0, 1, 2, 3, 4, 5].map(i =>
+            '<circle r="4.5" fill="#1c2321"><animateMotion dur="' + dur + 's" begin="-' + (i * dur / 6) + 's" repeatCount="indefinite" path="M45 57 a34 39 0 1 1 240 0 a34 39 0 1 1 -240 0"/></circle>').join("");
+        }
         el.querySelector(".c-out").textContent = "V = I × R → " + st.V + " = I × " + st.R + " → I = " + st.V + " / " + st.R + " = " + I.toFixed(2) + " A" + (I > 1.6 ? " — that is a lot for a small resistor: it would get hot." : "");
       };
       wireSlider(el, 0, v => { st.V = v; upd(); });
@@ -5834,13 +5842,16 @@ const CONCEPTS = {
         '<p style="font-size:12.5px;color:var(--muted);margin:8px 0 0">With the resistor removed and the button released, watch the reading flicker — that flicker is real hardware behaviour, and it is why the resistor exists.</p>';
       const read = el.querySelector(".fr-read");
       let pressed = false;
+      /* prefers-reduced-motion: no 160 ms flicker loop — the unstable
+         state is stated once, as text, and updates only on interaction */
+      const reducedFl = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
       const tick = () => {
         const fitted = el.querySelector("[data-fpd]").checked;
         if (pressed) read.textContent = "HIGH (1) — button connects the pin to 5 V";
         else if (fitted) read.textContent = "LOW (0) — the resistor holds it down";
-        else read.textContent = Math.random() < 0.5 ? "HIGH (1) ⚠ noise!" : "LOW (0) ⚠ noise!";
+        else read.textContent = reducedFl ? "⚠ unstable — with no resistor the pin drifts between HIGH and LOW unpredictably" : (Math.random() < 0.5 ? "HIGH (1) ⚠ noise!" : "LOW (0) ⚠ noise!");
       };
-      const iv = setInterval(tick, 160);
+      const iv = reducedFl ? 0 : setInterval(tick, 160);
       el._cleanup = () => clearInterval(iv);
       el.querySelector("[data-fb]").addEventListener("click", e => { pressed = !pressed; e.target.textContent = "Button: " + (pressed ? "PRESSED" : "released"); tick(); });
       el.querySelector("[data-fpd]").addEventListener("change", tick);
@@ -10256,37 +10267,92 @@ function sbxLoadChipLib() {
   return lib;
 }
 SBX_CHIP_LIB = sbxLoadChipLib();
+/* Would saving a chip called `name`, whose design uses `usedChips`,
+   make the chip contain itself — directly, or through a chain of
+   already-saved chips? Walk the current library from each used chip;
+   reaching `name` means a cycle. (The old definition of `name`, if
+   any, is never walked into: the walk stops the moment it arrives.) */
+function sbxChipWouldCycle(name, usedChips) {
+  const seen = new Set();
+  const visit = (chipName) => {
+    if (chipName === name) return true;
+    if (seen.has(chipName)) return false;
+    seen.add(chipName);
+    const def = SBX_CHIP_LIB[chipName];
+    if (!def || !def.design) return false;
+    return def.design.parts.some(p => p.kind === "chip" && visit(p.chip));
+  };
+  return (usedChips || []).some(visit);
+}
 
 /* Expand one chip definition's internal design into gates with a prefix.
    internalInNets: map chip input label -> external net name.
-   Returns gates whose output nets for chip outputs are prefix+label. */
-function sbxExpandInto(design, prefix, inNetMap, gates, errors) {
+   Returns gates whose output nets for chip outputs are prefix+label.
+   Round W: a saved chip may itself contain saved chips (nesting), so
+   expansion recurses. `stack` is the chain of chip names currently
+   being expanded — meeting a name already on the stack means a chip
+   contains itself, directly or through a chain, and is refused with
+   a plain message instead of expanding forever. Source resolution is
+   pin-aware: a wire fed from one pin of a nested chip instance reads
+   that pin's expanded net. */
+function sbxExpandInto(design, prefix, inNetMap, gates, errors, stack) {
+  stack = stack || [];
   const netOf = {};
   design.parts.forEach(p => { if (p.kind === "in") netOf["p" + p.id] = inNetMap[p.label] !== undefined ? inNetMap[p.label] : prefix + "in_" + p.label; });
   const outNet = (p) => prefix + "n" + p.id;
-  const srcNet = (partId) => {
-    const p = design.parts.find(x => x.id === partId);
+  const chipOutMap = {}; /* nested instance part id + ':' + pin label -> net */
+  const srcNet = (w) => {
+    const p = design.parts.find(x => x.id === w.f.p);
     if (!p) return null;
     if (p.kind === "in") return netOf["p" + p.id];
+    if (p.kind === "chip") { const n = chipOutMap[p.id + ":" + w.f.pin]; return n === undefined ? null : n; }
     return outNet(p);
   };
+  /* expand nested chip instances first, in dependency order (a nested
+     chip may be fed by another nested chip) */
+  const chipParts = design.parts.filter(p => p.kind === "chip");
+  const doneChips = new Set();
+  let guardN = 0;
+  while (doneChips.size < chipParts.length && guardN++ < 12) {
+    let progressed = false;
+    chipParts.forEach(p => {
+      if (doneChips.has(p.id)) return;
+      const ready = design.wires.filter(w => w.t.p === p.id).every(w => {
+        const sp = design.parts.find(x => x.id === w.f.p);
+        return !sp || sp.kind !== "chip" || doneChips.has(sp.id);
+      });
+      if (!ready) return;
+      doneChips.add(p.id); progressed = true;
+      const chip = SBX_CHIP_LIB[p.chip];
+      if (!chip) { errors.push("Inside a saved chip, the chip “" + p.chip + "” is missing from this device's chip library — it may have been deleted."); return; }
+      if (stack.indexOf(p.chip) >= 0) { errors.push("Chip “" + p.chip + "” contains itself (directly or through another chip) — a chip can never contain itself, so this is refused rather than expanded forever. Break the chain: rebuild one of the chips from plain gates or other chips."); return; }
+      const inMap = {};
+      chip.inputs.forEach(lbl => {
+        const w = design.wires.find(w => w.t.p === p.id && w.t.pin === lbl);
+        if (!w) { errors.push("Inside a saved chip, chip “" + (p.label || p.chip) + "” input " + lbl + " is not wired — re-save the outer chip from a fully wired design."); inMap[lbl] = "ZERO"; }
+        else { const n = srcNet(w); inMap[lbl] = n === null ? "ZERO" : n; }
+      });
+      const outs = sbxExpandInto({ parts: chip.design.parts, wires: chip.design.wires }, prefix + "c" + p.id + "_", inMap, gates, errors, stack.concat(p.chip));
+      chip.outputs.forEach(lbl => { chipOutMap[p.id + ":" + lbl] = outs[lbl]; });
+    });
+    if (!progressed) break;
+  }
+  chipParts.forEach(p => { if (!doneChips.has(p.id)) errors.push("Inside a saved chip, chips feed each other in a cycle around “" + (p.label || p.chip) + "” — chip instances cannot form a loop. Break it."); });
   design.parts.forEach(p => {
     if (p.kind === "gate") {
       const ins = sbxGateIns(p).map(pin => {
         const w = design.wires.find(w => w.t.p === p.id && w.t.pin === pin);
-        return w ? srcNet(w.f.p) : null;
+        return w ? srcNet(w) : null;
       });
       if (ins.some(n => n === null)) errors.push("Inside a saved chip, gate " + p.type + " (" + p.label + ") has an unwired input — the chip was saved from an incomplete design. Rebuild and re-save it fully wired.");
       gates.push({ id: prefix + "g" + p.id, type: p.type, ins: ins.map(n => n === null ? "ZERO" : n), out: outNet(p), _dangling: ins.some(n => n === null) });
-    } else if (p.kind === "chip") {
-      errors.push("chip-in-chip refused");
     }
   });
   const outs = {};
   design.parts.forEach(p => { if (p.kind === "out") {
     const w = design.wires.find(w => w.t.p === p.id);
     if (!w) errors.push("Inside a saved chip, output “" + p.label + "” was never wired — re-save the chip from a complete design.");
-    outs[p.label] = w ? srcNet(w.f.p) : "ZERO";
+    outs[p.label] = w ? (srcNet(w) || "ZERO") : "ZERO";
   } });
   return outs;
 }
@@ -10434,7 +10500,7 @@ function sbxBuildDefFull(design) {
         if (!w) { errors.push("Chip “" + p.label + "” input " + lbl + " is not wired — dangling input, flagged not guessed."); inMap[lbl] = "ZERO"; }
         else inMap[lbl] = srcNet(w);
       });
-      const outs = sbxExpandInto({ parts: chip.design.parts, wires: chip.design.wires }, "c" + p.id + "_", inMap, gates, errors);
+      const outs = sbxExpandInto({ parts: chip.design.parts, wires: chip.design.wires }, "c" + p.id + "_", inMap, gates, errors, [p.chip]);
       chip.outputs.forEach(lbl => chipOutMap[p.id + ":" + lbl] = outs[lbl]);
     });
     if (!progressed) break;
@@ -10486,9 +10552,17 @@ function sbxTruth(design) {
    A design serialises to JSON; chips it uses are embedded by value so a
    shared link works on a device that never saved the chip. Encoding is
    base64url of the UTF-8 JSON. Round-trip is verified in SBX. */
-function sbxEncodeDesign(design) {
+/* every chip a design depends on, transitively — a saved chip's own
+   design may use further chips, and those must travel with the share
+   or the receiving device cannot expand the outer chip */
+function sbxCollectChips(design) {
   const used = {};
-  design.parts.forEach(p => { if (p.kind === "chip" && SBX_CHIP_LIB[p.chip]) used[p.chip] = SBX_CHIP_LIB[p.chip]; });
+  const walk = d => { if (!d || !d.parts) return; d.parts.forEach(p => { if (p.kind === "chip" && SBX_CHIP_LIB[p.chip] && !used[p.chip]) { used[p.chip] = SBX_CHIP_LIB[p.chip]; walk(SBX_CHIP_LIB[p.chip].design); } }); };
+  walk(design);
+  return used;
+}
+function sbxEncodeDesign(design) {
+  const used = sbxCollectChips(design);
   const payload = { v: 1, design, chips: used };
   return btoa(unescape(encodeURIComponent(JSON.stringify(payload)))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
@@ -10905,7 +10979,7 @@ sbSec.innerHTML =
   '<div class="layout" style="margin-top:14px;grid-template-columns:minmax(0,1fr) minmax(0,1fr)">' +
   '<div><div class="ctrl-label">Truth table — generated by the engine (current setting highlighted)</div><div class="tt-wrap" style="max-height:300px"><table class="tt" id="sbTruth"></table></div><div class="tt-note" id="sbTruthNote"></div></div>' +
   '<div><div class="ctrl-label">Save as a chip — this design becomes a reusable part</div>' +
-  '<p style="font-size:13px;margin:4px 0 8px">The design must be fully wired and error-free. Its input switches become the chip\'s input pins (by label) and its lamps the output pins. One level only: a design containing chips cannot itself be saved as a chip — that refusal is stated, not hidden. Chips are saved on this device, alongside your named circuit saves.</p>' +
+  '<p style="font-size:13px;margin:4px 0 8px">The design must be fully wired and error-free. Its input switches become the chip\'s input pins (by label) and its lamps the output pins. Chips may contain chips: save a half adder, build a full adder out of two of them, save that too, and place it in a bigger design — the engine expands the nesting when it runs. The one hard rule: a chip may never contain itself, directly or through a chain of other chips — a save that would loop is refused, with the reason stated. Chips are saved on this device, alongside your named circuit saves.</p>' +
   '<div class="share-row"><input type="text" id="sbChipName" placeholder="Chip name — e.g. HA" aria-label="Chip name" /><button type="button" class="btn primary" id="sbSaveChip">Save as chip</button></div>' +
   '<ul class="save-list" id="sbChipList"></ul>' +
   '<div class="ctrl-label" style="margin-top:14px">Save &amp; share this design</div>' +
@@ -11367,8 +11441,11 @@ function sbRenderChips() {
 $("sbSaveChip").addEventListener("click", () => {
   const name = $("sbChipName").value.trim().replace(/\s+/g, "-");
   if (!name) { sbNote("Give the chip a name first — its pins are labelled after your design's inputs and outputs."); return; }
-  const chipParts = sb.design.parts.filter(p => p.kind === "chip");
-  if (chipParts.length) { sbNote("⚠ Refused, plainly: this design contains chip instances (" + chipParts.map(p => p.chip).join(", ") + "). One level of nesting is the shipped limit — a chip cannot contain chips. Flatten the design (rebuild the inner logic with plain gates) to save it as a chip."); return; }
+  const usedChips = sb.design.parts.filter(p => p.kind === "chip").map(p => p.chip);
+  /* chips may contain chips now (the evaluator expands recursively) —
+     the one hard rule left is that a chip may never contain ITSELF,
+     directly or through a chain of saved chips */
+  if (usedChips.length && sbxChipWouldCycle(name, usedChips)) { sbNote("⚠ Refused, plainly: saving this design as “" + esc(name) + "” would make the chip contain itself — it uses " + usedChips.join(", ") + ", and that chain already leads back to “" + esc(name) + "”. A chip can never contain itself. Rename the new chip, or rebuild the inner design so the chain does not loop."); return; }
   const built = sbxBuildDef(sb.design);
   if (!built.def) { sbNote("⚠ The chip was not saved: the design must run error-free first. First error: " + esc(built.errors[0])); return; }
   const inputs = sb.design.parts.filter(p => p.kind === "in").map(p => p.label);
@@ -11384,24 +11461,31 @@ $("sbSaveChip").addEventListener("click", () => {
 
 /* ---------- designs: save / share / import ---------- */
 function sbUsedChipsEmbedded(design) {
-  const used = {};
-  design.parts.forEach(p => { if (p.kind === "chip" && SBX_CHIP_LIB[p.chip]) used[p.chip] = SBX_CHIP_LIB[p.chip]; });
-  return used;
+  return sbxCollectChips(design);
 }
 function sbImportDesign(design, chipsEmbedded) {
   if (chipsEmbedded) {
     const chips = lsGet("lbl-chips", []);
+    const renames = {}, imported = [];
     Object.keys(chipsEmbedded).forEach(name => {
       const incoming = chipsEmbedded[name];
       const existing = chips.find(c => c.name === name);
-      if (!existing) { chips.push(incoming); return; }
+      if (!existing) { chips.push(incoming); imported.push(incoming); return; }
       if (JSON.stringify(existing.design) !== JSON.stringify(incoming.design)) {
         let nn = name + "-shared", k = 2;
         while (chips.find(c => c.name === nn)) nn = name + "-shared" + (k++);
         const renamed = Object.assign({}, incoming, { name: nn });
-        chips.push(renamed);
-        design.parts.forEach(p => { if (p.kind === "chip" && p.chip === name) p.chip = nn; });
+        chips.push(renamed); imported.push(renamed);
+        renames[name] = nn;
       }
+    });
+    /* a renamed chip must be renamed everywhere it is referenced —
+       including inside the designs of other chips from this import,
+       or a nested design would silently point at the old chip */
+    Object.keys(renames).forEach(oldName => {
+      const nn = renames[oldName];
+      design.parts.forEach(p => { if (p.kind === "chip" && p.chip === oldName) p.chip = nn; });
+      imported.forEach(c => { if (c.design) c.design.parts.forEach(p => { if (p.kind === "chip" && p.chip === oldName) p.chip = nn; }); });
     });
     lsSet("lbl-chips", chips);
     sbRefreshChipLib();
@@ -11886,26 +11970,40 @@ function vlgGenerate(design) {
      function must not, or verification with a temporary chip breaks. */
   const built = sbxBuildDef(design);
   if (!built.def) return { error: built.errors && built.errors.length ? built.errors[0] : "The design does not build." };
-  /* submodule names for every chip used (dedupe by definition) */
+  /* the full transitive chip set, dependencies first — a saved chip
+     may itself instantiate saved chips (nesting), and every level of
+     the hierarchy gets its own generated submodule */
   const chipModules = {}, renames = [];
   const seenDef = {};
-  design.parts.filter(p => p.kind === "chip").forEach(p => {
-    if (chipModules[p.chip]) return;
-    const def = SBX_CHIP_LIB[p.chip];
-    if (!def) return;
-    let base = vlgSanitize(p.chip), name = base, k = 2;
+  const order = [];
+  const visit = d => {
+    if (!d || !d.parts) return;
+    d.parts.filter(p => p.kind === "chip").forEach(p => {
+      if (chipModules[p.chip]) return;
+      const def = SBX_CHIP_LIB[p.chip];
+      if (!def) return;
+      chipModules[p.chip] = true; /* visited marker; the name is assigned below */
+      visit(def.design);
+      order.push(p.chip);
+    });
+  };
+  visit(design);
+  /* submodule names for every chip in the set (dedupe by definition) */
+  order.forEach(chipName => {
+    const def = SBX_CHIP_LIB[chipName];
+    let base = vlgSanitize(chipName), name = base, k = 2;
     const key = JSON.stringify(def.design);
     while (seenDef[name] && seenDef[name] !== key) name = base + "_" + (k++);
-    seenDef[name] = key; chipModules[p.chip] = name;
-    if (name !== p.chip) renames.push({ from: p.chip, to: name });
+    seenDef[name] = key; chipModules[chipName] = name;
+    if (name !== chipName) renames.push({ from: chipName, to: name });
   });
-  /* generate submodules first so the top module's instance connections
-     use the submodules' actual port names */
+  /* generate submodules dependencies-first so every module's instance
+     connections use the submodules' actual port names */
   const subTexts = {}, subPortMaps = {};
-  Object.keys(chipModules).forEach(name => {
-    const def = SBX_CHIP_LIB[name]; if (!def) return;
-    const sub = vlgModule(def.design, chipModules[name], {}, null);
-    subTexts[name] = sub.text; subPortMaps[name] = sub.portMap;
+  order.forEach(chipName => {
+    const def = SBX_CHIP_LIB[chipName]; if (!def) return;
+    const sub = vlgModule(def.design, chipModules[chipName], chipModules, subPortMaps);
+    subTexts[chipName] = sub.text; subPortMaps[chipName] = sub.portMap;
     renames.push.apply(renames, sub.renames);
   });
   const top = vlgModule(design, "sandbox_design", chipModules, subPortMaps);
@@ -11915,11 +12013,11 @@ function vlgGenerate(design) {
     "// input switches (inputs) and output lamps (outputs), in canvas order.\n";
   if (renames.length) text += "// Labels changed to make valid Verilog identifiers: " + renames.map(r => "“" + r.from + "” → " + r.to).join(", ") + ".\n";
   text += "\n" + top.text + "\n";
-  top.usedChips.forEach(name => {
+  order.forEach(name => {
     if (!subTexts[name]) return;
     text += "\n// Submodule for the saved chip “" + name + "” — generated from the chip's\n// own saved netlist, so the hierarchy matches what you built.\n" + subTexts[name] + "\n";
   });
-  return { text, renames, portMap: top.portMap, chips: top.usedChips };
+  return { text, renames, portMap: top.portMap, chips: order.slice() };
 }
 /* --- a small parser + evaluator for exactly the Verilog subset the
        exporter emits (assigns with ~ & | ^ and parentheses, and
@@ -14630,9 +14728,14 @@ renderStage = function () {
     groups.forEach((g, gi) => {
       const mod = MODULES_J.find(m => m.name === g.name) || MODULES_J[gi];
       const sec = document.createElement("div"); sec.className = "ux-group"; sec.dataset.module = mod ? mod.id : "";
+      /* Round W lazy galleries: unfiltered, only the first module's
+         cards are built up front; later modules render as a shell and
+         materialise near the viewport (or on any filter / deep link) */
+      const lazy = !filtering && gi > 0 && !(window.__fgsLazyDone && window.__fgsLazyDone.has(gi));
       const cards = [];
       g.items.forEach((it, idx) => {
         total++;
+        if (lazy) return;
         const type = inferType(it), level = inferLevel(it, g.name);
         const label = it.querySelector(".mi-label") ? it.querySelector(".mi-label").textContent : it.textContent;
         const hint = it.querySelector("small") ? it.querySelector("small").textContent : "";
@@ -14640,7 +14743,7 @@ renderStage = function () {
         if (labsOnly && type !== "Lab") return;
         if (tf && type !== tf) return;
         if (lf && level !== lf) return;
-        if (q && hay.indexOf(q) < 0) return;
+        if (q && !(window.__fgsQMatch ? window.__fgsQMatch(hay, q) : hay.indexOf(q) >= 0) && !(window.__fgsForceKeys && window.__fgsForceKeys.has(it.dataset.key))) return;
         shown++;
         const card = document.createElement("button"); card.type = "button"; card.className = "ux-act";
         card.dataset.key = it.dataset.key || "";
@@ -14655,12 +14758,13 @@ renderStage = function () {
         card.addEventListener("click", () => { markVisited(it.dataset.key); it.click(); });
         cards.push(card);
       });
-      if (!cards.length) return;
+      if (!cards.length && !lazy) return;
       const h = document.createElement("h3"); h.textContent = (gi + 1) + " · " + g.name; sec.appendChild(h);
       const bl = document.createElement("p"); bl.className = "ux-gblurb"; bl.textContent = mod ? mod.blurb : ""; sec.appendChild(bl);
       const grid = document.createElement("div"); grid.className = "ux-cards";
       cards.forEach(c => grid.appendChild(c)); sec.appendChild(grid);
-      if (!filtering && g.items.length > 9) {
+      if (lazy) { const snt = document.createElement("div"); snt.className = "fgs-lazy"; snt.dataset.gi = gi; snt.textContent = g.items.length + " activities — they load as you scroll here, or open one straight from the Menu, search, or a link."; sec.appendChild(snt); }
+      if (!filtering && cards.length && g.items.length > 9) {
         const sb = document.createElement("button"); sb.type = "button"; sb.className = "ux-showall";
         sb.textContent = "Show all " + g.items.length + " in this module";
         sb.addEventListener("click", () => {
@@ -18663,5 +18767,724 @@ table.tt tr.mu-cur td{background:var(--amber-soft);font-weight:700}
     });
     window.__countsV = { total, counts };
   })();
+})();
+</script>
+
+<style>
+/* ===== Round W — findability: deep links, search upgrade, lazy gallery ===== */
+.fgs-lazy{border:1px dashed var(--line2);border-radius:10px;padding:16px;color:var(--muted);font-size:13.5px;margin-top:4px}
+.fgs-cl{display:inline-flex;align-items:center;min-height:32px;padding:2px 4px;font-size:12px;font-weight:700;color:var(--amber);cursor:pointer;text-decoration:underline;text-underline-offset:2px}
+.fgs-cl:hover{color:var(--ink)}
+.fgs-hl{outline:3px solid var(--amber) !important;outline-offset:3px;border-radius:10px}
+.fgs-note{margin:10px 16px 0;font-size:13.5px;color:var(--muted)}
+.fgs-note b{color:var(--ink)}
+.fgs-dym{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.fgs-dym button{min-height:44px;border:1px solid var(--line2);background:var(--panel);border-radius:9px;padding:9px 13px;font-weight:700;cursor:pointer;color:var(--ink)}
+.fgs-cl:focus-visible,.fgs-dym button:focus-visible,.fgs-menu-sub:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+/* Menu child rows (Round W): signposts under a parent group — styled
+   like menu items, deliberately NOT .menu-item, so they are not
+   counted as activities and never enter the gallery registry */
+.fgs-menu-sub{display:flex;width:100%;text-align:left;border:0;background:transparent;border-radius:8px;padding:7px 10px 7px 22px;font-size:13.5px;font-weight:600;cursor:pointer;color:var(--ink);align-items:baseline;gap:8px;min-height:44px}
+.fgs-menu-sub small{font-weight:500;color:var(--muted);font-size:11.5px;margin-left:auto;text-align:right;flex:none}
+.fgs-menu-sub:hover{background:var(--panel2)}
+.fgs-menu-sub .mi-dot{width:7px;height:7px;border-radius:50%;background:var(--amber);flex:none;align-self:center}
+.fgs-menu-sub.menu-folded{display:none !important}
+/* Verilog simulator (Round W) */
+.vsim-ins{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}
+.vsim-out{font-family:var(--mono);font-size:13.5px;margin:6px 0;line-height:1.6}
+.vsim-table{border-collapse:collapse;font-family:var(--mono);font-size:12.5px;margin-top:8px}
+.vsim-table td,.vsim-table th{border:1px solid var(--line);padding:3px 8px;text-align:center}
+/* sandbox keyboard hint (Round W) */
+.sb-kb-hint{font-size:12.5px;color:var(--muted);margin:6px 0 0;line-height:1.5}
+/* print handouts (Round W): the handout host is screen-hidden and is
+   the ONLY thing that prints */
+#fgsPrint{display:none}
+@media print{
+  body>*:not(#fgsPrint){display:none !important}
+  #fgsPrint{display:block !important;color:#000;background:#fff;font-family:Georgia,"Times New Roman",serif;font-size:12pt;line-height:1.5}
+  #fgsPrint h1{font-size:19pt;margin:0 0 2pt;line-height:1.25}
+  #fgsPrint h2{font-size:13.5pt;margin:16pt 0 4pt;border-bottom:1px solid #999;padding-bottom:2pt}
+  #fgsPrint .hp-track{color:#444;font-size:10.5pt;margin:0 0 10pt}
+  #fgsPrint ol{margin:4pt 0 0;padding-left:20pt}
+  #fgsPrint li{margin:5pt 0}
+  #fgsPrint .hp-line{border-bottom:1px solid #bbb;height:22pt}
+  #fgsPrint .hp-foot{margin-top:18pt;font-size:10pt;color:#444;border-top:1px solid #999;padding-top:6pt}
+}
+</style>
+<script>
+"use strict";
+/* ================================================================
+   ROUND W — findability first (the owner's rating fixes):
+   1) a stable deep link per activity (#a=<activity-id>) that opens
+      the right module, materialises/expands the gallery, scrolls to
+      the activity and highlights it — plus a Copy link affordance on
+      every gallery card. Existing share hashes (#c= circuits,
+      #sb= sandbox designs, #assign= assignments) are untouched and
+      take precedence.
+   2) search upgrade, invisible: titles + outcome line + module name
+      all match; a curated synonym map for beginner vocabulary;
+      multi-token AND matching; small edit-distance fuzzy fallback
+      when exact matching finds nothing; result counts (already in
+      the gallery header) and closest-match suggestions on zero hits.
+      Typing also rebuilds the gallery again — Round L's input clone
+      had silently dropped Round J's gallery listener.
+   3) breadboard: synonym + top-ranking in search results, and two
+      child rows under the Boards Menu parent (no new parent, no new
+      counted activities — they are signposts to existing ones).
+   4) lazy galleries: modules past the first render on near-viewport,
+      first filter, or first deep link. Nothing is removed.
+   5) printable lab handouts (answers never enter the handout),
+      a simulator for exactly the Verilog subset the exporter emits,
+      sandbox nesting depth 2 lives in Round C/F edits above, and
+      reduced-motion/static-frame fixes live with their concepts.
+   ================================================================ */
+(function roundW() {
+  const $W = id => document.getElementById(id);
+  const escW = s => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  const cssEsc = s => (window.CSS && CSS.escape) ? CSS.escape(s) : String(s).replace(/"/g, '\\"');
+  const RJ = window.__uxRoundJ;
+  const reducedW = () => !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+
+  /* ================= registry (the live Menu is the registry) ================= */
+  function catalogW() {
+    const list = $W("menuList"); const out = []; let group = "";
+    if (!list) return out;
+    Array.prototype.slice.call(list.children).forEach(el => {
+      if (el.classList.contains("menu-group")) group = (el.dataset.group || "").trim();
+      else if (el.classList.contains("menu-item")) {
+        const lbl = el.querySelector(".mi-label");
+        const hint = el.querySelector("small");
+        out.push({ key: el.dataset.key || "", label: lbl ? lbl.textContent.trim() : "", hint: hint ? hint.textContent.trim() : "", group, search: (el.dataset.search || ""), el });
+      }
+    });
+    return out.filter(a => a.key);
+  }
+
+  /* ================= 2a) synonym enrichment of the haystacks ================= */
+  const SYN_RULES = [
+    [/latch|flip-flop|flip flop|bistable|sequential|shift register/, "flip-flop flip flop latch sr latch d latch bistable memory bit"],
+    [/7-segment|seven segment|7447|seg7|\bbcd\b/, "seven segment 7 segment 7-segment display digit"],
+    [/half adder/, "adder half-adder addition sum carry"],
+    [/full adder/, "adder full-adder ripple addition sum carry"],
+    [/ripple/, "ripple adder carry chain propagation"],
+    [/lookahead|carry-lookahead/, "carry lookahead adder cla generate propagate"],
+    [/\badders?\b/, "adder adders adding"],
+    [/\balu\b|arithmetic logic/, "alu arithmetic logic unit operations"],
+    [/multiplex|\bmux\b/, "mux multiplexer demux demultiplexer selector select"],
+    [/demultiplex|demux/, "demux demultiplexer mux multiplexer"],
+    [/counter|shift register/, "counter counting shift register register bits"],
+    [/hamming|error correction|\becc\b/, "error correction hamming ecc parity syndrome codeword single error"],
+    [/\brace\b|lost update|thread interleav/, "race condition lost update threads interleaving mutex lock atomic"],
+    [/addr|address decod|memory.map|chip select/, "address decoding memory mapped memory-mapped memory map decoder chip select"],
+    [/uart|serial/, "serial uart baud transmitter receiver asynchronous"],
+    [/\bi2c\b|\bspi\b/, "i2c spi serial protocol bus clock data"],
+    [/cache/, "cache hit miss tag index offset locality temporal spatial"],
+    [/pipeline/, "pipeline hazard stall forwarding stages datapath"],
+    [/schedul|mlfq|round robin/, "scheduling scheduler fcfs round robin sjf shortest job mlfq quantum turnaround"],
+    [/breadboard/, "breadboard breadbord bench board projects picker"],
+    [/karnaugh|k-map|kmap/, "karnaugh kmap k-map minimiser minimizer sop boolean"]
+  ];
+  const KEY_TERMS = {
+    "hamming-ecc": "error correction ecc hamming",
+    "os-race": "race condition lost update",
+    "addr-decode": "address decoding memory mapped memory-mapped",
+    "dma-controller": "dma direct memory access",
+    "mux-7seg": "seven segment 7 segment display",
+    "breadboard": "breadboard breadbord full adder bench",
+    "chipx": "breadboard chips 74xx pinout explorer",
+    "fault-trainer": "breadboard fault finding trainer diagnosis bench",
+    "tristate-bus": "tri-state tristate bus high impedance",
+    "sbx-sandbox": "sandbox build your own circuit gates chips",
+    "verilog-export": "verilog hdl export simulate simulation"
+  };
+  function enrichSearch() {
+    const list = $W("menuList"); if (!list) return;
+    let group = "";
+    Array.prototype.slice.call(list.children).forEach(el => {
+      if (el.classList.contains("menu-group")) { group = (el.dataset.group || "").trim(); return; }
+      if (!el.classList.contains("menu-item") || el.dataset.fgsSyn) return;
+      el.dataset.fgsSyn = "1";
+      const lbl = el.querySelector(".mi-label");
+      const label = lbl ? lbl.textContent.trim() : "";
+      let hay = (el.dataset.key + " " + label + " " + (el.dataset.search || "")).toLowerCase();
+      const add = [];
+      if (group && (el.dataset.search || "").toLowerCase().indexOf(group.toLowerCase()) < 0) add.push(group.toLowerCase());
+      SYN_RULES.forEach(([re, terms]) => { if (re.test(hay)) add.push(terms); });
+      if (KEY_TERMS[el.dataset.key]) add.push(KEY_TERMS[el.dataset.key]);
+      if (el.dataset.key.indexOf("bb-") === 0) add.push("breadboard breadbord bench project");
+      if (add.length) el.dataset.search = ((el.dataset.search || "") + " " + add.join(" ")).trim();
+    });
+  }
+  enrichSearch();
+
+  /* ================= 2b) matcher: token AND over enriched haystacks ================= */
+  const Q_SYN = { "breadbord": ["breadboard"], "flip": ["latch"], "flop": ["latch"], "7": ["seven"], "kmap": ["karnaugh"], "karnaugh": ["kmap"], "mux": ["multiplexer"], "demux": ["demultiplexer"], "ecc": ["hamming", "error"], "dma": ["direct", "memory", "access"], "alu": ["arithmetic"] };
+  window.__fgsQMatch = function (hay, q) {
+    const toks = String(q).toLowerCase().split(/\s+/).filter(Boolean);
+    return toks.every(t => {
+      if (hay.indexOf(t) >= 0) return true;
+      const alts = Q_SYN[t] || [];
+      return alts.some(a => hay.indexOf(a) >= 0);
+    });
+  };
+  /* small edit distance (Levenshtein with early exit past maxD) */
+  function lev(a, b, maxD) {
+    if (Math.abs(a.length - b.length) > maxD) return maxD + 1;
+    let prev = [], cur = [];
+    for (let j = 0; j <= b.length; j++) prev[j] = j;
+    for (let i = 1; i <= a.length; i++) {
+      cur[0] = i; let best = cur[0];
+      for (let j = 1; j <= b.length; j++) {
+        cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+        if (cur[j] < best) best = cur[j];
+      }
+      if (best > maxD) return maxD + 1;
+      const t = prev; prev = cur; cur = t;
+    }
+    return prev[b.length];
+  }
+  function tokenFuzzyInHay(tok, hay) {
+    if (tok.length < 3) return hay.indexOf(tok) >= 0;
+    const maxD = tok.length >= 7 ? 2 : 1;
+    const words = hay.split(/[^a-z0-9-]+/).filter(w => w.length >= 3);
+    return words.some(w => Math.abs(w.length - tok.length) <= maxD && lev(tok, w, maxD) <= maxD);
+  }
+  function fuzzyCatalog(q) {
+    const toks = q.toLowerCase().split(/\s+/).filter(Boolean);
+    if (!toks.length) return [];
+    const scored = [];
+    catalogW().forEach(a => {
+      const hay = (a.label + " " + a.hint + " " + a.group + " " + a.search).toLowerCase();
+      let score = 0, okAll = true;
+      toks.forEach(t => {
+        if (hay.indexOf(t) >= 0) { score += 0; return; }
+        const alts = Q_SYN[t] || [];
+        if (alts.some(x => hay.indexOf(x) >= 0)) { score += 1; return; }
+        if (tokenFuzzyInHay(t, hay)) { score += 2; return; }
+        okAll = false;
+      });
+      if (okAll) scored.push({ key: a.key, label: a.label, group: a.group, score });
+    });
+    scored.sort((x, y) => x.score - y.score);
+    return scored;
+  }
+  window.__fgsSearchKeys = q => {
+    const cat = catalogW();
+    return cat.filter(a => window.__fgsQMatch((a.label + " " + a.hint + " " + a.group + " " + a.search).toLowerCase(), q)).map(a => a.key);
+  };
+  window.__fgsFuzzyKeys = q => fuzzyCatalog(q).map(x => x.key);
+
+  /* ================= 4) lazy galleries + card decoration ================= */
+  window.__fgsLazyDone = window.__fgsLazyDone || new Set();
+  function materializeAllGallery() {
+    if (!RJ) return;
+    let grew = false;
+    for (let gi = 0; gi < 6; gi++) if (!window.__fgsLazyDone.has(gi)) { window.__fgsLazyDone.add(gi); grew = true; }
+    if (grew) RJ.buildGallery();
+  }
+  const io = ("IntersectionObserver" in window) ? new IntersectionObserver(entries => {
+    let grew = false;
+    entries.forEach(en => {
+      if (en.isIntersecting) {
+        const gi = +en.target.dataset.gi;
+        if (!window.__fgsLazyDone.has(gi)) { window.__fgsLazyDone.add(gi); grew = true; }
+        io.unobserve(en.target);
+      }
+    });
+    if (grew && RJ) RJ.buildGallery();
+  }, { rootMargin: "700px 0px" }) : null;
+
+  function copyLinkFor(key, statusEl) {
+    const link = location.href.split("#")[0] + "#a=" + key;
+    try { history.replaceState(null, "", "#a=" + key); } catch (e) { /* sandbox */ }
+    const done = ok => { if (statusEl) statusEl.textContent = ok ? "Link copied ✓" : "Link is in the address bar — copy it from there"; };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(link).then(() => done(true), () => done(false));
+    else done(false);
+  }
+  function decorateGallery() {
+    const gal = $W("uxGallery"); if (!gal) return;
+    gal.querySelectorAll(".fgs-lazy").forEach(s => { if (io) io.observe(s); });
+    gal.querySelectorAll(".ux-act").forEach(card => {
+      if (card.querySelector(".fgs-cl")) return;
+      const key = card.dataset.key; if (!key) return;
+      const main = card.querySelector(".ux-main"); if (!main) return;
+      const s = document.createElement("span");
+      s.className = "fgs-cl"; s.setAttribute("role", "button"); s.tabIndex = -1;
+      s.textContent = "Copy link"; s.title = "Copy a direct link to this activity";
+      s.setAttribute("aria-label", "Copy link to this activity");
+      s.addEventListener("click", ev => { ev.stopPropagation(); ev.preventDefault(); copyLinkFor(key, s); });
+      main.appendChild(s);
+    });
+    /* breadboard queries rank breadboard cards first in their group */
+    const inp = $W("uxSearch");
+    const q = inp ? (inp.value || "").trim().toLowerCase() : "";
+    if (/breadboard|breadbord/.test(q)) {
+      gal.querySelectorAll(".ux-cards").forEach(grid => {
+        const cards = Array.prototype.slice.call(grid.children);
+        const bb = cards.filter(c => /^(bb-|breadboard$|chipx$|fault-trainer$)/.test(c.dataset.key || "") || /breadboard/.test((keySearch(c.dataset.key) || "")));
+        /* stable partition: breadboard cards to the front, order kept */
+        bb.slice().reverse().forEach(c => grid.insertBefore(c, grid.firstChild));
+      });
+    }
+  }
+  const keySearchMap = {};
+  function keySearch(key) {
+    if (!(key in keySearchMap)) {
+      const it = document.querySelector('#menuList .menu-item[data-key="' + cssEsc(key) + '"]');
+      keySearchMap[key] = it ? (it.dataset.search || "") : "";
+    }
+    return keySearchMap[key];
+  }
+  const galObs = ("MutationObserver" in window) ? new MutationObserver(() => decorateGallery()) : null;
+  if (galObs && $W("uxGallery")) galObs.observe($W("uxGallery"), { childList: true });
+
+  /* ================= 1) deep links: #a=<activity-id> ================= */
+  function itemForKey(key) { return document.querySelector('#menuList .menu-item[data-key="' + cssEsc(key) + '"]'); }
+  function fallbackTarget(key) {
+    const byId = document.getElementById(key);
+    if (byId) return byId;
+    if (/^circ-/.test(key) || key === "breadboard" || /^bb-/.test(key) || key === "chipx" || key === "fault-trainer") return $W("stageTitle");
+    if (/^concept-/.test(key)) return $W("conceptPanel");
+    if (key === "concepts") return $W("conceptsView");
+    if (key === "kmap") return $W("kmapView");
+    if (/^sbx-|^verilog/.test(key)) return $W("sandboxView");
+    if (/^adv-/.test(key)) return document.querySelector("#module-boards");
+    return null;
+  }
+  function highlightEl(el) {
+    if (!el) return;
+    const host = el.closest ? (el.closest(".card, article, section") || el) : el;
+    host.classList.add("fgs-hl");
+    setTimeout(() => host.classList.remove("fgs-hl"), 2600);
+    try { host.scrollIntoView({ behavior: reducedW() ? "auto" : "smooth", block: "start" }); } catch (e) {}
+  }
+  function galleryReveal(key) {
+    materializeAllGallery();
+    const card = document.querySelector('.ux-act[data-key="' + cssEsc(key) + '"]');
+    if (card && card.hidden) {
+      const sec = card.closest(".ux-group");
+      const sb = sec ? sec.querySelector(".ux-showall") : null;
+      if (sb && sb.dataset.open !== "1") sb.click();
+      card.hidden = false;
+    }
+    return card;
+  }
+  let lastRoute = { key: "", at: 0 };
+  function openActivity(key) {
+    const item = itemForKey(key);
+    if (!item) return false;
+    window.__uxInteracted = true;
+    let target = null;
+    const proto = Element.prototype;
+    const origSIV = proto.scrollIntoView;
+    try {
+      proto.scrollIntoView = function (o) { target = this; return origSIV.call(this, o); };
+    } catch (e) {}
+    item.click();
+    setTimeout(() => { try { proto.scrollIntoView = origSIV; } catch (e) {} }, 1300);
+    galleryReveal(key);
+    [500, 1150].forEach(t => setTimeout(() => {
+      const el = (target && document.contains(target)) ? target : fallbackTarget(key);
+      if (el) highlightEl(el);
+    }, t));
+    return true;
+  }
+  function routeHash() {
+    const h = location.hash || "";
+    if (/[#&](c|sb|assign)=/.test(h)) return; /* existing share flows own these */
+    const m = h.match(/[#&]a=([A-Za-z0-9_-]+)/);
+    if (!m) return;
+    const key = decodeURIComponent(m[1]);
+    const now = Date.now();
+    if (lastRoute.key === key && now - lastRoute.at < 3000) return;
+    lastRoute = { key, at: now };
+    openActivity(key);
+  }
+  window.addEventListener("hashchange", routeHash);
+  if (/[#&]a=/.test(location.hash || "")) {
+    window.__uxInteracted = true; /* keep Round L's land-at-top out of the way */
+    setTimeout(routeHash, 400);
+    setTimeout(routeHash, 1500);
+  }
+  /* keep the address bar shareable as the user navigates in-page */
+  document.addEventListener("click", e => {
+    const t = e.target; if (!t.closest) return;
+    let key = null;
+    const mi = t.closest(".menu-item"); if (mi && mi.dataset.key) key = mi.dataset.key;
+    const card = t.closest(".ux-act"); if (card && card.dataset.key) key = card.dataset.key;
+    const rs = t.closest(".ux-result"); if (rs && rs.dataset.key) key = rs.dataset.key;
+    const bp = t.closest("[data-bbproj]"); if (bp) key = bp.dataset.bbproj === "full" ? "breadboard" : "bb-" + bp.dataset.bbproj;
+    if (!key) return;
+    setTimeout(() => {
+      const h = location.hash || "";
+      if (/[#&](c|sb|assign)=/.test(h)) return; /* a richer share state already owns the hash */
+      try { history.replaceState(null, "", "#a=" + key); } catch (err) {}
+    }, 450);
+  }, false);
+
+  /* ================= 2c) the search pipeline ================= */
+  const searchInp = $W("uxSearch");
+  let pipelineTimer = null;
+  function galleryPostPass(q) {
+    const gal = $W("uxGallery"); if (!gal) return;
+    const shownCards = gal.querySelectorAll(".ux-act:not([hidden])").length;
+    const old = $W("fgsFuzzyNote"); if (old) old.remove();
+    if (!q) { window.__fgsForceKeys = null; return; }
+    if (shownCards > 0) { window.__fgsForceKeys = null; return; }
+    /* exact + synonym matching found nothing: fuzzy fallback */
+    const hits = fuzzyCatalog(q);
+    if (hits.length) {
+      window.__fgsForceKeys = new Set(hits.map(h => h.key));
+      if (RJ) RJ.buildGallery();
+      const g2 = $W("uxGallery");
+      const note = document.createElement("p");
+      note.className = "fgs-note"; note.id = "fgsFuzzyNote";
+      note.innerHTML = "No exact match for “" + escW(q) + "” — showing the <b>" + hits.length + " closest</b> activit" + (hits.length === 1 ? "y" : "ies") + ":";
+      const head = g2.querySelector(".ux-ghead");
+      if (head && head.parentNode) head.parentNode.insertBefore(note, head.nextSibling);
+      return;
+    }
+    /* still nothing: did-you-mean on the closest titles */
+    const nr = gal.querySelector(".ux-noresults");
+    if (nr) {
+      const scored = catalogW().map(a => ({ a, d: Math.min.apply(null, q.toLowerCase().split(/\s+/).map(t => lev(t, a.label.toLowerCase().split(/\s+/)[0] || "", 9))) }))
+        .sort((x, y) => x.d - y.d).slice(0, 3);
+      nr.innerHTML = "No activity matches “" + escW(q) + "”. Did you mean:";
+      const row = document.createElement("span"); row.className = "fgs-dym";
+      scored.forEach(({ a }) => {
+        const b = document.createElement("button"); b.type = "button"; b.textContent = a.label;
+        b.addEventListener("click", () => { searchInp.value = a.label; searchInp.dispatchEvent(new Event("input", { bubbles: true })); });
+        row.appendChild(b);
+      });
+      nr.appendChild(row);
+    }
+  }
+  function runPipeline() {
+    if (!searchInp || !RJ) return;
+    window.__fgsForceKeys = null;
+    RJ.buildGallery();
+    galleryPostPass((searchInp.value || "").trim().toLowerCase());
+  }
+  if (searchInp) {
+    searchInp.addEventListener("input", () => { clearTimeout(pipelineTimer); pipelineTimer = setTimeout(runPipeline, 200); });
+    searchInp.addEventListener("keydown", e => { if (e.key === "Enter") { clearTimeout(pipelineTimer); setTimeout(runPipeline, 60); } });
+  }
+  /* the live dropdown (Round L): synonyms arrive via the enriched
+     haystacks; this pass adds breadboard-first ranking and a
+     closest-matches rescue when the dropdown reports zero */
+  function fixDropdown() {
+    const box = document.querySelector(".ux-results");
+    if (!box || box.hidden || !searchInp) return;
+    const q = (searchInp.value || "").trim().toLowerCase();
+    if (!q) return;
+    const countEl = box.querySelector(".ux-rcount");
+    const zero = countEl && /^0\s/.test(countEl.textContent || "");
+    if (zero) {
+      const hits = fuzzyCatalog(q).slice(0, 5);
+      if (!hits.length) return;
+      box.innerHTML = '<div class="ux-rcount">No exact match for “' + escW(searchInp.value.trim()) + '” — closest activities:</div>' +
+        hits.map(h => '<button type="button" class="ux-result" data-key="' + escW(h.key) + '" role="option"><span>' + escW(h.label) + "</span><small>" + escW(h.group) + "</small></button>").join("");
+      box.querySelectorAll(".ux-result").forEach(b => b.addEventListener("click", () => {
+        const it = itemForKey(b.dataset.key);
+        box.hidden = true;
+        if (it) it.click();
+      }));
+      return;
+    }
+    if (/breadboard|breadbord/.test(q)) {
+      const btns = Array.prototype.slice.call(box.querySelectorAll(".ux-result"));
+      const bb = btns.filter(b => /^(bb-|breadboard$|chipx$|fault-trainer$)/.test(b.dataset.key || ""));
+      bb.slice().reverse().forEach(b => box.insertBefore(b, countEl ? countEl.nextSibling : box.firstChild));
+    }
+  }
+  if (searchInp) {
+    searchInp.addEventListener("input", () => setTimeout(fixDropdown, 300));
+    searchInp.addEventListener("focus", () => setTimeout(fixDropdown, 300));
+  }
+
+  /* ---- menu filter also ranks breadboard first (filter-only) ---- */
+  const menuFilterEl = $W("menuFilter");
+  if (menuFilterEl) {
+    const origOrder = new Map();
+    Array.prototype.slice.call($W("menuList").children).forEach((el, i) => origOrder.set(el, i));
+    menuFilterEl.addEventListener("input", () => {
+      const q = (menuFilterEl.value || "").trim().toLowerCase();
+      const list = $W("menuList"); if (!list) return;
+      if (/breadboard|breadbord/.test(q)) {
+        /* within each group, matching breadboard rows rise to the top */
+        let header = null;
+        Array.prototype.slice.call(list.children).forEach(el => {
+          if (el.classList.contains("menu-group")) header = el;
+          else if (header && el.classList.contains("menu-item") && /^(bb-|breadboard$|chipx$|fault-trainer$)/.test(el.dataset.key || "")) {
+            header.parentNode.insertBefore(el, header.nextSibling);
+          }
+        });
+      } else if (!q) {
+        Array.prototype.slice.call(list.children).sort((a, b) => (origOrder.get(a) || 0) - (origOrder.get(b) || 0)).forEach(el => list.appendChild(el));
+      }
+    });
+  }
+
+  /* ================= 3) Menu child rows for the Breadboard ================= */
+  (function breadboardChildren() {
+    const list = $W("menuList"); if (!list) return;
+    let boardsHeader = null;
+    Array.prototype.slice.call(list.children).forEach(el => {
+      if (el.classList.contains("menu-group") && (el.dataset.group || "").trim() === "Boards, Modulation & Projects") boardsHeader = el;
+    });
+    if (!boardsHeader) return;
+    const mkSub = (label, small, act) => {
+      const b = document.createElement("button");
+      b.type = "button"; b.className = "fgs-menu-sub"; b.dataset.fgssub = "1";
+      b.innerHTML = '<span class="mi-dot" aria-hidden="true"></span><span class="mi-label"></span><small></small>';
+      b.querySelector(".mi-label").textContent = label;
+      b.querySelector("small").textContent = small;
+      b.addEventListener("click", act);
+      return b;
+    };
+    const goBreadboard = () => { const it = itemForKey("breadboard"); if (it) it.click(); };
+    const goPicker = () => {
+      const it = itemForKey("breadboard"); if (it) it.click();
+      setTimeout(() => { const pk = $W("bbPicker"); if (pk) pk.scrollIntoView({ behavior: reducedW() ? "auto" : "smooth", block: "start" }); }, 450);
+    };
+    const sub1 = mkSub("Breadboard area — the full-adder board", "Breadboard · Logic & Circuits", goBreadboard);
+    const sub2 = mkSub("Breadboard project picker — every bench project", "Breadboard · Logic & Circuits", goPicker);
+    boardsHeader.parentNode.insertBefore(sub2, boardsHeader.nextSibling);
+    boardsHeader.parentNode.insertBefore(sub1, boardsHeader.nextSibling);
+    /* fold in step with the Boards parent (Round M drives the fold
+       through the header's data-folded attribute) */
+    const syncFold = () => {
+      const folded = boardsHeader.dataset.folded === "true";
+      [sub1, sub2].forEach(s => s.classList.toggle("menu-folded", folded));
+    };
+    syncFold();
+    if ("MutationObserver" in window) new MutationObserver(syncFold).observe(boardsHeader, { attributes: true, attributeFilter: ["data-folded"] });
+    /* the Menu filter governs these rows too */
+    if (menuFilterEl) menuFilterEl.addEventListener("input", () => {
+      const q = (menuFilterEl.value || "").trim().toLowerCase();
+      [sub1, sub2].forEach(s => {
+        const txt = s.textContent.toLowerCase();
+        s.style.display = (!q || txt.indexOf(q) >= 0 || /breadboard|breadbord/.test(q)) ? "" : "none";
+      });
+    });
+  })();
+
+  /* ================= 5a) printable lab handouts ================= */
+  function handoutHTML(lab) {
+    const tasks = (lab.tasks || []).map(t => "<li>" + t + "</li>").join("");
+    const checks = (lab.checks || []).map(c => "<li>" + c.label + '<div class="hp-line"></div></li>').join("");
+    const wrap = (lab.wrap || []).map(w => "<li>" + w.q + '<div class="hp-line"></div></li>').join("");
+    return "<h1>" + escW(lab.code + " · " + lab.title) + "</h1>" +
+      '<p class="hp-track">' + escW(lab.track || "") + " · From Gates to Systems — lab handout</p>" +
+      "<h2>Aim</h2><p>" + lab.aim + "</p>" +
+      (tasks ? "<h2>Your tasks — in order</h2><ol>" + tasks + "</ol>" : "") +
+      (checks ? "<h2>Check questions — work them on the site, write your answers here first</h2><ol>" + checks + "</ol>" : "") +
+      (wrap ? "<h2>Wrap-up questions</h2><ol>" + wrap + "</ol>" : "") +
+      '<p class="hp-foot">Answers are checked on the site itself (each lab marks its own questions there) — this sheet deliberately leaves them off, so it can be handed out before the lab is worked.</p>';
+  }
+  function printHost() {
+    let host = $W("fgsPrint");
+    if (!host) { host = document.createElement("div"); host.id = "fgsPrint"; host.setAttribute("aria-hidden", "true"); document.body.appendChild(host); }
+    return host;
+  }
+  function printHandout(labId) {
+    const lab = (typeof RE_LAB_INDEX !== "undefined") ? RE_LAB_INDEX[labId] : null;
+    if (!lab) return false;
+    const host = printHost();
+    host.innerHTML = handoutHTML(lab);
+    try { window.print(); } catch (e) { /* inert in the preview sandbox — works on the live page */ }
+    return true;
+  }
+  if (typeof RE_LAB_INDEX !== "undefined") {
+    Object.keys(RE_LAB_INDEX).forEach(id => {
+      const card = document.getElementById(id);
+      if (!card || card.querySelector(".fgs-print-btn")) return;
+      const row = document.createElement("div");
+      row.className = "share-row"; row.style.marginTop = "12px";
+      row.innerHTML = '<button type="button" class="btn fgs-print-btn">Print handout</button><span style="font-size:12.5px;color:var(--muted)">This lab on paper: aim, tasks and questions in order — the answers stay on the site, where they are checked.</span>';
+      row.querySelector("button").addEventListener("click", () => printHandout(id));
+      card.appendChild(row);
+    });
+    window.addEventListener("afterprint", () => { const h = $W("fgsPrint"); if (h) h.innerHTML = ""; });
+  }
+
+  /* ================= 5b) simulate the exported Verilog ================= */
+  (function verilogSim() {
+    const block = $W("sbVerilogBlock"); if (!block) return;
+    if (typeof vlgParseModules !== "function" || typeof vlgEvalModule !== "function") return;
+    const wrap = document.createElement("div");
+    wrap.style.cssText = "margin-top:14px;border-top:1px solid var(--line);padding-top:12px";
+    wrap.innerHTML =
+      '<div class="ctrl-label">Simulate the exported Verilog</div>' +
+      '<p style="font-size:13px;margin:4px 0 8px">Simulates <b>exactly the subset this page exports</b>: a module header, <span class="mono">input</span>/<span class="mono">output</span>/<span class="mono">wire</span> declarations, <span class="mono">assign</span> statements using <span class="mono">~ &amp; | ^</span> and parentheses, and saved-chip submodules. The text above is parsed back and driven with test vectors — it is not a general Verilog simulator, and makes no claim to be.</p>' +
+      '<div class="share-row"><button type="button" class="btn primary" id="sbVsimBtn">Simulate the exported Verilog</button>' +
+      '<button type="button" class="btn" id="sbVsimAll" disabled>Run all combinations</button>' +
+      '<span class="mono" id="sbVsimNote" style="font-size:12px;color:var(--muted)"></span></div>' +
+      '<div class="vsim-ins" id="sbVsimIns"></div>' +
+      '<div class="vsim-out" id="sbVsimOut"></div>' +
+      '<div id="sbVsimRows"></div>';
+    block.appendChild(wrap);
+    const S = { mods: null, top: "sandbox_design", portMap: {}, inPorts: [], outPorts: [], vals: {} };
+    const labelOf = port => { const inv = {}; Object.keys(S.portMap).forEach(l => inv[S.portMap[l]] = l); return inv[port] || port; };
+    function evalNow() {
+      if (!S.mods) return;
+      const nets = vlgEvalModule(S.mods, S.top, S.vals, 0);
+      const out = $W("sbVsimOut"); if (!out) return;
+      const vtxt = S.outPorts.map(p => labelOf(p) + " = " + (nets[p] === undefined ? "?" : nets[p])).join(" · ");
+      let eng = "";
+      try {
+        const labelIns = {}; S.inPorts.forEach(p => labelIns[labelOf(p)] = S.vals[p] ? 1 : 0);
+        const r = sbxEval(sb.design, labelIns);
+        if (r) eng = S.outPorts.every(p => r[labelOf(p)] === nets[p]) ? " — the gate engine agrees on this vector ✓" : " — the gate engine DISAGREES on this vector ✗";
+      } catch (e) {}
+      out.textContent = "Outputs: " + vtxt + eng;
+    }
+    function build() {
+      const note = $W("sbVsimNote");
+      sbRefreshChipLib();
+      const gen = window.VERILOGX.generate(sb.design);
+      if (gen.error) { note.textContent = "Nothing to simulate yet: " + gen.error; return false; }
+      const codeEl = $W("sbVerilogCode"); if (codeEl) codeEl.textContent = gen.text;
+      const det = $W("sbVerilogDetails"); if (det) det.open = true;
+      S.mods = vlgParseModules(gen.text);
+      S.top = S.mods["sandbox_design"] ? "sandbox_design" : Object.keys(S.mods)[0];
+      S.portMap = gen.portMap || {};
+      const mod = S.mods[S.top]; if (!mod) { note.textContent = "The exported text did not parse back — that is a bug; the self-check below the export reports it too."; return false; }
+      S.inPorts = mod.ports.filter(p => p.dir === "input").map(p => p.name);
+      S.outPorts = mod.ports.filter(p => p.dir === "output").map(p => p.name);
+      S.vals = {}; S.inPorts.forEach(p => S.vals[p] = 0);
+      const ins = $W("sbVsimIns"); ins.innerHTML = "";
+      S.inPorts.forEach(p => {
+        const b = document.createElement("button");
+        b.type = "button"; b.className = "ux-bigbtn"; b.setAttribute("aria-pressed", "false");
+        b.textContent = labelOf(p) + " = 0";
+        b.addEventListener("click", () => { S.vals[p] = S.vals[p] ? 0 : 1; b.textContent = labelOf(p) + " = " + S.vals[p]; b.setAttribute("aria-pressed", S.vals[p] ? "true" : "false"); evalNow(); });
+        ins.appendChild(b);
+      });
+      const all = $W("sbVsimAll");
+      if (S.inPorts.length <= 6) { all.disabled = false; all.textContent = "Run all " + (1 << S.inPorts.length) + " combinations"; }
+      else { all.disabled = true; all.textContent = "All combinations needs ≤ 6 inputs (this design has " + S.inPorts.length + ")"; }
+      note.textContent = "Parsed the exported text back: " + Object.keys(S.mods).length + " module(s), " + S.inPorts.length + " input(s), " + S.outPorts.length + " output(s). Toggle inputs to drive it.";
+      evalNow();
+      return true;
+    }
+    function runAll() {
+      if (!S.mods) return null;
+      const truth = sbxTruth(sb.design);
+      if (!truth) return null;
+      let matched = 0; const diverging = [];
+      truth.forEach(row => {
+        const inVals = {};
+        S.inPorts.forEach(p => inVals[p] = row.ins[labelOf(p)] ? 1 : 0);
+        const nets = vlgEvalModule(S.mods, S.top, inVals, 0);
+        const ok = S.outPorts.every(p => nets[p] === row.outs[labelOf(p)]);
+        if (ok) matched++;
+        else diverging.push({ ins: Object.assign({}, row.ins), engine: Object.assign({}, row.outs), verilog: S.outPorts.map(p => labelOf(p) + "=" + (nets[p] === undefined ? "?" : nets[p])).join(" ") });
+      });
+      return { rows: truth.length, matched, diverging };
+    }
+    $W("sbVsimBtn").addEventListener("click", build);
+    $W("sbVsimAll").addEventListener("click", () => {
+      const r = runAll(); const host = $W("sbVsimRows"); if (!r || !host) return;
+      if (!r.diverging.length) {
+        host.innerHTML = '<p class="progress-line" style="color:var(--green);font-weight:700">The parsed-back Verilog agrees with the gate engine on all ' + r.rows + " input combinations ✓</p>";
+      } else {
+        host.innerHTML = '<p class="progress-line" style="color:var(--red);font-weight:700">Agreement on ' + r.matched + " of " + r.rows + " rows — diverging rows:</p>" +
+          '<table class="vsim-table"><thead><tr><th>Inputs</th><th>Engine outputs</th><th>Verilog outputs</th></tr></thead><tbody>' +
+          r.diverging.slice(0, 8).map(d => "<tr><td>" + escW(Object.keys(d.ins).map(k => k + "=" + d.ins[k]).join(" ")) + "</td><td>" + escW(Object.keys(d.engine).map(k => k + "=" + d.engine[k]).join(" ")) + "</td><td>" + escW(d.verilog) + "</td></tr>").join("") +
+          "</tbody></table>";
+      }
+    });
+    window.__fgsVsim = { build, runAll, state: S };
+  })();
+
+  /* ================= 5c) sandbox keyboard hint, visible ================= */
+  (function sbHint() {
+    const wrapEl = $W("sbWrap"); if (!wrapEl || $W("sbKbHint")) return;
+    const p = document.createElement("p");
+    p.className = "sb-kb-hint"; p.id = "sbKbHint";
+    p.innerHTML = "<b>Keyboard:</b> click or Tab into the canvas — <b>arrow keys</b> move the dashed cursor, or the selected part (Shift = bigger steps); <b>Enter</b> places the armed part or flips a selected switch; <b>F</b> flips a switch; <b>Delete</b> removes the selected part. Pins are buttons: Tab to one and press Enter to wire it.";
+    wrapEl.parentNode.insertBefore(p, wrapEl.nextSibling);
+  })();
+
+  /* ================= verification handles + self-tests ================= */
+  function nestingSelfTest() {
+    const savedLib = SBX_CHIP_LIB;
+    try {
+      const haDesign = { seq: 10, parts: [
+        sbxPart(1, "in", "A", 0.6, 2), sbxPart(2, "in", "B", 0.6, 5),
+        sbxPart(3, "gate", "S", 5, 2, { type: "XOR" }), sbxPart(4, "gate", "C", 5, 5, { type: "AND" }),
+        sbxPart(5, "out", "S", 10.6, 2), sbxPart(6, "out", "C", 10.6, 5)
+      ], wires: [
+        sbxWire(1, "o", 3, "i0"), sbxWire(2, "o", 3, "i1"),
+        sbxWire(1, "o", 4, "i0"), sbxWire(2, "o", 4, "i1"),
+        sbxWire(3, "o", 5, "i"), sbxWire(4, "o", 6, "i")
+      ] };
+      const faDesign = { seq: 20, parts: [
+        sbxPart(1, "in", "A", 0.6, 1), sbxPart(2, "in", "B", 0.6, 3.4), sbxPart(3, "in", "Cin", 0.6, 5.8),
+        sbxPart(4, "chip", "HA1", 4.2, 2.2, { chip: "HA" }), sbxPart(5, "chip", "HA2", 7.6, 3.6, { chip: "HA" }),
+        sbxPart(6, "gate", "OR", 10, 5.6, { type: "OR" }),
+        sbxPart(7, "out", "Sum", 11.3, 3.4), sbxPart(8, "out", "Cout", 11.3, 6.2)
+      ], wires: [
+        sbxWire(1, "o", 4, "A"), sbxWire(2, "o", 4, "B"),
+        sbxWire(4, "S", 5, "A"), sbxWire(3, "o", 5, "B"),
+        sbxWire(4, "C", 6, "i0"), sbxWire(5, "C", 6, "i1"),
+        sbxWire(5, "S", 7, "i"), sbxWire(6, "o", 8, "i")
+      ] };
+      SBX_CHIP_LIB = Object.assign({}, savedLib, {
+        HA: { name: "HA", inputs: ["A", "B"], outputs: ["S", "C"], design: haDesign },
+        FA: { name: "FA", inputs: ["A", "B", "Cin"], outputs: ["Sum", "Cout"], design: faDesign }
+      });
+      const topDesign = { seq: 30, parts: [
+        sbxPart(1, "in", "A", 0.6, 1), sbxPart(2, "in", "B", 0.6, 3.4), sbxPart(3, "in", "Cin", 0.6, 5.8),
+        sbxPart(4, "chip", "FA1", 5.4, 3.4, { chip: "FA" }),
+        sbxPart(5, "out", "Sum", 11.3, 2.6), sbxPart(6, "out", "Cout", 11.3, 5.4)
+      ], wires: [
+        sbxWire(1, "o", 4, "A"), sbxWire(2, "o", 4, "B"), sbxWire(3, "o", 4, "Cin"),
+        sbxWire(4, "Sum", 5, "i"), sbxWire(4, "Cout", 6, "i")
+      ] };
+      const truth = sbxTruth(topDesign);
+      let ok = !!truth && truth.length === 8;
+      if (truth) truth.forEach(r => { const s = r.ins.A + r.ins.B + r.ins.Cin; if (r.outs.Sum !== (s & 1) || r.outs.Cout !== ((s >> 1) & 1)) ok = false; });
+      const vres = window.VERILOGX ? window.VERILOGX.verifyDesign(topDesign) : null;
+      /* cycle: a chip whose design places itself */
+      SBX_CHIP_LIB = Object.assign({}, SBX_CHIP_LIB, { LOOP: { name: "LOOP", inputs: ["A"], outputs: ["Y"], design: { seq: 1, parts: [
+        sbxPart(1, "in", "A", 0.6, 3), sbxPart(2, "chip", "L1", 5, 3, { chip: "LOOP" }), sbxPart(3, "out", "Y", 10.6, 3)
+      ], wires: [sbxWire(1, "o", 2, "A"), sbxWire(2, "Y", 3, "i")] } } });
+      const cyc = sbxBuildDef({ seq: 2, parts: [
+        sbxPart(1, "in", "A", 0.6, 3), sbxPart(2, "chip", "LP", 5, 3, { chip: "LOOP" }), sbxPart(3, "out", "Y", 10.6, 3)
+      ], wires: [sbxWire(1, "o", 2, "A"), sbxWire(2, "Y", 3, "i")] });
+      const cycleRefused = !cyc.def && cyc.errors.some(e => /contains itself/.test(e));
+      const wouldCycle = sbxChipWouldCycle("HA", ["FA"]) === true && sbxChipWouldCycle("BRANDNEW", ["HA"]) === false;
+      /* share encoding now embeds chips transitively */
+      const enc = sbxEncodeDesign(topDesign);
+      const dec = sbxDecodeDesign(enc);
+      const embedsBoth = !!(dec.chips && dec.chips.FA && dec.chips.HA);
+      return { depth2FullAdder: ok, rows: truth ? truth.length : 0, verilogDepth2: vres ? { ok: vres.ok, rows: vres.rows, matched: vres.matched } : null, cycleRefused, wouldCycle, embedsBoth };
+    } catch (e) {
+      return { error: String(e && e.message || e) };
+    } finally { SBX_CHIP_LIB = savedLib; }
+  }
+  function coverage() {
+    materializeAllGallery();
+    const cat = catalogW();
+    const missing = [];
+    cat.forEach(a => { if (!document.querySelector('.ux-act[data-key="' + cssEsc(a.key) + '"]')) missing.push(a.key); });
+    return { total: cat.length, withCards: cat.length - missing.length, missing };
+  }
+  window.__fgsW = {
+    open: openActivity,
+    coverage,
+    catalog: catalogW,
+    handout: id => (typeof RE_LAB_INDEX !== "undefined" && RE_LAB_INDEX[id]) ? handoutHTML(RE_LAB_INDEX[id]) : null,
+    printHandout,
+    nesting: nestingSelfTest,
+    perf: { domNodes: document.querySelectorAll("*").length, atMs: Math.round(performance.now()), galleryCardsNow: document.querySelectorAll(".ux-act").length }
+  };
+  try { window.__fgsW.selfTest = { nesting: nestingSelfTest() }; } catch (e) { window.__fgsW.selfTest = { error: String(e && e.message || e) }; }
+
+  /* initial gallery build under the new rules (lazy + matcher live) */
+  if (RJ) RJ.buildGallery();
+  decorateGallery();
 })();
 </script>
