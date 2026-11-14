@@ -8396,7 +8396,8 @@ RE_WIDGETS.sap = function (root) {
   const PROGS = {
     add: { name: "P1 · Add two numbers", mem: [0x09, 0x1A, 0x30, 0x40, 0, 0, 0, 0, 0, 20, 22, 0, 0, 0, 0, 0], src: "LDA 9 · ADD 10 · OUT · HLT — data: mem[9]=20, mem[10]=22" },
     count: { name: "P2 · Count down with a loop", mem: [0x09, 0x30, 0x2A, 0x65, 0x51, 0x40, 0, 0, 0, 3, 1, 0, 0, 0, 0, 0], src: "LDA 9 · OUT · SUB 10 · JZ 5 · JMP 1 · HLT — data: mem[9]=3, mem[10]=1" },
-    sta: { name: "P3 · Store and reload (STA)", mem: [0x09, 0x1A, 0x7B, 0x0C, 0x1B, 0x30, 0x40, 0, 0, 17, 25, 0, 0, 0, 0, 0], src: "LDA 9 · ADD 10 · STA 11 · LDA 12 (=0) · ADD 11 · OUT · HLT — data: mem[9]=17, mem[10]=25" }
+    sta: { name: "P3 · Store and reload (STA)", mem: [0x09, 0x1A, 0x7B, 0x0C, 0x1B, 0x30, 0x40, 0, 0, 17, 25, 0, 0, 0, 0, 0], src: "LDA 9 · ADD 10 · STA 11 · LDA 12 (=0) · ADD 11 · OUT · HLT — data: mem[9]=17, mem[10]=25" },
+    custom: { name: "Custom — from the two-pass assembler", mem: [0x06, 0x30, 0x27, 0x65, 0x51, 0x40, 3, 1, 0, 0, 0, 0, 0, 0, 0, 0], src: "LDA 6 · OUT · SUB 7 · JZ 5 · JMP 1 · HLT — the assembler's Example 1 (countdown), assembled by the two-pass assembler; assemble your own there and use its Send button to replace this image" }
   };
   /* Interrupt extension: a fixed handler lives at address 13 — OUT
      (0x30) followed by RETI (0x80, opcode 8, the one instruction the
@@ -8408,7 +8409,7 @@ RE_WIDGETS.sap = function (root) {
   const HANDLER_ADDR = 13, RETI_BYTE = 0x80;
   const OPNAMES = ["LDA", "ADD", "SUB", "OUT", "HLT", "JMP", "JZ", "STA", "RETI"];
   root.innerHTML = '<p class="what">A SAP-1-style 8-bit CPU: 16 bytes of RAM shared by program and data, an accumulator A, a program counter, and 8 opcodes — <span class="mono">LDA, ADD, SUB, OUT, HLT, JMP, JZ, STA</span> — each encoded as one byte (opcode in the high nibble, address in the low). Step the fetch–execute cycle and watch A, PC and the output. The three programs were hand-assembled and hand-traced; the stepper executes them for real.</p>' +
-    '<div class="tool-controls"><label>Program <select id="sapProg" class="tool-num" style="width:auto"><option value="add">' + PROGS.add.name + '</option><option value="count">' + PROGS.count.name + '</option><option value="sta">' + PROGS.sta.name + "</option></select></label>" +
+    '<div class="tool-controls"><label>Program <select id="sapProg" class="tool-num" style="width:auto"><option value="add">' + PROGS.add.name + '</option><option value="count">' + PROGS.count.name + '</option><option value="sta">' + PROGS.sta.name + '</option><option value="custom">' + PROGS.custom.name + "</option></select></label>" +
     '<button type="button" class="btn primary" id="sapStep">Step ▸</button><button type="button" class="btn" id="sapRun">Run to HLT</button><button type="button" class="btn" id="sapReset">Reset</button>' +
     '<button type="button" class="btn" id="sapInt" aria-pressed="false">⚡ Interrupt</button></div>' +
     '<div class="decimal-line" id="sapSrc"></div>' +
@@ -8507,6 +8508,20 @@ RE_WIDGETS.sap = function (root) {
       : "✗ The uninterrupted program finishes with A = " + base.A + " (run it without touching Interrupt and check). Fire the interrupt mid-run, return, and confirm the interrupted run lands on exactly that value too.";
   });
   RE_WIDGETS.sap.stepOnce = stepOnce; RE_WIDGETS.sap.load = load;
+  /* Round Z wiring: the two-pass assembler sends its assembled
+     16-byte image here; it becomes the Custom program, selected
+     and loaded, so this stepper's own Step / Run controls execute
+     the student's bytes. load() recomputes the uninterrupted
+     baseline from the same image, so the guided-task check and the
+     finish message stay honest for custom programs too. */
+  window.__sap1LoadCustom = function (mem, srcText) {
+    const m = (mem || []).slice(0, 16); while (m.length < 16) m.push(0);
+    PROGS.custom.mem = m;
+    if (srcText) PROGS.custom.src = srcText;
+    const sel = root.querySelector("#sapProg"); if (sel) sel.value = "custom";
+    load();
+    return true;
+  };
   load();
 };
 
@@ -22542,5 +22557,688 @@ select.rx-sel{max-width:100%}
   try {
     window.__roundYSelfTest = { crc: crcVerify(), hazard: hazVerify(), mesi: mesiVerify() };
   } catch (e) { window.__roundYSelfTest = { error: String(e && e.message || e) }; }
+})();
+</script>
+
+<style>
+/* ===== Round Z — barrel shifter · R-2R DAC · SAP-1 assembler ===== */
+.rz-src{width:100%;box-sizing:border-box;font-family:"IBM Plex Mono",monospace;font-size:13.5px;line-height:1.55;padding:10px 12px;border:1.6px solid var(--line2);border-radius:8px;background:var(--panel2);color:var(--ink);min-height:200px;resize:vertical}
+.rz-src:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+.rz-errlist{font-family:"IBM Plex Mono",monospace;font-size:12.5px;line-height:1.7;color:var(--red);white-space:pre-wrap;margin-top:8px}
+.rz-symtab{font-family:"IBM Plex Mono",monospace}
+.rz-dactab td,.rz-dactab th{text-align:center}
+.rz-cur-row td{background:var(--amber-soft);font-weight:700}
+</style>
+<script>
+"use strict";
+/* ================================================================
+   ROUND Z — three new labs, each computed by its own model:
+   1) Barrel shifter — a 4-bit logical shifter built as TWO stages
+      of 2-to-1 muxes (stage 1 shifts by 1 under S0, stage 2 shifts
+      by 2 under S1), each mux wired from gates exactly like the
+      site's defMux2 block (2 AND + 1 OR per mux, one shared NOT
+      per stage select). Two netlists (left / right) on the site
+      engine (window.LAB); verify() enumerates all 16 data x 4
+      amounts x 2 directions = 128 combinations against plain
+      arithmetic logical shift.
+   2) R-2R ladder DAC — 4 bits (16 codes: few enough that every
+      step is individually visible, the same default width as the
+      ADC visualiser it mirrors). Every voltage is computed from
+      Vout = Vref x code / 2^n with Vref = 5 V; verify() recomputes
+      each code independently as the sum of its bit weights
+      (Vref/2 + Vref/4 + Vref/8 + Vref/16) and checks the step is
+      constant. A binary counter drives the code.
+   3) Two-pass assembler for the SAP-1 — the instruction set is
+      exactly the site's SAP_OPS (LDA ADD SUB OUT HLT JMP JZ STA,
+      byte = opcode<<4 | operand); DB is an assembler directive
+      that lays down one data byte, not an instruction. Pass 1
+      builds the symbol table and counts bytes; pass 2 emits the
+      16-byte memory image. Errors carry line numbers: unknown
+      mnemonic, undefined label, duplicate label, out-of-range
+      address/operand, missing operand, operand on OUT/HLT,
+      program longer than 16 bytes. Assembled bytes run on
+      window.RE.reSAP1 — the same engine function the SAP-1
+      capstone stepper and the microprogrammed variant are both
+      verified against. The capstone stepper is also wired for
+      real: its widget exposes window.__sap1LoadCustom (Round Z
+      patch to RE_WIDGETS.sap, adding a Custom program slot), and
+      the assembler's Send button loads the assembled image into
+      that stepper, which then steps it with its own controls.
+      The microprogrammed variant shares the 16-byte image format
+      and semantics but loads only its built-in programs.
+   All three start paused: nothing auto-runs.
+   ================================================================ */
+(function roundZ() {
+  const $Z = id => document.getElementById(id);
+  const escZ = s => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+  function mulberryZ(seed) { let a = seed >>> 0; return function () { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+  function jumpZ(id) { const el = id && $Z(id); if (el) setTimeout(() => el.scrollIntoView({ behavior: "smooth", block: "start" }), 60); }
+  function clickMenuKeyZ(key) { const it = document.querySelector('#menuList .menu-item[data-key="' + key + '"]'); if (it) { it.click(); return true; } return false; }
+  function fbSetZ(el, ok, msg) { if (!el) return; el.textContent = (ok ? "✓ " : "✗ ") + msg; el.style.color = ok ? "var(--green)" : "var(--red)"; }
+  function optBtnsZ(host, labels, onPick) {
+    host.innerHTML = "";
+    labels.forEach((lab, i) => {
+      const b = document.createElement("button"); b.type = "button"; b.className = "btn"; b.textContent = lab;
+      b.addEventListener("click", () => onPick(i, b));
+      host.appendChild(b);
+    });
+  }
+  const LABE = window.LAB;
+
+  /* ================================================================
+     1) BARREL SHIFTER — two mux stages: shift-by-1, then shift-by-2.
+     ================================================================ */
+  function defShifter(dir) {
+    const gates = [
+      { id: "ns0", type: "NOT", ins: ["S0"], out: "nS0" },
+      { id: "ns1", type: "NOT", ins: ["S1"], out: "nS1" } ];
+    const srcStage1 = i => { const j = dir === "L" ? i - 1 : i + 1; return (j < 0 || j > 3) ? "ZERO" : "D" + j; };
+    const srcStage2 = i => { const j = dir === "L" ? i - 2 : i + 2; return (j < 0 || j > 3) ? "ZERO" : "M" + j; };
+    for (let i = 0; i < 4; i++) {
+      gates.push({ id: "a1s" + i, type: "AND", ins: [srcStage1(i), "S0"], out: "t1s" + i });
+      gates.push({ id: "a1k" + i, type: "AND", ins: ["D" + i, "nS0"], out: "t1k" + i });
+      gates.push({ id: "o1" + i, type: "OR", ins: ["t1s" + i, "t1k" + i], out: "M" + i });
+    }
+    for (let i = 0; i < 4; i++) {
+      gates.push({ id: "a2s" + i, type: "AND", ins: [srcStage2(i), "S1"], out: "t2s" + i });
+      gates.push({ id: "a2k" + i, type: "AND", ins: ["M" + i, "nS1"], out: "t2k" + i });
+      gates.push({ id: "o2" + i, type: "OR", ins: ["t2s" + i, "t2k" + i], out: "Y" + i });
+    }
+    return { inputs: ["D3", "D2", "D1", "D0", "S1", "S0"], outputs: ["Y3", "Y2", "Y1", "Y0"], gates };
+  }
+  const shDefL = LABE.computeLevels(defShifter("L"));
+  const shDefR = LABE.computeLevels(defShifter("R"));
+  function shBits(prefix, v) { const o = {}; for (let i = 0; i < 4; i++) o[prefix + i] = v[prefix + i]; return o; }
+  function shiftEval(data, amt, dir) {
+    const def = dir === "L" ? shDefL : shDefR;
+    const ins = { S1: (amt >> 1) & 1, S0: amt & 1 };
+    for (let i = 0; i < 4; i++) ins["D" + i] = (data >> i) & 1;
+    const v = LABE.evaluateAll(def, ins);
+    const pack = p => v[p + 3] * 8 + v[p + 2] * 4 + v[p + 1] * 2 + v[p + 0];
+    return { y: pack("Y"), mid: pack("M"), vals: v };
+  }
+  function shiftRef(data, amt, dir) { return dir === "L" ? (data << amt) & 15 : data >> amt; }
+  function shiftVerify() {
+    let n = 0, ok = 0;
+    for (let data = 0; data < 16; data++) for (let amt = 0; amt < 4; amt++) for (const dir of ["L", "R"]) {
+      n++; if (shiftEval(data, amt, dir).y === shiftRef(data, amt, dir)) ok++;
+    }
+    const countsSame = shDefL.gates.length === shDefR.gates.length;
+    return { combos: n, ok, gateCount: shDefL.gates.length, muxCount: shDefL.gates.filter(g => g.type === "OR").length,
+      delay: shDefL.timing ? shDefL.timing.total : null, countsSame, pass: ok === n && countsSame };
+  }
+  const SH_V = shiftVerify();
+  const bin4 = v => [(v >> 3) & 1, (v >> 2) & 1, (v >> 1) & 1, v & 1].join("");
+
+  const sh = { data: 11, amt: 1, dir: "L" };
+  const shSec = document.createElement("section");
+  shSec.className = "card stage-card"; shSec.id = "shifterCard"; shSec.style.marginTop = "16px";
+  shSec.innerHTML =
+    "<h2>Barrel shifter — a shift is a mux network, not a loop</h2>" +
+    '<p class="what">Software shifts in a loop: move one place, repeat. Hardware cannot afford the wait, so a <b>barrel shifter</b> lays out every possible shift at once and lets multiplexers choose. This one is 4 bits wide and built the standard way — in <b>stages</b>: stage 1 shifts by <b>1</b> place if control bit <b>S0</b> is set, stage 2 shifts by <b>2</b> places if <b>S1</b> is set, and the two stages together reach every amount 0–3 in a single pass through the network (amount = 2·S1 + S0). Each bit position in each stage is one <b>2-to-1 mux</b> wired from gates exactly like the site\'s prebuilt mux block: pick the neighbour or keep your own bit. Places shifted past the edge fill with <b>0</b> — this is a <i>logical</i> shift. Direction is a wiring choice: the left and right networks below are mirror images, and both are real netlists evaluated by the gate engine — nothing here is computed by a hidden <span class="mono">&lt;&lt;</span> operator. This is the shift the site\'s ALU never grew: the ALU control lab decodes add, subtract, AND and OR, and the SAP-1\'s eight opcodes have no shift either — here is the hardware that would supply one.</p>' +
+    '<div class="schematic-box"><svg viewBox="0 0 920 120" role="img" aria-label="Barrel shifter structure: data enters stage 1 (shift by 1 under S0), then stage 2 (shift by 2 under S1), then leaves as the result" style="display:block;width:100%;height:auto">' +
+    '<rect x="30" y="34" width="150" height="52" rx="7" style="fill:var(--panel2);stroke:var(--line2)"/><text class="ry-lab" x="105" y="58" style="text-anchor:middle">data in</text><text class="ry-sub" x="105" y="76" style="text-anchor:middle" id="shSvgD">1011</text>' +
+    '<path d="M180 60 H250" style="stroke:var(--ink);stroke-width:2"/>' +
+    '<rect x="250" y="26" width="220" height="68" rx="7" style="fill:var(--panel2);stroke:var(--line2)"/><text class="ry-lab" x="360" y="52" style="text-anchor:middle">STAGE 1 · 4 muxes</text><text class="ry-sub" x="360" y="70" style="text-anchor:middle" id="shSvgS1">shift by 1 if S0 = 1</text><text class="ry-sub" x="360" y="86" style="text-anchor:middle" id="shSvgM">middle: 0110</text>' +
+    '<path d="M470 60 H540" style="stroke:var(--ink);stroke-width:2"/>' +
+    '<rect x="540" y="26" width="220" height="68" rx="7" style="fill:var(--amber-soft);stroke:var(--amber)"/><text class="ry-lab" x="650" y="52" style="text-anchor:middle">STAGE 2 · 4 muxes</text><text class="ry-sub" x="650" y="70" style="text-anchor:middle" id="shSvgS2">shift by 2 if S1 = 1</text><text class="ry-sub" x="650" y="86" style="text-anchor:middle">one pass, no loop</text>' +
+    '<path d="M760 60 H806" style="stroke:var(--ink);stroke-width:2"/>' +
+    '<text class="ry-lab" x="812" y="58">out</text><text class="ry-sub" x="812" y="76" id="shSvgY">0110</text>' +
+    "</svg></div>" +
+    '<div class="ctrl-label">Data — 4 bits, click to set (D3 D2 D1 D0)</div>' +
+    '<div class="seq-state" id="shData" style="margin-top:4px"></div>' +
+    '<div class="tool-controls">' +
+    '<label>Direction <span class="seg" role="group" aria-label="Shift direction" id="shDirSeg"><button type="button" data-sdir="L" aria-pressed="true">Left ◀</button><button type="button" data-sdir="R" aria-pressed="false">Right ▶</button></span></label>' +
+    '<label>Amount <span class="seg" role="group" aria-label="Shift amount" id="shAmtSeg"><button type="button" data-samt="0" aria-pressed="false">0</button><button type="button" data-samt="1" aria-pressed="true">1</button><button type="button" data-samt="2" aria-pressed="false">2</button><button type="button" data-samt="3" aria-pressed="false">3</button></span></label></div>' +
+    '<div class="ctrl-label">After stage 1 (shift by 1 if S0)</div>' +
+    '<div class="seq-state" id="shMid" style="margin-top:4px"></div>' +
+    '<div class="ctrl-label">Output — after stage 2 (shift by 2 if S1)</div>' +
+    '<div class="seq-state" id="shOut" style="margin-top:4px"></div>' +
+    '<div class="decimal-line" id="shMsg" aria-live="polite"></div>' +
+    '<div class="seq-state" id="shCost" style="margin-top:6px"></div>' +
+    '<div class="decimal-line" id="shVerifyLine" aria-live="polite"></div>' +
+    '<div class="lab-check"><span class="lab-check-q" id="shQ"></span><span id="shOpts" style="display:flex;gap:6px;flex-wrap:wrap"></span><span class="lab-check-fb" id="shFb" aria-live="polite"></span></div>' +
+    '<div class="share-row"><button type="button" class="btn" id="shNewQ">New question</button>' +
+    '<button type="button" class="btn" data-shlink="mux">The 2-to-1 mux block it is built from →</button>' +
+    '<button type="button" class="btn" data-shlink="alucontrol">ALU control — the decode this feeds →</button>' +
+    '<button type="button" class="btn" data-shlink="sap">The SAP-1 datapath (no shift opcode — yet) →</button></div>' +
+    '<p class="cp-formal adv-only">Structure, counted from the netlist itself at load: 2 stages × 4 bit positions = 8 two-to-one muxes; each mux is 2 AND + 1 OR, and each stage\'s select inverter is shared by its four muxes, so the network totals 8×3 + 2 = 26 gates — the figure in the readout above is the engine\'s own gate count, not a caption. An n-bit barrel shifter needs log2(n) stages, which is why shifts cost area, not time: widening to 8 bits means 3 stages and 24 muxes, while a loop-in-hardware (one shifter stage reused) would take up to n clock cycles. The netlists were verified exhaustively before shipping: all 128 combinations of data × amount × direction match the arithmetic logical shift.</p>';
+  const hazEl = $Z("hazardCard");
+  if (hazEl && hazEl.parentNode) hazEl.parentNode.insertBefore(shSec, hazEl.nextSibling);
+  else { const cv = $Z("circuitsView"); if (cv) cv.appendChild(shSec); }
+  shSec.querySelectorAll("[data-shlink]").forEach(b => b.addEventListener("click", () => {
+    const k = b.dataset.shlink;
+    if (k === "mux") { if (!clickMenuKeyZ("circ-mux4")) jumpZ("shifterCard"); }
+    else if (k === "alucontrol") { if (!clickMenuKeyZ("org-alucontrol")) jumpZ("shifterCard"); }
+    else { if (!clickMenuKeyZ("lab-arch-10")) jumpZ("shifterCard"); }
+  }));
+  function shCells(host, value, prefix, clickable) {
+    host.innerHTML = "";
+    [3, 2, 1, 0].forEach(i => {
+      const bit = (value >> i) & 1;
+      const c = document.createElement(clickable ? "button" : "div");
+      if (clickable) c.type = "button";
+      c.className = "seq-cell" + (bit ? " one" : "");
+      c.innerHTML = "<b>" + bit + '</b><span class="ry-role">' + prefix + i + "</span>";
+      if (clickable) c.addEventListener("click", () => { sh.data ^= (1 << i); shRender(); });
+      host.appendChild(c);
+    });
+  }
+  function shRender() {
+    const r = shiftEval(sh.data, sh.amt, sh.dir);
+    shCells(shSec.querySelector("#shData"), sh.data, "D", true);
+    shCells(shSec.querySelector("#shMid"), r.mid, "M", false);
+    shCells(shSec.querySelector("#shOut"), r.y, "Y", false);
+    shSec.querySelector("#shSvgD").textContent = bin4(sh.data);
+    shSec.querySelector("#shSvgM").textContent = "middle: " + bin4(r.mid);
+    shSec.querySelector("#shSvgY").textContent = bin4(r.y);
+    shSec.querySelector("#shSvgS1").textContent = "shift by 1 if S0 = 1 · S0 = " + (sh.amt & 1);
+    shSec.querySelector("#shSvgS2").textContent = "shift by 2 if S1 = 1 · S1 = " + ((sh.amt >> 1) & 1);
+    const arrow = sh.dir === "L" ? "<<" : ">>";
+    shSec.querySelector("#shMsg").innerHTML = "<b>" + bin4(sh.data) + " (" + sh.data + ") " + arrow + " " + sh.amt + " = " + bin4(r.y) + " (" + r.y + ")</b> — stage 1 " +
+      ((sh.amt & 1) ? "shifted by 1 to " + bin4(r.mid) : "passed the data through unchanged (" + bin4(r.mid) + ")") +
+      ", stage 2 " + ((sh.amt >> 1) ? "shifted by 2" : "passed it through") + ". Bits that fell off the " + (sh.dir === "L" ? "left" : "right") + " end are gone; the vacated places are the ZERO nets wired into the edge muxes.";
+    const cost = shSec.querySelector("#shCost"); cost.innerHTML = "";
+    [["muxes (2 stages × 4 bits)", SH_V.muxCount], ["gates, counted on the netlist", SH_V.gateCount], ["stages", 2], ["settled delay, engine timing model", (SH_V.delay == null ? "—" : SH_V.delay + " ns")]].forEach(([k, v]) => {
+      const c = document.createElement("div"); c.className = "seq-cell";
+      c.innerHTML = "<b>" + v + '</b><span class="ry-role">' + k + "</span>"; cost.appendChild(c);
+    });
+    shSec.querySelector("#shVerifyLine").textContent = "Engine check, run at load: " + SH_V.ok + " of " + SH_V.combos + " combinations (every 4-bit data value × amounts 0–3 × both directions) match the arithmetic logical shift, computed by enumerating the netlists — not by trusting this readout.";
+  }
+  function shSegWire(segId, attr, set) {
+    shSec.querySelector(segId).querySelectorAll("button").forEach(b => b.addEventListener("click", () => {
+      shSec.querySelector(segId).querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x === b ? "true" : "false"));
+      set(b.dataset[attr]); shRender();
+    }));
+  }
+  shSegWire("#shDirSeg", "sdir", v => sh.dir = v);
+  shSegWire("#shAmtSeg", "samt", v => sh.amt = +v);
+  let shQn = 0;
+  function shQuestion() {
+    const rng = mulberryZ(777 + shQn * 131);
+    const data = 1 + Math.floor(rng() * 15), amt = Math.floor(rng() * 4), dir = shQn % 2 === 0 ? "L" : "R";
+    const expected = shiftEval(data, amt, dir).y;
+    shSec.querySelector("#shQ").textContent = "Predict, then check: data " + bin4(data) + " (" + data + "), shift " + (dir === "L" ? "left" : "right") + " by " + amt + ". What comes out?";
+    const cand = Array.from(new Set([expected, shiftRef(data, amt, dir === "L" ? "R" : "L"), shiftRef(data, (amt + 1) % 4, dir), data]));
+    for (let i = cand.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); const t = cand[i]; cand[i] = cand[j]; cand[j] = t; }
+    const host = shSec.querySelector("#shOpts"), fb = shSec.querySelector("#shFb");
+    fb.textContent = "";
+    optBtnsZ(host, cand.map(v => bin4(v) + " (" + v + ")"), i => {
+      const v = cand[i];
+      fbSetZ(fb, v === expected, v === expected
+        ? "Right — stage by stage: S0 = " + (amt & 1) + " moves it " + ((amt & 1) ? "one place" : "not at all") + ", S1 = " + ((amt >> 1) & 1) + " moves it " + ((amt >> 1) ? "two more" : "not at all") + ", landing on " + bin4(expected) + ". Set the lab above to the same values and watch the middle row agree."
+        : "Not that — set data " + bin4(data) + ", direction " + (dir === "L" ? "left" : "right") + ", amount " + amt + " above and read the output row; then trace which stage moved the bits you lost.");
+    });
+    window.__shQuestion = { data, amt, dir, expected };
+  }
+  shSec.querySelector("#shNewQ").addEventListener("click", () => { shQn++; shQuestion(); });
+  shRender(); shQuestion();
+
+  /* ================================================================
+     2) R-2R LADDER DAC — 4 bits, Vref = 5 V, counter-driven.
+     ================================================================ */
+  const DAC_BITS = 4, DAC_VREF = 5, DAC_CODES = 16;
+  const DAC_STEP = DAC_VREF / DAC_CODES;
+  function dacVout(code) { return DAC_VREF * code / DAC_CODES; }
+  function dacVerify() {
+    let ok = true, maxErr = 0;
+    for (let code = 0; code < DAC_CODES; code++) {
+      /* independent recomputation: sum of the set bits' ladder weights */
+      let sum = 0;
+      for (let i = 0; i < DAC_BITS; i++) if ((code >> i) & 1) sum += DAC_VREF / Math.pow(2, DAC_BITS - i);
+      const err = Math.abs(sum - dacVout(code));
+      if (err > maxErr) maxErr = err;
+      if (err > 1e-12) ok = false;
+      if (code > 0 && Math.abs((dacVout(code) - dacVout(code - 1)) - DAC_STEP) > 1e-12) ok = false;
+    }
+    if (Math.abs(dacVout(DAC_CODES - 1) - DAC_VREF * (DAC_CODES - 1) / DAC_CODES) > 1e-12) ok = false;
+    return { codes: DAC_CODES, step: DAC_STEP, maxErr, pass: ok };
+  }
+  const DAC_V = dacVerify();
+  const dac = { code: 5, timer: null };
+  const dacCard = document.createElement("div");
+  dacCard.className = "card proj-card"; dacCard.id = "dacCard"; dacCard.style.gridColumn = "1/-1";
+  dacCard.innerHTML =
+    '<div class="proj-head"><h2>R-2R ladder DAC — digital back to analog</h2><span class="badge">Tool</span></div>' +
+    '<p class="what">The <b>ADC visualiser</b> next door turns a voltage into a code. This is its mirror image: a code back into a voltage. The converter is a ladder of just two resistor values — <b>R = 10 kΩ</b> along the rail, <b>2R = 20 kΩ</b> down each branch (decode real values like these in the resistor colour decoder). Each bit throws its branch switch to <b>Vref</b> or to <b>ground</b>; by superposition each set bit contributes a fixed weight — the most significant bit Vref/2, then Vref/4, Vref/8, Vref/16 — and the weights add, which is why the whole ladder obeys one formula: <b>Vout = Vref × code / 2<sup>n</sup></b>. It is built <b>4 bits</b> wide, the ADC visualiser\'s default width: 16 codes is few enough that every step of the staircase stays individually visible and countable, and the table below lists all of them. A <b>binary counter</b> drives the input — step it and the output climbs one LSB at a time, exactly the staircase a counter chip feeding this ladder would produce on a real bench. This is also the converter hiding under the analogue-looking projects: a PWM pin plus a filter is the cheap DAC of the Projects module, and this ladder is the honest one — every output level exact, no ripple, at the price of one precision resistor network.</p>' +
+    '<div class="ctrl-label">Counter output — the 4 input bits (B3 B2 B1 B0), click to set the code directly</div>' +
+    '<div class="seq-state" id="dacBits" style="margin-top:4px"></div>' +
+    '<div class="share-row"><button type="button" class="btn primary" id="dacStep">Step the counter ▸</button>' +
+    '<button type="button" class="btn" id="dacSweep">Run the counter 0 → 15</button>' +
+    '<button type="button" class="btn" id="dacReset">Reset counter to 0</button></div>' +
+    '<div class="schematic-box"><svg id="dacLadderSvg" viewBox="0 0 920 190" role="img" aria-label="R-2R resistor ladder: four branches of 2R switched between Vref and ground, joined by R sections along the rail to the output" style="display:block;width:100%;height:auto"></svg></div>' +
+    '<div class="ctrl-label">Output staircase — one full counter sweep, codes 0 to 15; the marker sits on the counter\'s current code</div>' +
+    '<div class="schematic-box"><svg id="dacSvg" viewBox="0 0 920 250" role="img" aria-label="DAC staircase: output voltage stepping up by one LSB per code" style="display:block;width:100%;height:auto"></svg></div>' +
+    '<div class="decimal-line" id="dacOut" aria-live="polite"></div>' +
+    '<div class="seq-state" id="dacCost" style="margin-top:6px"></div>' +
+    '<div class="ctrl-label" style="margin-top:14px">Every code, computed from Vout = 5 × code / 16</div>' +
+    '<div class="tt-wrap" style="max-height:300px"><table class="tt rz-dactab" id="dacTable"></table></div>' +
+    '<div class="lab-check"><span class="lab-check-q" id="dacQ"></span><span id="dacOpts" style="display:flex;gap:6px;flex-wrap:wrap"></span><span class="lab-check-fb" id="dacFb" aria-live="polite"></span></div>' +
+    '<div class="share-row"><button type="button" class="btn" id="dacNewQ">New question</button>' +
+    '<button type="button" class="btn" data-daclink="adc">The ADC visualiser — the way back →</button>' +
+    '<button type="button" class="btn" data-daclink="t555">The 555 astable — a clock to drive the counter →</button>' +
+    '<button type="button" class="btn" data-daclink="pwm">PWM brightness — the cheap DAC →</button>' +
+    '<button type="button" class="btn" data-daclink="resistor">Resistor colour decoder — read R and 2R →</button></div>' +
+    '<details class="details-disclosure"><summary>Details — why the ladder obeys the formula</summary>' +
+    '<p class="proj-teaches">Look into any node of the ladder, in either direction, and the resistance is exactly R — that is the trick the R/2R choice buys. So each branch sees the same load, each bit\'s contribution halves cleanly down the ladder, and superposition gives Vout = Vref × (b3/2 + b2/4 + b1/8 + b0/16) = Vref × code / 16. Full scale is never quite Vref: the largest code, 1111, gives 15/16 × 5 V = 4.6875 V — one step below the reference, the same "one LSB short" behaviour the ADC shows at its top code. Load-time check: all 16 voltages were recomputed as independent sums of bit weights and agree with the formula to under 1e-12 V, with a constant step of 0.3125 V.</p></details>';
+  const adcEl = $Z("tool-adc");
+  if (adcEl && adcEl.parentNode) adcEl.parentNode.insertBefore(dacCard, adcEl.nextSibling);
+  else { const at = $Z("advTools"); if (at) at.appendChild(dacCard); }
+  dacCard.querySelectorAll("[data-daclink]").forEach(b => b.addEventListener("click", () => {
+    const k = b.dataset.daclink;
+    const key = k === "adc" ? "tool-adc" : k === "t555" ? "tool-555" : k === "pwm" ? "proj-pwm" : "comp-resistor";
+    if (!clickMenuKeyZ(key)) jumpZ("dacCard");
+  }));
+  function dacFmt(v) { return v.toFixed(4); }
+  function dacStopSweep() { if (dac.timer) { clearInterval(dac.timer); dac.timer = null; const b = dacCard.querySelector("#dacSweep"); if (b) b.textContent = "Run the counter 0 → 15"; } }
+  function dacRender() {
+    const host = dacCard.querySelector("#dacBits"); host.innerHTML = "";
+    [3, 2, 1, 0].forEach(i => {
+      const bit = (dac.code >> i) & 1;
+      const c = document.createElement("button"); c.type = "button";
+      c.className = "seq-cell" + (bit ? " one" : "");
+      c.innerHTML = "<b>" + bit + '</b><span class="ry-role">B' + i + " · weight " + dacFmt(DAC_VREF / Math.pow(2, DAC_BITS - i)) + " V</span>";
+      c.addEventListener("click", () => { dacStopSweep(); dac.code ^= (1 << i); dacRender(); });
+      host.appendChild(c);
+    });
+    /* ladder schematic: node x positions, bit3 nearest the output (right) */
+    const nodeX = i => 180 + i * 170; /* i = 0..3 left (LSB end) to right (MSB end); bit at node i is B(3-i) from left... branch order below maps explicitly */
+    let s = "";
+    s += '<line x1="90" y1="60" x2="830" y2="60" style="stroke:var(--ink);stroke-width:2"/>';
+    for (let n = 0; n < 3; n++) {
+      const x1 = nodeX(n), x2 = nodeX(n + 1);
+      s += '<rect x="' + ((x1 + x2) / 2 - 26) + '" y="48" width="52" height="24" rx="4" style="fill:var(--panel2);stroke:var(--line2)"/><text class="ry-sub" x="' + ((x1 + x2) / 2) + '" y="64" style="text-anchor:middle">R</text>';
+    }
+    for (let n = 0; n < 4; n++) {
+      const x = nodeX(n), bitIdx = n, bit = (dac.code >> bitIdx) & 1;
+      s += '<circle cx="' + x + '" cy="60" r="4" style="fill:var(--ink)"/>';
+      s += '<line x1="' + x + '" y1="60" x2="' + x + '" y2="96" style="stroke:var(--ink);stroke-width:2"/>';
+      s += '<rect x="' + (x - 26) + '" y="96" width="52" height="24" rx="4" style="fill:var(--panel2);stroke:var(--line2)"/><text class="ry-sub" x="' + x + '" y="112" style="text-anchor:middle">2R</text>';
+      s += '<rect x="' + (x - 40) + '" y="132" width="80" height="26" rx="6" style="fill:' + (bit ? "var(--amber-soft)" : "var(--panel)") + ';stroke:' + (bit ? "var(--amber)" : "var(--line2)") + '"/><text class="ry-sub" x="' + x + '" y="149" style="text-anchor:middle">B' + bitIdx + " → " + (bit ? "Vref" : "GND") + "</text>";
+      s += '<text class="ry-lab" x="' + x + '" y="34" style="text-anchor:middle">B' + bitIdx + "</text>";
+    }
+    s += '<line x1="90" y1="60" x2="90" y2="96" style="stroke:var(--ink);stroke-width:2"/><rect x="64" y="96" width="52" height="24" rx="4" style="fill:var(--panel2);stroke:var(--line2)"/><text class="ry-sub" x="90" y="112" style="text-anchor:middle">2R</text><text class="ry-sub" x="90" y="140" style="text-anchor:middle">to GND (termination)</text>';
+    s += '<line x1="' + nodeX(3) + '" y1="60" x2="852" y2="60" style="stroke:var(--ink);stroke-width:2"/><text class="ry-lab" x="856" y="52">Vout</text><text class="ry-sub" x="856" y="70" id="dacSvgV">' + dacFmt(dacVout(dac.code)) + " V</text>";
+    s += '<text class="ry-sub" x="460" y="182" style="text-anchor:middle">rail sections R = 10 kΩ · branches 2R = 20 kΩ · each switch follows its bit: 1 → Vref (5 V), 0 → ground</text>';
+    dacCard.querySelector("#dacLadderSvg").innerHTML = s;
+    /* staircase over one full sweep */
+    const X0 = 46, Y0 = 206, W = 828, H = 158;
+    const X = c => X0 + (c / DAC_CODES) * W, Y = v => Y0 - (v / DAC_VREF) * H;
+    let p = "M" + X(0) + " " + Y(dacVout(0));
+    for (let k = 0; k < DAC_CODES; k++) { p += " H" + X(k + 1) + " V" + Y(dacVout(Math.min(k + 1, DAC_CODES - 1))); }
+    let g = '<line x1="' + X0 + '" y1="' + Y0 + '" x2="' + (X0 + W) + '" y2="' + Y0 + '" stroke="var(--line2)"/>' +
+      '<line x1="' + X0 + '" y1="' + (Y0 - H) + '" x2="' + X0 + '" y2="' + Y0 + '" stroke="var(--line2)"/>' +
+      '<path d="' + p + '" fill="none" stroke="var(--slate-wire)" stroke-width="1.8"/>' +
+      '<circle cx="' + (X(dac.code) + (X(1) - X(0)) / 2) + '" cy="' + Y(dacVout(dac.code)) + '" r="6" fill="var(--amber)"/>' +
+      '<text class="net-label strong" x="' + Math.min(X(dac.code) + 14, X0 + W - 210) + '" y="' + (Y0 - H + 16) + '">code ' + dac.code.toString(2).padStart(4, "0") + " → " + dacFmt(dacVout(dac.code)) + " V</text>" +
+      '<text class="net-label" x="' + X0 + '" y="' + (Y0 + 20) + '">counter 0 →</text>' +
+      '<text class="net-label" x="' + (X0 + W) + '" y="' + (Y0 + 20) + '" text-anchor="end">→ 15, then wraps to 0</text>' +
+      '<text class="net-label" x="' + X0 + '" y="' + (Y(DAC_VREF) - 4) + '">Vref 5 V (never reached — top code is 15/16 of it)</text>';
+    dacCard.querySelector("#dacSvg").innerHTML = g;
+    dacCard.querySelector("#dacOut").innerHTML = "Code <b>" + dac.code.toString(2).padStart(4, "0") + "</b> (decimal " + dac.code + ") → Vout = 5 × " + dac.code + " / 16 = <b>" + dacFmt(dacVout(dac.code)) + " V</b>. Set bits contribute: " +
+      [3, 2, 1, 0].filter(i => (dac.code >> i) & 1).map(i => "B" + i + " = " + dacFmt(DAC_VREF / Math.pow(2, DAC_BITS - i)) + " V").join(" + ") + ((dac.code === 0) ? "nothing — every branch is grounded" : "") + ".";
+    const cost = dacCard.querySelector("#dacCost"); cost.innerHTML = "";
+    [["bits (n)", DAC_BITS], ["codes", DAC_CODES], ["step size (1 LSB)", dacFmt(DAC_STEP) + " V"], ["full scale (code 15)", dacFmt(dacVout(15)) + " V"], ["resistor values", "R 10 kΩ · 2R 20 kΩ"]].forEach(([k, v]) => {
+      const c = document.createElement("div"); c.className = "seq-cell";
+      c.innerHTML = "<b>" + v + '</b><span class="ry-role">' + k + "</span>"; cost.appendChild(c);
+    });
+    const t = dacCard.querySelector("#dacTable");
+    let h = "<thead><tr><th>Code (binary)</th><th>Code</th><th>Vout = 5 × code / 16</th><th>Step from previous</th></tr></thead><tbody>";
+    for (let code = 0; code < DAC_CODES; code++) {
+      h += '<tr' + (code === dac.code ? ' class="rz-cur-row"' : "") + "><td>" + code.toString(2).padStart(4, "0") + "</td><td>" + code + "</td><td>" + dacFmt(dacVout(code)) + " V</td><td>" + (code === 0 ? "—" : "+" + dacFmt(dacVout(code) - dacVout(code - 1)) + " V") + "</td></tr>";
+    }
+    t.innerHTML = h + "</tbody>";
+  }
+  dacCard.querySelector("#dacStep").addEventListener("click", () => { dacStopSweep(); dac.code = (dac.code + 1) % DAC_CODES; dacRender(); });
+  dacCard.querySelector("#dacReset").addEventListener("click", () => { dacStopSweep(); dac.code = 0; dacRender(); });
+  dacCard.querySelector("#dacSweep").addEventListener("click", () => {
+    if (dac.timer) { dacStopSweep(); return; }
+    const reduced = !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+    if (reduced) { dac.code = DAC_CODES - 1; dacRender(); return; }
+    dac.code = 0; dacRender();
+    const b = dacCard.querySelector("#dacSweep"); b.textContent = "Running… tap to stop";
+    dac.timer = setInterval(() => {
+      if (dac.code >= DAC_CODES - 1) { dacStopSweep(); return; }
+      dac.code++; dacRender();
+    }, 220);
+  });
+  let dacQn = 0;
+  function dacQuestion() {
+    const rng = mulberryZ(3131 + dacQn * 97);
+    const code = 1 + Math.floor(rng() * 15);
+    const expected = dacVout(code);
+    dacCard.querySelector("#dacQ").textContent = "Predict, then check: the counter outputs " + code.toString(2).padStart(4, "0") + " (code " + code + ") to the 4-bit ladder, Vref = 5 V. What is Vout?";
+    const cand = Array.from(new Set([expected, expected + DAC_STEP, expected - DAC_STEP, DAC_VREF * code / 8]));
+    for (let i = cand.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); const t = cand[i]; cand[i] = cand[j]; cand[j] = t; }
+    const host = dacCard.querySelector("#dacOpts"), fb = dacCard.querySelector("#dacFb");
+    fb.textContent = "";
+    optBtnsZ(host, cand.map(v => dacFmt(v) + " V"), i => {
+      const v = cand[i];
+      fbSetZ(fb, Math.abs(v - expected) < 1e-12, Math.abs(v - expected) < 1e-12
+        ? "Right — 5 × " + code + " / 16 = " + dacFmt(expected) + " V. Cross-check by weights: the set bits of " + code.toString(2).padStart(4, "0") + " add to the same total in the table above."
+        : "Not that — apply the formula, Vout = 5 × code / 16 with code = " + code + ", or find code " + code + " in the table: every row there is that formula evaluated.");
+    });
+    window.__dacQuestion = { code, expected };
+  }
+  dacCard.querySelector("#dacNewQ").addEventListener("click", () => { dacQn++; dacQuestion(); });
+  dacRender(); dacQuestion();
+
+  /* ================================================================
+     3) TWO-PASS ASSEMBLER FOR THE SAP-1.
+     Instruction set: exactly the site's SAP-1 opcodes, in order.
+     ================================================================ */
+  const ASM_OPS = ["LDA", "ADD", "SUB", "OUT", "HLT", "JMP", "JZ", "STA"];
+  const ASM_NO_OPERAND = { OUT: true, HLT: true };
+  function asmParseNumber(tok) {
+    if (/^0x[0-9a-fA-F]+$/.test(tok)) return parseInt(tok, 16);
+    if (/^-?\d+$/.test(tok)) return parseInt(tok, 10);
+    return null;
+  }
+  function asmSplitLine(raw) {
+    let text = String(raw).split(";")[0].trim();
+    let label = null;
+    const m = text.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(.*)$/);
+    if (m) { label = m[1]; text = m[2].trim(); }
+    if (!text) return { label, mnemonic: null, operand: null, extra: null, empty: true };
+    const parts = text.split(/\s+/);
+    return { label, mnemonic: parts[0].toUpperCase(), operand: parts.length > 1 ? parts[1] : null, extra: parts.length > 2 ? parts.slice(2).join(" ") : null, empty: false };
+  }
+  function asmAssemble(src) {
+    const lines = String(src).split(/\r?\n/);
+    const errors = [];
+    const symbols = {}; const symbolList = [];
+    /* ---- PASS 1: symbol table + size ---- */
+    let addr = 0, tooLongNoted = false;
+    lines.forEach((raw, i) => {
+      const L = asmSplitLine(raw);
+      if (L.label !== null) {
+        const key = L.label.toLowerCase();
+        if (symbols[key]) errors.push({ line: i + 1, msg: "duplicate label '" + L.label + "' — first defined on line " + symbols[key].line });
+        else { symbols[key] = { name: L.label, addr, line: i + 1 }; symbolList.push(symbols[key]); }
+      }
+      if (!L.empty) {
+        addr++;
+        if (addr > 16 && !tooLongNoted) { tooLongNoted = true; errors.push({ line: i + 1, msg: "program exceeds the SAP-1's 16 bytes of memory — this line would land at address " + (addr - 1) }); }
+      }
+    });
+    /* ---- PASS 2: emit bytes ---- */
+    const bytes = new Array(16).fill(0);
+    const listing = [];
+    addr = 0;
+    lines.forEach((raw, i) => {
+      const L = asmSplitLine(raw);
+      if (L.empty) return;
+      const lineNo = i + 1, here = addr; addr++;
+      if (here > 15) return; /* already reported in pass 1 */
+      if (L.extra !== null) { errors.push({ line: lineNo, msg: "unexpected extra text '" + L.extra + "' — one instruction per line" }); return; }
+      if (L.mnemonic === "DB") {
+        if (L.operand === null) { errors.push({ line: lineNo, msg: "DB needs a value, e.g. DB 42" }); return; }
+        const v = asmParseNumber(L.operand);
+        if (v === null) { errors.push({ line: lineNo, msg: "DB value '" + L.operand + "' is not a number" }); return; }
+        if (v < 0 || v > 255) { errors.push({ line: lineNo, msg: "DB value " + v + " is out of range — a byte holds 0–255" }); return; }
+        bytes[here] = v; listing.push({ addr: here, byte: v, line: lineNo, text: "DB " + v });
+        return;
+      }
+      const op = ASM_OPS.indexOf(L.mnemonic);
+      if (op < 0) { errors.push({ line: lineNo, msg: "unknown mnemonic '" + L.mnemonic + "' — the SAP-1 has exactly eight: " + ASM_OPS.join(", ") + " (plus the DB data directive)" }); return; }
+      if (ASM_NO_OPERAND[L.mnemonic]) {
+        if (L.operand !== null) { errors.push({ line: lineNo, msg: L.mnemonic + " takes no operand — its byte is just the opcode nibble, 0x" + (op << 4).toString(16).toUpperCase().padStart(2, "0") }); return; }
+        bytes[here] = op << 4; listing.push({ addr: here, byte: op << 4, line: lineNo, text: L.mnemonic });
+        return;
+      }
+      if (L.operand === null) { errors.push({ line: lineNo, msg: L.mnemonic + " needs an operand — an address 0–15 or a label" }); return; }
+      let val = asmParseNumber(L.operand);
+      if (val === null) {
+        const sym = symbols[L.operand.toLowerCase()];
+        if (!sym) { errors.push({ line: lineNo, msg: "undefined label '" + L.operand + "' — pass 1 found no such label" }); return; }
+        val = sym.addr;
+      }
+      if (val < 0 || val > 15) { errors.push({ line: lineNo, msg: "address " + val + " is out of range — the operand nibble holds 0–15" }); return; }
+      bytes[here] = (op << 4) | val;
+      listing.push({ addr: here, byte: bytes[here], line: lineNo, text: L.mnemonic + " " + val });
+    });
+    return { bytes: errors.length ? null : bytes, errors, symbols: symbolList, listing, size: listing.length };
+  }
+  const ASM_EX_COUNT =
+    "; Count down from 3 — the labels do the address\n" +
+    "; arithmetic for you. Pass 1 gives count and one\n" +
+    "; their addresses; pass 2 fills the nibbles in.\n" +
+    "        LDA count\n" +
+    "loop:   OUT\n" +
+    "        SUB one\n" +
+    "        JZ done\n" +
+    "        JMP loop\n" +
+    "done:   HLT\n" +
+    "count:  DB 3\n" +
+    "one:    DB 1";
+  const ASM_EX_ADD =
+    "; Add two numbers and show the sum.\n" +
+    "        LDA a\n" +
+    "        ADD b\n" +
+    "        OUT\n" +
+    "        HLT\n" +
+    "a:      DB 20\n" +
+    "b:      DB 22";
+  function asmRunBytes(bytes) { return window.RE.reSAP1(bytes.slice(0, 16)); }
+  function asmVerify() {
+    const out = {};
+    const a = asmAssemble(ASM_EX_ADD);
+    out.addClean = !!a.bytes && a.bytes.slice(0, 6).join(",") === [0x04, 0x15, 0x30, 0x40, 20, 22].join(",");
+    if (a.bytes) { const r = asmRunBytes(a.bytes); out.addRun = r.halted && r.A === 42 && r.out.join(",") === "42"; }
+    const c = asmAssemble(ASM_EX_COUNT);
+    out.countClean = !!c.bytes && c.bytes.slice(0, 8).join(",") === [0x06, 0x30, 0x27, 0x65, 0x51, 0x40, 3, 1].join(",");
+    out.countSymbols = c.symbols.length === 4 && c.symbols.some(s => s.name === "loop" && s.addr === 1) && c.symbols.some(s => s.name === "count" && s.addr === 6);
+    if (c.bytes) { const r = asmRunBytes(c.bytes); out.countRun = r.halted && r.A === 0 && r.out.join(",") === "3,2,1"; }
+    const hasErr = (src, frag) => asmAssemble(src).errors.some(e => e.msg.indexOf(frag) >= 0);
+    out.errUnknown = hasErr("MUL 3\nHLT", "unknown mnemonic");
+    out.errUndefined = hasErr("JMP nowhere\nHLT", "undefined label");
+    out.errDuplicate = hasErr("x: HLT\nx: HLT", "duplicate label");
+    out.errRangeAddr = hasErr("LDA 16", "out of range");
+    out.errRangeDb = hasErr("DB 300", "out of range");
+    out.errMissing = hasErr("LDA", "needs an operand");
+    out.errNoOperand = hasErr("OUT 3", "takes no operand");
+    out.hookWired = typeof window.__sap1LoadCustom === "function";
+    let opsMatch = true;
+    try { if (typeof SAP_OPS !== "undefined") opsMatch = SAP_OPS.join(",") === ASM_OPS.join(","); } catch (e) { opsMatch = true; }
+    out.opsMatch = opsMatch;
+    out.pass = !!(out.addClean && out.addRun && out.countClean && out.countSymbols && out.countRun && out.errUnknown && out.errUndefined && out.errDuplicate && out.errRangeAddr && out.errRangeDb && out.errMissing && out.errNoOperand && out.opsMatch && out.hookWired);
+    return out;
+  }
+  const ASM_V = asmVerify();
+  const asm = { bytes: null, listing: [] };
+  const asmSec = document.createElement("section");
+  asmSec.className = "card stage-card"; asmSec.id = "asmCard"; asmSec.style.marginTop = "16px"; asmSec.style.marginBottom = "16px";
+  asmSec.innerHTML =
+    "<h2>Two-pass assembler — mnemonics in, machine code out</h2>" +
+    '<p class="what">Every SAP-1 program on this site so far was <b>hand-assembled</b>: someone counted addresses on paper and packed each byte as opcode-nibble × 16 + address. This panel is the tool that does that counting — an <b>assembler</b>, working the way real assemblers work, in <b>two passes</b>. <b>Pass 1</b> reads the source once just to build the <b>symbol table</b>: it walks the lines counting bytes, and every <b>label</b> is recorded with the address it will land at — which is the only way a forward reference like <span class="mono">JZ done</span> can work, since <span class="mono">done</span> has not been seen yet when the jump is read. <b>Pass 2</b> reads it again and emits the bytes, filling each label in from the table. The instruction set is exactly the SAP-1\'s own eight — <b>LDA, ADD, SUB, OUT, HLT, JMP, JZ, STA</b>, byte = opcode&lt;&lt;4 | operand — plus one assembler directive, <b>DB</b> ("define byte"), which is not an instruction at all: it just lays a data value into the memory image, the way the hand-assembled programs keep their data after the code. Errors are reported the way assemblers report them, <b>with the offending line</b>: unknown mnemonic, undefined label, duplicate label, an address or DB value out of range, a missing operand, an operand on OUT or HLT, or a program that outgrows the 16 bytes. Assemble, then run the bytes here on the SAP-1 engine — or send them to the Architecture capstone, whose stepper loads your exact image as its <b>Custom</b> program and steps it with its own Step and Run controls.</p>' +
+    '<div class="share-row"><button type="button" class="btn" id="asmExCount">Example 1 · Count down (labels + a loop)</button>' +
+    '<button type="button" class="btn" id="asmExAdd">Example 2 · Add two numbers</button></div>' +
+    '<label class="ctrl-label" for="asmSrc">Source — one instruction per line; labels end with a colon; ; starts a comment</label>' +
+    '<textarea class="rz-src" id="asmSrc" spellcheck="false" aria-label="SAP-1 assembly source"></textarea>' +
+    '<div class="share-row"><button type="button" class="btn primary" id="asmGo">Assemble — two passes ▸</button>' +
+    '<button type="button" class="btn" id="asmRun" disabled>Run the bytes here ▸</button>' +
+    '<button type="button" class="btn" id="asmSend" disabled>Send to the SAP-1 capstone stepper ▸</button></div>' +
+    '<div class="decimal-line" id="asmMsg" aria-live="polite"></div>' +
+    '<div class="rz-errlist" id="asmErrors" aria-live="polite"></div>' +
+    '<div class="ctrl-label" style="margin-top:12px">Pass 1 — the symbol table</div>' +
+    '<div class="seq-state rz-symtab" id="asmSymbols" style="margin-top:4px"></div>' +
+    '<div class="ctrl-label" style="margin-top:12px">Pass 2 — the 16-byte memory image (hex)</div>' +
+    '<div class="seq-state" id="asmBytes" style="margin-top:4px"></div>' +
+    '<div class="ry-trace" id="asmTrace" aria-live="polite"></div>' +
+    '<div class="decimal-line" id="asmRunMsg" aria-live="polite"></div>' +
+    '<div class="lab-check"><span class="lab-check-q" id="asmQ"></span><span id="asmOpts" style="display:flex;gap:6px;flex-wrap:wrap"></span><span class="lab-check-fb" id="asmFb" aria-live="polite"></span></div>' +
+    '<div class="share-row"><button type="button" class="btn" id="asmNewQ">New question</button>' +
+    '<button type="button" class="btn" data-asmlink="sap">The SAP-1 capstone stepper →</button>' +
+    '<button type="button" class="btn" data-asmlink="micro">The microprogrammed control unit — same memory image →</button></div>' +
+    '<p class="cp-formal adv-only">Which stepper runs the assembled bytes, stated plainly: the run above executes on reSAP1, the engine function the Architecture capstone\'s instruction-level stepper is itself checked against (its guided-task answers are computed from reSAP1 runs). The Send button goes further: it loads your exact 16-byte image into that capstone stepper as its Custom program — the stepper selects it, resets, recomputes its own uninterrupted baseline from your image, and its Step / Run-to-HLT controls then execute your bytes, interrupts included. Its one divergence is documented in that widget: the interrupt handler (OUT · RETI) is installed at addresses 13–14 of its live memory, so keep data out of 13–14 if you plan to step a program there. The microprogrammed control unit executes the identical instruction semantics over the identical 16-byte memory image — its stepper was verified against reSAP1 on all three built-in programs — so an image assembled here is a valid image for that machine too, though its panel loads only its built-in programs. One honest wart survives from the base machine: opcodes 8–15 do not exist, and a byte like 0x80 in program memory is the interrupt handler\'s RETI only inside the capstone widget\'s extension — this assembler will not emit it, because it is not one of the eight.</p>';
+  const archHostZ = $Z("sysArch"); if (archHostZ) archHostZ.appendChild(asmSec);
+  asmSec.querySelectorAll("[data-asmlink]").forEach(b => b.addEventListener("click", () => {
+    if (b.dataset.asmlink === "sap") { if (!clickMenuKeyZ("lab-arch-10")) jumpZ("asmCard"); }
+    else { if (!clickMenuKeyZ("micro-sap1")) jumpZ("asmCard"); }
+  }));
+  const hex2Z = v => "0x" + v.toString(16).toUpperCase().padStart(2, "0");
+  function asmRenderResult(res) {
+    const symHost = asmSec.querySelector("#asmSymbols"); symHost.innerHTML = "";
+    if (!res.symbols.length) { const d = document.createElement("div"); d.className = "seq-cell"; d.innerHTML = "<b>—</b><span class='ry-role'>no labels in this source</span>"; symHost.appendChild(d); }
+    res.symbols.forEach(s => {
+      const c = document.createElement("div"); c.className = "seq-cell";
+      c.innerHTML = "<b>" + escZ(s.name) + " = " + s.addr + '</b><span class="ry-role">defined on line ' + s.line + "</span>";
+      symHost.appendChild(c);
+    });
+    const byteHost = asmSec.querySelector("#asmBytes"); byteHost.innerHTML = "";
+    const byAddr = {}; res.listing.forEach(l => byAddr[l.addr] = l);
+    for (let a = 0; a < 16; a++) {
+      const c = document.createElement("div"); c.className = "seq-cell" + (byAddr[a] ? " one" : "");
+      const byteVal = res.bytes ? res.bytes[a] : 0;
+      c.innerHTML = "<b>" + (res.bytes ? hex2Z(byteVal) : "--") + '</b><span class="ry-role">mem[' + a + "]" + (byAddr[a] ? " · " + escZ(byAddr[a].text) : "") + "</span>";
+      byteHost.appendChild(c);
+    }
+  }
+  function asmDoAssemble() {
+    const src = asmSec.querySelector("#asmSrc").value;
+    const res = asmAssemble(src);
+    const errEl = asmSec.querySelector("#asmErrors"), msgEl = asmSec.querySelector("#asmMsg");
+    asmSec.querySelector("#asmTrace").textContent = "";
+    asmSec.querySelector("#asmRunMsg").textContent = "";
+    if (res.errors.length) {
+      asm.bytes = null; asm.listing = [];
+      asmSec.querySelector("#asmRun").disabled = true;
+      asmSec.querySelector("#asmSend").disabled = true;
+      msgEl.innerHTML = "<b>Assembly failed — " + res.errors.length + " error" + (res.errors.length === 1 ? "" : "s") + ".</b> Nothing was emitted: an assembler that guesses past an error produces machine code that fails somewhere else, later, silently.";
+      errEl.textContent = res.errors.map(e => "Line " + e.line + ": " + e.msg).join("\n");
+      asmRenderResult({ symbols: res.symbols, listing: [], bytes: null });
+      return res;
+    }
+    asm.bytes = res.bytes; asm.listing = res.listing;
+    asmSec.querySelector("#asmRun").disabled = false;
+    asmSec.querySelector("#asmSend").disabled = false;
+    errEl.textContent = "";
+    msgEl.innerHTML = "<b>Assembled cleanly.</b> Pass 1 recorded " + res.symbols.length + " label" + (res.symbols.length === 1 ? "" : "s") + "; pass 2 emitted " + res.size + " byte" + (res.size === 1 ? "" : "s") + " into the 16-byte image (the rest is zero-filled). Hand-check one: the first byte packs its opcode in the high nibble and its operand in the low nibble. Now run it.";
+    asmRenderResult(res);
+    return res;
+  }
+  asmSec.querySelector("#asmGo").addEventListener("click", asmDoAssemble);
+  asmSec.querySelector("#asmRun").addEventListener("click", () => {
+    if (!asm.bytes) return;
+    const r = asmRunBytes(asm.bytes);
+    const tr = asmSec.querySelector("#asmTrace");
+    tr.innerHTML = r.trace.map(t => "fetch mem[" + t.pc + "] = " + hex2Z(t.ir) + " → " + t.op + (t.op === "OUT" || t.op === "HLT" ? "" : " " + t.ad) + " · " + escZ(t.note)).join("\n") || "No steps — the image is all zeros (0x00 is LDA 0, so this cannot happen from a real assemble; the trace is empty only if the program halted instantly).";
+    asmSec.querySelector("#asmRunMsg").innerHTML = r.halted
+      ? "<b>Ran to HLT</b> in " + r.steps + " step" + (r.steps === 1 ? "" : "s") + " on the SAP-1 engine. Output: <b>[" + r.out.join(", ") + "]</b> · final A = <b>" + r.A + "</b>. That is the same result the capstone stepper would report for this memory image — it is the same machine."
+      : "<b>Did not halt</b> within " + r.steps + " steps — the program is looping (a jump with no exit will do that; on the real SAP-1 it would spin forever too). Output so far: [" + r.out.join(", ") + "], A = " + r.A + ".";
+  });
+  asmSec.querySelector("#asmSend").addEventListener("click", () => {
+    if (!asm.bytes) return;
+    const note = asmSec.querySelector("#asmRunMsg");
+    if (typeof window.__sap1LoadCustom !== "function") { note.textContent = "The capstone stepper did not initialise on this page load, so the send is unavailable — the run above still executes your exact bytes on the same engine."; return; }
+    const srcText = asm.listing.map(l => l.text).join(" · ") + " — assembled by the two-pass assembler and sent here; step it with this stepper's own controls";
+    window.__sap1LoadCustom(asm.bytes, srcText);
+    note.innerHTML = "<b>Sent.</b> The SAP-1 capstone stepper now holds your exact 16-byte image as its Custom program, loaded and reset — opening it. (One caveat, from that widget's own design: its interrupt handler is installed at addresses 13–14 in its live memory, so a program that keeps data at 13 or 14 will differ there; the run in this panel always uses your image exactly as assembled.)";
+    if (!clickMenuKeyZ("lab-arch-10")) jumpZ("asmCard");
+  });
+  asmSec.querySelector("#asmExCount").addEventListener("click", () => { asmSec.querySelector("#asmSrc").value = ASM_EX_COUNT; asmDoAssemble(); });
+  asmSec.querySelector("#asmExAdd").addEventListener("click", () => { asmSec.querySelector("#asmSrc").value = ASM_EX_ADD; asmDoAssemble(); });
+  let asmQn = 0;
+  function asmQuestion() {
+    const items = [
+      { src: "ADD 10", why: "ADD is opcode 1, so the byte is 1 in the high nibble and 10 (A in hex) in the low: 0x1A — the same byte the hand-assembled capstone programs use for ADD 10." },
+      { src: "JZ 5", why: "JZ is opcode 6 with operand 5: 0x65 — the countdown in the capstone loops on exactly this byte." },
+      { src: "STA 11", why: "STA is opcode 7 with operand 11 (B in hex): 0x7B." },
+      { src: "SUB 9", why: "SUB is opcode 2 with operand 9: 0x29." }
+    ];
+    const it = items[asmQn % items.length];
+    const res = asmAssemble(it.src);
+    const expected = res.bytes ? res.bytes[0] : null;
+    asmSec.querySelector("#asmQ").textContent = "Check: hand-assemble it before the machine does — '" + it.src + "' assembles to which byte?";
+    const swap = ((expected & 15) << 4) | (expected >> 4);
+    const cand = Array.from(new Set([expected, swap, (expected + 16) & 255, (expected - 1) & 255]));
+    const host = asmSec.querySelector("#asmOpts"), fb = asmSec.querySelector("#asmFb");
+    fb.textContent = "";
+    optBtnsZ(host, cand.map(v => hex2Z(v)), i => {
+      const v = cand[i];
+      fbSetZ(fb, v === expected, v === expected ? "Right — " + it.why : "Not that byte — the opcode goes in the HIGH nibble and the operand in the low: work out the opcode number for " + it.src.split(" ")[0] + " first (LDA 0, ADD 1, SUB 2, OUT 3, HLT 4, JMP 5, JZ 6, STA 7), then place the operand.");
+    });
+    window.__asmQuestion = { src: it.src, expected };
+  }
+  asmSec.querySelector("#asmNewQ").addEventListener("click", () => { asmQn++; asmQuestion(); });
+  asmSec.querySelector("#asmSrc").value = ASM_EX_COUNT;
+  asmRenderResult({ symbols: [], listing: [], bytes: null });
+  asmSec.querySelector("#asmMsg").textContent = "Example 1 is loaded — a countdown with two labels and a loop. Press Assemble and watch pass 1's symbol table and pass 2's bytes appear, then run it. It starts unassembled: nothing runs until you say so.";
+  asmQuestion();
+
+  /* ================= verification handles ================= */
+  window.__shiftCheck = { def: defShifter, eval: shiftEval, ref: shiftRef, verify: shiftVerify, defs: { L: shDefL, R: shDefR } };
+  window.__dacCheck = { vout: dacVout, verify: dacVerify, bits: DAC_BITS, vref: DAC_VREF, step: DAC_STEP };
+  window.__asmCheck = { assemble: asmAssemble, ops: ASM_OPS.slice(), verify: asmVerify, examples: { count: ASM_EX_COUNT, add: ASM_EX_ADD } };
+
+  /* ================= MENU REGISTRATION + COUNT REBUILD ================= */
+  function addMenuItemZ(groupName, afterKey, spec) {
+    const list = $Z("menuList"); if (!list) return false;
+    if (list.querySelector('[data-key="' + spec.key + '"]')) return false;
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "menu-item"; b.dataset.key = spec.key;
+    b.dataset.search = (spec.label + " " + spec.hint + " " + spec.search).toLowerCase();
+    if (spec.level) b.dataset.uxlevel = spec.level;
+    b.innerHTML = '<span class="mi-dot" aria-hidden="true"></span><span class="mi-label"></span><small></small>';
+    b.querySelector(".mi-label").textContent = spec.label;
+    b.querySelector("small").textContent = spec.hint;
+    b.addEventListener("click", () => { const p = $Z("menuPanel"); if (p) p.hidden = true; const mb = $Z("menuBtn"); if (mb) mb.setAttribute("aria-expanded", "false"); spec.go(); });
+    if (afterKey) {
+      const anchor = list.querySelector('[data-key="' + afterKey + '"]');
+      if (anchor) { anchor.parentNode.insertBefore(b, anchor.nextSibling); return true; }
+    }
+    let sib = null, inGroup = false;
+    Array.prototype.slice.call(list.children).forEach(el => {
+      if (el.classList.contains("menu-group")) inGroup = (el.dataset.group || "").trim() === groupName;
+      else if (inGroup && el.classList.contains("menu-item")) sib = el;
+    });
+    if (sib) sib.parentNode.insertBefore(b, sib.nextSibling); else list.appendChild(b);
+    return true;
+  }
+  addMenuItemZ("Logic & Circuits", "hazard-lab", {
+    key: "barrel-shifter", label: "Barrel shifter lab — a shift is a mux network",
+    hint: "Two stages of 2-to-1 muxes shift 4 bits left or right by 0–3 in one pass — all 128 combinations verified on the gate engine",
+    search: "barrel shifter shift shifting left right logical mux multiplexer stages alu datapath sap-1 zero fill network simulator",
+    level: "intermediate",
+    go: () => { setTopArea("circuits"); syncRail("circuits"); jumpZ("shifterCard"); }
+  });
+  addMenuItemZ("Boards, Modulation & Projects", "tool-adc", {
+    key: "r2r-dac", label: "R-2R ladder DAC — digital back to analog",
+    hint: "A 4-bit resistor ladder driven by a binary counter: every code's voltage from Vref × code / 16, staircase on the scope",
+    search: "dac digital to analog digital-to-analog r-2r r2r ladder resistor ladder converter staircase counter pwm 555 adc counterpart d/a simulator",
+    level: "intermediate",
+    go: () => { setTopArea("advanced"); syncRail("advanced"); const pb = document.querySelector('#advPicker [data-adv="tools"]'); if (pb) pb.click(); jumpZ("dacCard"); }
+  });
+  addMenuItemZ("Computer Architecture", "mesi-lab", {
+    key: "sap1-assembler", label: "Two-pass assembler for the SAP-1",
+    hint: "Type mnemonics with labels, watch pass one build the symbol table and pass two emit the bytes — then run them in the SAP-1",
+    search: "assembler two-pass two pass mnemonics labels symbol table machine code sap-1 assembly assemble hand assembled bytes hex simulator",
+    level: "intermediate",
+    go: () => { setTopArea("systems"); syncRail("systems"); const pb = document.querySelector('#sysPicker [data-sys="arch"]'); if (pb) pb.click(); jumpZ("asmCard"); }
+  });
+  (function rebuildCountsZ() {
+    const RJ = window.__uxRoundJ; if (!RJ) return;
+    const groups = RJ.menuGroups(); const counts = {}; let total = 0;
+    groups.forEach(g => {
+      counts[g.name] = g.items.length; total += g.items.length;
+      const c = g.header.querySelector(".mi-count"); if (c) c.textContent = g.items.length;
+    });
+    window.LAB_MENU = { groups: groups.map(g => ({ name: g.name, items: g.items.map(b => { const l = b.querySelector(".mi-label"); return l ? l.textContent : ""; }) })), count: total };
+    window.LAB_MODULES = { modules: groups.map(g => ({ name: g.name, count: g.items.length })), total };
+    RJ.buildRailAndList(counts);
+    RJ.buildGallery();
+    ["boards", "arch", "os", "org"].forEach(id => {
+      const h = document.querySelector("#module-" + id + " .mh-count");
+      if (!h) return;
+      const name = { boards: "Boards, Modulation & Projects", arch: "Computer Architecture", os: "Operating Systems", org: "Computer Organization" }[id];
+      if (counts[name]) h.textContent = counts[name] + " items";
+    });
+    window.__countsZ = { total, counts };
+  })();
+
+  /* ================= load-time self-tests (evidence handles) ================= */
+  try {
+    window.__roundZSelfTest = { shifter: SH_V, dac: DAC_V, assembler: ASM_V };
+  } catch (e) { window.__roundZSelfTest = { error: String(e && e.message || e) }; }
 })();
 </script>
