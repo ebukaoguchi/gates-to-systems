@@ -21824,3 +21824,723 @@ select.rx-sel{max-width:100%}
   } catch (e) { XC.selfTest = { error: String(e && e.message || e) }; }
 })();
 </script>
+
+<style>
+/* ===== Round Y — CRC · static hazard · MESI coherence ===== */
+.ry-role{display:block;font-size:9.5px;color:var(--muted);font-weight:600}
+.ry-trace{font-family:"IBM Plex Mono",monospace;font-size:12.5px;line-height:1.75;max-height:220px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:8px 12px;background:var(--panel2);margin-top:8px;white-space:pre-wrap}
+.ry-trace .ry-cur{font-weight:700;color:var(--amber)}
+.seq-cell.ry-bad{border-color:var(--red);background:var(--panel);box-shadow:inset 0 0 0 1.5px var(--red)}
+.seq-cell.ry-good{border-color:var(--teal);background:var(--amber-soft)}
+.ry-wave{stroke-width:2.4;fill:none}
+.ry-wa{stroke:var(--amber-wire)} .ry-w1{stroke:var(--teal)} .ry-w2{stroke:var(--amber)} .ry-wf{stroke:var(--ink);stroke-width:3}
+.ry-glitch{fill:var(--red);opacity:.14}
+.ry-lab{font-size:11px;font-weight:700;fill:var(--ink)}
+.ry-sub{font-size:10px;fill:var(--muted)}
+.ry-vlab{font-size:10.5px;font-weight:700;fill:var(--red)}
+.ry-mgrid{display:grid;grid-template-columns:64px 1fr 1fr 1fr;gap:6px;margin:8px 0}
+@media (max-width:560px){.ry-mgrid{grid-template-columns:44px 1fr 1fr 1fr;gap:4px}}
+.ry-mhead{font-size:11px;font-weight:700;color:var(--muted);text-align:center;padding-top:8px}
+.ry-mcell{border:1.6px solid var(--line2);border-radius:8px;padding:7px 8px;background:var(--panel2);font-family:"IBM Plex Mono",monospace;font-size:12px;text-align:center}
+.ry-mcell .ry-st{font-size:15px;font-weight:700;display:block}
+.ry-mcell.st-M{border-color:var(--red)} .ry-mcell.st-E{border-color:var(--teal)} .ry-mcell.st-S{border-color:var(--amber)}
+.ry-mcell.st-I{border-style:dashed;color:var(--muted)}
+.ry-mcell.mem{border-color:var(--line2)}
+.ry-stale{color:var(--red);font-weight:700;font-size:10.5px}
+.ry-fresh{color:var(--teal);font-weight:700;font-size:10.5px}
+</style>
+<script>
+"use strict";
+/* ================================================================
+   ROUND Y — three new labs, each computed by its own model:
+   1) CRC error detection — one LFSR step is a real gate netlist
+      (two XORs + a pass-through) evaluated by the site engine
+      (window.LAB); the whole lab steps that netlist. The shipped
+      verify() cross-checks the netlist encoder against an
+      INDEPENDENT bit-array long division for all 64 messages,
+      and proves: every single-bit error and every burst of
+      length <= 3 is caught; every error pattern that is a
+      multiple of the generator is missed. Generator G(x) =
+      x^3 + x + 1 (1011), 6-bit messages, 9-bit codewords.
+   2) Static hazard — F = A·C + A'·B (the K-map minimum) simulated
+      with the site's own gate delays (window.LAB.GATE_DELAYS:
+      NOT/AND/OR = 10 ns) as transport-delay waveforms computed
+      from the netlist. The 1->0 transition of A at B = C = 1
+      produces a genuine 10 ns low pulse on F; the redundant
+      consensus term B·C removes it at the cost of one extra gate.
+      Nothing about the glitch is drawn by hand: the self-test
+      measures it from the simulated waveform.
+   3) MESI cache coherence — a two-CPU snooping model over 3 lines
+      x 2 words. Every transition is computed by mesiStep; the
+      self-test replays the scripted demonstration against the
+      hand-derived MESI trace and then runs 2000 seeded random
+      operations checking that every read returns the last value
+      written and the MESI invariants hold (at most one M/E, all
+      valid copies agree, memory differs only under an M).
+   All three start paused: nothing auto-runs.
+   ================================================================ */
+(function roundY() {
+  const $Y = id => document.getElementById(id);
+  const escY = s => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+  function mulberryY(seed) { let a = seed >>> 0; return function () { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+  function jumpY(id) { const el = id && $Y(id); if (el) setTimeout(() => el.scrollIntoView({ behavior: "smooth", block: "start" }), 60); }
+  function clickMenuKeyY(key) { const it = document.querySelector('#menuList .menu-item[data-key="' + key + '"]'); if (it) { it.click(); return true; } return false; }
+  function fbSetY(el, ok, msg) { if (!el) return; el.textContent = (ok ? "✓ " : "✗ ") + msg; el.style.color = ok ? "var(--green)" : "var(--red)"; }
+  function optBtnsY(host, labels, onPick) {
+    host.innerHTML = "";
+    labels.forEach((lab, i) => {
+      const b = document.createElement("button"); b.type = "button"; b.className = "btn"; b.textContent = lab;
+      b.addEventListener("click", () => onPick(i, b));
+      host.appendChild(b);
+    });
+  }
+  const LABE = window.LAB;
+
+  /* ================================================================
+     1) CRC — generator G(x) = x^3 + x + 1, binary 1011.
+     One register step, as a netlist on the site engine:
+       FB is the bit leaving the top of the register (R2);
+       NR2 = R1 · NR1 = R0 xor R2 · NR0 = M xor R2
+     (the two XORs are exactly the tap positions of G: x^1 and x^0).
+     ================================================================ */
+  const CRC_G = [1, 0, 1, 1];
+  function crcStepDef() {
+    return { inputs: ["M", "R2", "R1", "R0"], outputs: ["NR2", "NR1", "NR0"], gates: [
+      { id: "s1", type: "XOR", ins: ["R1", "ZERO"], out: "NR2" },
+      { id: "s2", type: "XOR", ins: ["R0", "R2"], out: "NR1" },
+      { id: "s3", type: "XOR", ins: ["M", "R2"], out: "NR0" } ] };
+  }
+  const crcDef = LABE.computeLevels(crcStepDef());
+  function crcStepNet(reg, bit) { /* reg = [R2,R1,R0] -> next reg, via the engine */
+    const v = LABE.evaluateAll(crcDef, { M: bit, R2: reg[0], R1: reg[1], R0: reg[2] });
+    return [v.NR2, v.NR1, v.NR0];
+  }
+  function crcRunNet(bits) { let r = [0, 0, 0]; const trace = []; bits.forEach(b => { r = crcStepNet(r, b); trace.push(r.slice()); }); return { rem: r, trace }; }
+  /* independent reference: bit-array polynomial long division */
+  function crcDivRemainder(bits) {
+    const a = bits.slice();
+    for (let i = 0; i + CRC_G.length <= a.length; i++) if (a[i] === 1) for (let j = 0; j < CRC_G.length; j++) a[i + j] ^= CRC_G[j];
+    return a.slice(a.length - 3);
+  }
+  function crcEncode(msg) { return crcRunNet(msg.concat([0, 0, 0])).rem; }
+  function crcCheckWord(word) { return crcRunNet(word).rem; }
+  function crcVerify() {
+    let enc = 0, chk = 0, single = 0, sTot = 0, burst = 0, bTot = 0, miss = 0, mTot = 0;
+    for (let m = 0; m < 64; m++) {
+      const msg = []; for (let i = 5; i >= 0; i--) msg.push((m >> i) & 1);
+      const remRef = crcDivRemainder(msg.concat([0, 0, 0]));
+      if (crcEncode(msg).join("") === remRef.join("")) enc++;
+      const cw = msg.concat(remRef);
+      if (crcCheckWord(cw).join("") === "000") chk++;
+      for (let p = 0; p < 9; p++) { const rx = cw.slice(); rx[p] ^= 1; sTot++; if (crcCheckWord(rx).join("") !== "000") single++; }
+      for (let len = 1; len <= 3; len++) for (let off = 0; off + len <= 9; off++) { const rx = cw.slice(); for (let j = 0; j < len; j++) rx[off + j] ^= 1; bTot++; if (crcCheckWord(rx).join("") !== "000") burst++; }
+      for (let off = 0; off <= 5; off++) { const rx = cw.slice(); for (let j = 0; j < 4; j++) rx[off + j] ^= CRC_G[j]; mTot++; if (crcCheckWord(rx).join("") === "000") miss++; }
+    }
+    return { enc, chk, single, sTot, burst, bTot, miss, mTot,
+      pass: enc === 64 && chk === 64 && single === sTot && burst === bTot && miss === mTot };
+  }
+
+  const crc = { msg: [1, 1, 0, 1, 0, 1], sendStep: 0, reg: [0, 0, 0], trace: [], recv: null, chkStep: 0, chkReg: [0, 0, 0], burstAt: 1, genAt: 2 };
+  const crcSec = document.createElement("section");
+  crcSec.className = "card stage-card"; crcSec.id = "crcCard"; crcSec.style.marginTop = "16px";
+  crcSec.innerHTML =
+    "<h2>CRC — the shift register that divides</h2>" +
+    '<p class="what">A <b>cyclic redundancy check</b> treats the message as a polynomial and divides it by a fixed <b>generator</b> — here <b>G(x) = x³ + x + 1</b>, binary <b>1011</b>. The 3-bit remainder rides along with the message; the receiver divides the whole word again, and a remainder of <b>000</b> means <i>consistent</i> — not, as the last experiment shows, <i>certainly intact</i>. The divider is the little circuit below: a 3-bit shift register whose feedback bit (the one leaving the top, R2) is XORed back at exactly the tap positions where G has 1s below its leading term. Every step in this lab is that circuit, evaluated by the site\'s gate engine — the same style of serial hardware that puts CRCs on Ethernet frames and inside the serial links elsewhere on this site. It follows the parity &amp; checksum idea and the Hamming lab: parity catches a flip but cannot say where; CRC cannot repair either, but it catches patterns parity waves through — and it has one honest blind spot, which you will inject yourself.</p>' +
+    '<div class="schematic-box"><svg viewBox="0 0 920 150" role="img" aria-label="CRC shift register: incoming bit XORed with the leaving bit R2 enters R0; R0 XOR R2 enters R1; R1 shifts into R2" style="display:block;width:100%;height:auto">' +
+    '<text class="ry-lab" x="16" y="82">bit in</text><path d="M58 78 H120" style="stroke:var(--ink);stroke-width:2"/>' +
+    '<circle cx="140" cy="78" r="16" style="fill:var(--panel);stroke:var(--amber)"/><text class="ry-lab" x="140" y="83" style="text-anchor:middle">⊕</text>' +
+    '<path d="M156 78 H216" style="stroke:var(--ink);stroke-width:2"/>' +
+    '<rect x="216" y="52" width="86" height="52" rx="7" style="fill:var(--panel2);stroke:var(--line2)"/><text class="ry-lab" x="259" y="74" style="text-anchor:middle">R0</text><text class="ry-sub" x="259" y="92" style="text-anchor:middle">x⁰ place</text>' +
+    '<path d="M302 78 H340" style="stroke:var(--ink);stroke-width:2"/>' +
+    '<circle cx="360" cy="78" r="16" style="fill:var(--panel);stroke:var(--amber)"/><text class="ry-lab" x="360" y="83" style="text-anchor:middle">⊕</text>' +
+    '<path d="M376 78 H436" style="stroke:var(--ink);stroke-width:2"/>' +
+    '<rect x="436" y="52" width="86" height="52" rx="7" style="fill:var(--panel2);stroke:var(--line2)"/><text class="ry-lab" x="479" y="74" style="text-anchor:middle">R1</text><text class="ry-sub" x="479" y="92" style="text-anchor:middle">x¹ place</text>' +
+    '<path d="M522 78 H596" style="stroke:var(--ink);stroke-width:2"/>' +
+    '<rect x="596" y="52" width="86" height="52" rx="7" style="fill:var(--amber-soft);stroke:var(--amber)"/><text class="ry-lab" x="639" y="74" style="text-anchor:middle">R2</text><text class="ry-sub" x="639" y="92" style="text-anchor:middle">x² place · leaves first</text>' +
+    '<path d="M639 52 V24 H140 V58" style="stroke:var(--amber);stroke-width:2;fill:none"/><text class="ry-sub" x="390" y="16" style="text-anchor:middle">feedback: the leaving bit R2 is XORed in at both taps — G = 1011 has 1s at x¹ and x⁰</text>' +
+    '<text class="ry-sub" x="460" y="140" style="text-anchor:middle">one step: R2 ← R1 · R1 ← R0 ⊕ R2 · R0 ← bit in ⊕ R2</text>' +
+    "</svg></div>" +
+    '<div class="ctrl-label">Message — 6 bits, click to set</div>' +
+    '<div class="seq-state" id="crcMsg" style="margin-top:4px"></div>' +
+    '<div class="share-row"><button type="button" class="btn primary" id="crcStep">Step the divider ▸</button>' +
+    '<button type="button" class="btn" id="crcRunAll">Run all 9 steps</button>' +
+    '<button type="button" class="btn" id="crcResetSend">Reset sender</button></div>' +
+    '<div class="seq-state" id="crcRegRow" style="margin-top:4px"></div>' +
+    '<div class="ry-trace" id="crcTrace" aria-live="polite"></div>' +
+    '<div class="decimal-line" id="crcSendMsg" aria-live="polite"></div>' +
+    '<div class="ctrl-label" style="margin-top:14px">On the wire — the 9-bit codeword. Click bits to flip them, or use the error buttons</div>' +
+    '<div class="seq-state" id="crcRecv" style="margin-top:4px"></div>' +
+    '<div class="share-row"><button type="button" class="btn" id="crcFlip1">Flip one bit</button>' +
+    '<button type="button" class="btn" id="crcBurst">Burst error — flip 3 in a row</button>' +
+    '<button type="button" class="btn" id="crcGen">The invisible error — XOR the generator itself</button>' +
+    '<button type="button" class="btn" id="crcFix">Restore the sent word</button></div>' +
+    '<div class="ctrl-label" style="margin-top:14px">At the receiver — divide the received word by the same circuit</div>' +
+    '<div class="share-row"><button type="button" class="btn primary" id="crcChkStep">Step the checker ▸</button>' +
+    '<button type="button" class="btn" id="crcChkAll">Run the checker</button></div>' +
+    '<div class="seq-state" id="crcChkRow" style="margin-top:4px"></div>' +
+    '<div class="decimal-line" id="crcVerdict" aria-live="polite"></div>' +
+    '<div class="lab-check"><span class="lab-check-q" id="crcQ"></span><span id="crcOpts" style="display:flex;gap:6px;flex-wrap:wrap"></span><span class="lab-check-fb" id="crcFb" aria-live="polite"></span></div>' +
+    '<div class="share-row"><button type="button" class="btn" id="crcNewQ">New question</button>' +
+    '<button type="button" class="btn" data-crclink="ham">Back to Hamming(7,4) — the code that repairs →</button>' +
+    '<button type="button" class="btn" data-crclink="parity">The parity &amp; checksum concept →</button></div>' +
+    '<p class="cp-formal adv-only">G(x) = x³ + x + 1 · the sender computes (M(x)·x³) mod G(x) by clocking the message then three 0s through the register; the codeword M(x)·x³ + R(x) is exactly divisible by G(x), which is why the checker — the same circuit clocked with the received word — must end at 000 on an intact word. An error E(x) is invisible exactly when G(x) divides E(x). All bursts of length ≤ 3 are caught because a burst of length ≤ deg G cannot be a multiple of G unless it is zero. This lab\'s engine-driven encoder was verified against independent polynomial long division on all 64 messages before shipping; the blind-spot claim was verified the same way (all 384 placements of generator-multiple errors pass the checker).</p>';
+  const hamEl = $Y("hammingCard");
+  if (hamEl && hamEl.parentNode) hamEl.parentNode.insertBefore(crcSec, hamEl.nextSibling);
+  else { const cv = $Y("circuitsView"); if (cv) cv.appendChild(crcSec); }
+  crcSec.querySelectorAll("[data-crclink]").forEach(b => b.addEventListener("click", () => {
+    if (b.dataset.crclink === "ham") { if (!clickMenuKeyY("hamming-ecc")) jumpY("crcCard"); }
+    else { if (!clickMenuKeyY("concept-parity")) jumpY("crcCard"); }
+  }));
+  function crcCodeword() { return crc.msg.concat(crcEncode(crc.msg)); }
+  function crcResetSender() { crc.sendStep = 0; crc.reg = [0, 0, 0]; crc.trace = []; crc.recv = crcCodeword(); crcResetChecker(); }
+  function crcResetChecker() { crc.chkStep = 0; crc.chkReg = [0, 0, 0]; }
+  function crcFeedBits() { return crc.msg.concat([0, 0, 0]); }
+  function crcRegCells(host, reg, label) {
+    host.innerHTML = "";
+    ["R2", "R1", "R0"].forEach((n, i) => {
+      const c = document.createElement("div"); c.className = "seq-cell" + (reg[i] ? " one" : "");
+      c.innerHTML = "<b>" + reg[i] + '</b><span class="ry-role">' + n + "</span>"; host.appendChild(c);
+    });
+    const lab = document.createElement("div"); lab.className = "seq-cell";
+    lab.innerHTML = "<b>" + reg.join("") + '</b><span class="ry-role">' + label + "</span>"; host.appendChild(lab);
+  }
+  function crcRender() {
+    const mh = crcSec.querySelector("#crcMsg"); mh.innerHTML = "";
+    crc.msg.forEach((b, i) => {
+      const c = document.createElement("button"); c.type = "button"; c.className = "seq-cell" + (b ? " one" : "");
+      c.innerHTML = "<b>" + b + '</b><span class="ry-role">bit ' + (i + 1) + "</span>";
+      c.addEventListener("click", () => { crc.msg[i] ^= 1; crcResetSender(); crcRender(); });
+      mh.appendChild(c);
+    });
+    crcRegCells(crcSec.querySelector("#crcRegRow"), crc.reg, crc.sendStep >= 9 ? "remainder — final" : "sender register after step " + crc.sendStep + " of 9");
+    const feed = crcFeedBits();
+    const tr = crcSec.querySelector("#crcTrace");
+    if (!crc.trace.length) tr.textContent = "Not started. The divider will be clocked with the message bits, then three 0s — the augmentation that makes room for the remainder.";
+    else tr.innerHTML = crc.trace.map((r, i) => (i === crc.trace.length - 1 ? '<span class="ry-cur">' : "") + "step " + (i + 1) + " · bit in " + feed[i] + " · register " + r.join("") + (i === crc.trace.length - 1 ? "</span>" : "")).join("\n");
+    const sm = crcSec.querySelector("#crcSendMsg");
+    if (crc.sendStep >= 9) sm.innerHTML = "Remainder <b>" + crc.reg.join("") + "</b> — so the wire carries message + remainder: <b>" + crcCodeword().join("") + "</b>. (Check: dividing that codeword by G gives remainder 000 — run the checker on the untouched word.)";
+    else sm.textContent = "Sender: step " + crc.sendStep + " of 9 done (" + (crc.sendStep < 6 ? "message bits" : "the three appended 0s") + " going in). The register holds the running remainder of everything clocked in so far.";
+    const rh = crcSec.querySelector("#crcRecv"); rh.innerHTML = "";
+    const sent = crcCodeword();
+    crc.recv.forEach((b, i) => {
+      const c = document.createElement("button"); c.type = "button";
+      c.className = "seq-cell" + (b ? " one" : "") + (b !== sent[i] ? " ry-bad" : "");
+      c.innerHTML = "<b>" + b + '</b><span class="ry-role">' + (i < 6 ? "data" : "CRC") + " " + (i + 1) + "</span>";
+      c.addEventListener("click", () => { crc.recv[i] ^= 1; crcResetChecker(); crcRender(); });
+      rh.appendChild(c);
+    });
+    crcRegCells(crcSec.querySelector("#crcChkRow"), crc.chkReg, crc.chkStep >= 9 ? "checker remainder — final" : "checker register after step " + crc.chkStep + " of 9");
+    const vd = crcSec.querySelector("#crcVerdict");
+    if (crc.chkStep < 9) vd.textContent = "Checker: step " + crc.chkStep + " of 9. It is the same circuit, started from 000, dividing the word as received.";
+    else {
+      const rem = crc.chkReg.join(""), intact = crc.recv.join("") === sent.join("");
+      if (rem !== "000") vd.innerHTML = "<b>Caught.</b> The checker ends at remainder <b>" + rem + "</b> ≠ 000: the received word is not divisible by G, so something changed in transit. CRC says <i>discard / retransmit</i> — unlike Hamming it cannot say which bit, only that the word is wrong.";
+      else if (intact) vd.innerHTML = "<b>Accepted — and rightly.</b> Remainder 000, and the word is bit-for-bit what was sent.";
+      else vd.innerHTML = "<b>Accepted — and wrongly.</b> Remainder <b>000</b>, yet the word differs from what was sent (red-rimmed bits). The error pattern you injected is an exact multiple of the generator 1011, and a multiple of G divided by G leaves remainder 0: the check is blind to it by construction. This is CRC's honest limit — it detects every single-bit error and every burst up to the generator's length, but an error shaped like the generator itself sails through.";
+    }
+  }
+  crcSec.querySelector("#crcStep").addEventListener("click", () => {
+    if (crc.sendStep >= 9) return;
+    crc.reg = crcStepNet(crc.reg, crcFeedBits()[crc.sendStep]);
+    crc.sendStep++; crc.trace.push(crc.reg.slice()); crcRender();
+  });
+  crcSec.querySelector("#crcRunAll").addEventListener("click", () => { while (crc.sendStep < 9) { crc.reg = crcStepNet(crc.reg, crcFeedBits()[crc.sendStep]); crc.sendStep++; crc.trace.push(crc.reg.slice()); } crcRender(); });
+  crcSec.querySelector("#crcResetSend").addEventListener("click", () => { crcResetSender(); crcRender(); });
+  crcSec.querySelector("#crcFlip1").addEventListener("click", () => {
+    const sent = crcCodeword(); let p = Math.floor(Math.random() * 9);
+    crc.recv = sent.slice(); crc.recv[p] ^= 1; crcResetChecker(); crcRender();
+  });
+  crcSec.querySelector("#crcBurst").addEventListener("click", () => {
+    const sent = crcCodeword(); crc.recv = sent.slice();
+    for (let j = 0; j < 3; j++) crc.recv[crc.burstAt + j] ^= 1;
+    crc.burstAt = (crc.burstAt + 2) % 7; crcResetChecker(); crcRender();
+  });
+  crcSec.querySelector("#crcGen").addEventListener("click", () => {
+    const sent = crcCodeword(); crc.recv = sent.slice();
+    for (let j = 0; j < 4; j++) crc.recv[crc.genAt + j] ^= CRC_G[j];
+    crc.genAt = (crc.genAt + 1) % 6; crcResetChecker(); crcRender();
+  });
+  crcSec.querySelector("#crcFix").addEventListener("click", () => { crc.recv = crcCodeword(); crcResetChecker(); crcRender(); });
+  crcSec.querySelector("#crcChkStep").addEventListener("click", () => {
+    if (crc.chkStep >= 9) return;
+    crc.chkReg = crcStepNet(crc.chkReg, crc.recv[crc.chkStep]); crc.chkStep++; crcRender();
+  });
+  crcSec.querySelector("#crcChkAll").addEventListener("click", () => { while (crc.chkStep < 9) { crc.chkReg = crcStepNet(crc.chkReg, crc.recv[crc.chkStep]); crc.chkStep++; } crcRender(); });
+  let crcQn = 0;
+  function crcQuestion() {
+    const rng = mulberryY(4242 + crcQn * 131);
+    const msg = [0, 0, 0, 0, 0, 0].map(() => Math.floor(rng() * 2));
+    if (msg.every(v => !v)) msg[1] = 1;
+    const expected = crcEncode(msg).join("");
+    crcSec.querySelector("#crcQ").textContent = "Check: the message " + msg.join("") + " is sent with generator 1011. What 3-bit remainder goes on the wire?";
+    const opts = Array.from(new Set([expected, "000", crcEncode(msg.map((b, i) => i === 5 ? b ^ 1 : b)).join(""), msg.slice(3).join("")]));
+    for (let i = opts.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); const t = opts[i]; opts[i] = opts[j]; opts[j] = t; }
+    const host = crcSec.querySelector("#crcOpts"), fb = crcSec.querySelector("#crcFb");
+    host.innerHTML = ""; fb.textContent = "";
+    opts.forEach(v => {
+      const b = document.createElement("button"); b.type = "button"; b.className = "btn"; b.textContent = v;
+      b.addEventListener("click", () => fbSetY(fb, v === expected, v === expected
+        ? "Right — clocking " + msg.join("") + " then 000 through the register ends at " + expected + " (long division of " + msg.join("") + "000 by 1011 agrees)."
+        : "Not that one — set the message bits above to " + msg.join("") + " and step the divider: the register after step 9 is the answer."));
+      host.appendChild(b);
+    });
+    window.__crcQuestion = { msg, expected };
+  }
+  crcSec.querySelector("#crcNewQ").addEventListener("click", () => { crcQn++; crcQuestion(); });
+  crcResetSender(); crcRender(); crcQuestion();
+
+  /* ================================================================
+     2) STATIC HAZARD — F = A·C + A'·B, delays from the engine.
+     Waveforms are transport-delay simulations over the netlist:
+     valAt(net, t) evaluates gate functions on delayed inputs, so
+     the glitch is produced by the delay arithmetic itself.
+     ================================================================ */
+  function hazDef(consensus) {
+    const gates = [
+      { id: "n1", type: "NOT", ins: ["A"], out: "NA" },
+      { id: "g1", type: "AND", ins: ["A", "C"], out: "T1" },
+      { id: "g2", type: "AND", ins: ["NA", "B"], out: "T2" } ];
+    if (consensus) gates.push({ id: "g3", type: "AND", ins: ["B", "C"], out: "T3" });
+    gates.push({ id: "o1", type: "OR", ins: consensus ? ["T1", "T2", "T3"] : ["T1", "T2"], out: "F" });
+    return { inputs: ["A", "B", "C"], outputs: ["F"], gates };
+  }
+  const hazDefs = { plain: LABE.computeLevels(hazDef(false)), cons: LABE.computeLevels(hazDef(true)) };
+  const HAZ_T0 = -20, HAZ_T1 = 90;
+  function hazWave(consensus, from, to, B, C) {
+    const def = consensus ? hazDefs.cons : hazDefs.plain;
+    const byOut = {}; def.gates.forEach(g => byOut[g.out] = g);
+    const settled = LABE.evaluateAll(def, { A: from, B, C });
+    const cache = {};
+    function valAt(net, t) {
+      if (t < 0) return settled[net];
+      const k = net + "@" + t;
+      if (cache[k] !== undefined) return cache[k];
+      let v;
+      if (net === "A") v = to;
+      else if (net === "B") v = B;
+      else if (net === "C") v = C;
+      else { const g = byOut[net]; v = LABE.GATE_FNS[g.type](g.ins.map(n => valAt(n, t - LABE.gateDelay(g.type)))); }
+      cache[k] = v; return v;
+    }
+    const nets = consensus ? ["A", "NA", "T1", "T2", "T3", "F"] : ["A", "NA", "T1", "T2", "F"];
+    const wave = {};
+    nets.forEach(n => { wave[n] = []; for (let t = HAZ_T0; t <= HAZ_T1; t++) wave[n].push(valAt(n, t)); });
+    return wave;
+  }
+  function hazMeasure(consensus, B, C) { return hazMeasureT(consensus, 1, 0, B, C); } /* A 1->0, the classic handover */
+  function hazMeasureT(consensus, from, to, B, C) {
+    const wave = hazWave(consensus, from, to, B, C);
+    const F = wave.F; const trans = [];
+    for (let i = 1; i < F.length; i++) if (F[i] !== F[i - 1]) trans.push({ t: HAZ_T0 + i, to: F[i] });
+    let glitch = null;
+    for (let i = 0; i + 1 < trans.length; i++) {
+      if (trans[i].to === 0 && trans[i + 1].to === 1 && trans[i].t > 0) glitch = { start: trans[i].t, end: trans[i + 1].t, width: trans[i + 1].t - trans[i].t };
+    }
+    return { wave, trans, glitch, finalF: F[F.length - 1] };
+  }
+  function hazSteadyOk() { /* both netlists must compute the same function: A·C + A'·B */
+    const want = (A, B, C) => (A && C) || (!A && B) ? 1 : 0;
+    return [hazDefs.plain, hazDefs.cons].every(def =>
+      LABE.enumerateTruth(def).every(r => r.outs[0] === want(r.ins.A, r.ins.B, r.ins.C)));
+  }
+  function hazVerify() {
+    const plain = hazMeasure(false, 1, 1), cons = hazMeasure(true, 1, 1);
+    const upPlain = (() => { const w = hazWave(false, 0, 1, 1, 1); return w.F.every(v => v === 1); })();
+    const otherCombos = [[1, 0], [0, 1], [0, 0]].every(([B, C]) => !hazMeasure(false, B, C).glitch);
+    return { steady: hazSteadyOk(), glitchWidth: plain.glitch ? plain.glitch.width : 0,
+      glitchStart: plain.glitch ? plain.glitch.start : null, glitchEnd: plain.glitch ? plain.glitch.end : null,
+      consClean: !cons.glitch && cons.finalF === 1, upClean: upPlain, otherCombosClean: otherCombos,
+      pass: hazSteadyOk() && !!plain.glitch && plain.glitch.width === 10 && !cons.glitch && cons.finalF === 1 && upPlain && otherCombos };
+  }
+
+  const haz = { B: 1, C: 1, consensus: false, trans: { from: 1, to: 0 } };
+  const hazSec = document.createElement("section");
+  hazSec.className = "card stage-card"; hazSec.id = "hazardCard"; hazSec.style.marginTop = "16px";
+  hazSec.innerHTML =
+    "<h2>Static hazard — the cheapest circuit glitches</h2>" +
+    '<p class="what">Minimise F with a Karnaugh map and you land on <b>F = A·C + Ā·B</b>: two product terms, four gates, nothing wasted. It is also wrong — briefly, on exactly one transition. Set <b>B = C = 1</b> and flip <b>A from 1 to 0</b>: the A·C term should hand over to the Ā·B term, but the handover goes through an inverter, and the two paths arrive at <b>different times</b>. For a few nanoseconds neither term is driving the OR, and F dips to 0 even though the truth table says it must stay 1. That dip is a <b>static hazard</b>, and below it is not drawn — it falls out of the site\'s own gate-delay model (NOT, AND, OR at <b>10 ns</b> each, the same numbers the Timing view uses), run as a transport-delay simulation over the real netlist. The fix is the term the minimiser threw away: the <b>consensus term B·C</b>, logically redundant, temporally essential. Toggle it in and the glitch is gone — at a price you can count.</p>' +
+    '<div class="schematic-box"><svg viewBox="0 0 920 238" role="img" aria-label="Circuit diagram: A feeds an AND with C and a NOT feeding an AND with B; both terms feed an OR; an optional third AND of B and C is the consensus term" style="display:block;width:100%;height:auto">' +
+    '<text class="ry-lab" x="14" y="44">A</text><path d="M34 40 H120" style="stroke:var(--ink);stroke-width:2"/><path d="M34 40 H60 V130 H120" style="stroke:var(--ink);stroke-width:1.6;fill:none"/>' +
+    '<rect x="120" y="18" width="120" height="44" rx="7" style="fill:var(--panel2);stroke:var(--line2)"/><text class="ry-lab" x="180" y="38" style="text-anchor:middle">AND · A·C</text><text class="ry-sub" x="180" y="54" style="text-anchor:middle">10 ns</text>' +
+    '<text class="ry-lab" x="14" y="134">Ā</text>' +
+    '<rect x="66" y="86" width="86" height="36" rx="7" style="fill:var(--panel2);stroke:var(--line2)"/><text class="ry-lab" x="109" y="102" style="text-anchor:middle">NOT A</text><text class="ry-sub" x="109" y="116" style="text-anchor:middle">10 ns</text>' +
+    '<path d="M60 104 H66" style="stroke:var(--ink);stroke-width:1.6"/><path d="M152 104 H180 V148 H196" style="stroke:var(--ink);stroke-width:1.6;fill:none"/>' +
+    '<rect x="196" y="126" width="120" height="44" rx="7" style="fill:var(--panel2);stroke:var(--line2)"/><text class="ry-lab" x="256" y="146" style="text-anchor:middle">AND · Ā·B</text><text class="ry-sub" x="256" y="162" style="text-anchor:middle">10 ns</text>' +
+    '<text class="ry-lab" x="330" y="44">C = <span id="hazSvgC">1</span></text><path d="M376 40 H392 V52 H240" style="stroke:var(--line2);stroke-width:1.6;fill:none"/>' +
+    '<text class="ry-lab" x="330" y="152">B = <span id="hazSvgB">1</span></text><path d="M376 148 H316" style="stroke:var(--line2);stroke-width:1.6"/>' +
+    '<g id="hazSvgCons"><rect x="420" y="176" width="170" height="26" rx="7" style="fill:var(--panel);stroke:var(--line2);stroke-dasharray:4 3"/><text class="ry-sub" x="505" y="193" style="text-anchor:middle">AND · B·C (consensus) — off</text></g>' +
+    '<path d="M316 40 H560 V64 H620" style="stroke:var(--ink);stroke-width:2;fill:none"/><path d="M316 148 H560 V96 H620" style="stroke:var(--ink);stroke-width:1.6;fill:none"/>' +
+    '<rect x="620" y="52" width="110" height="56" rx="7" style="fill:var(--amber-soft);stroke:var(--amber)"/><text class="ry-lab" x="675" y="78" style="text-anchor:middle">OR</text><text class="ry-sub" x="675" y="94" style="text-anchor:middle">10 ns</text>' +
+    '<path d="M730 80 H800" style="stroke:var(--ink);stroke-width:2"/><text class="ry-lab" x="812" y="84">F</text>' +
+    '<text class="ry-sub" x="14" y="228">path A→F direct: AND + OR = 20 ns · path A→F through the inverter: NOT + AND + OR = 30 ns — the 10 ns gap is the hazard</text>' +
+    "</svg></div>" +
+    '<div class="tool-controls">' +
+    '<label>B <span class="seg" role="group" aria-label="B value" id="hazBSeg"><button type="button" data-hb="0" aria-pressed="false">0</button><button type="button" data-hb="1" aria-pressed="true">1</button></span></label>' +
+    '<label>C <span class="seg" role="group" aria-label="C value" id="hazCSeg"><button type="button" data-hc="0" aria-pressed="false">0</button><button type="button" data-hc="1" aria-pressed="true">1</button></span></label>' +
+    '<label>Consensus term B·C <span class="seg" role="group" aria-label="Consensus term" id="hazConsSeg"><button type="button" data-hcons="off" aria-pressed="true">Off — the K-map minimum</button><button type="button" data-hcons="on" aria-pressed="false">On — one gate more</button></span></label></div>' +
+    '<div class="share-row"><button type="button" class="btn primary" id="hazFlip">Flip A: 1 → 0 ▸</button>' +
+    '<button type="button" class="btn" id="hazFlipBack">Flip A back: 0 → 1 ▸</button></div>' +
+    '<div class="schematic-box"><svg id="hazSvg" viewBox="0 0 920 300" role="img" aria-label="Timing diagram computed from the gate delays: A, the two product terms, and F, with the glitch shaded" style="display:block;width:100%;height:auto"></svg></div>' +
+    '<div class="decimal-line" id="hazMsg" aria-live="polite"></div>' +
+    '<div class="seq-state" id="hazCost" style="margin-top:6px"></div>' +
+    '<div class="lab-check"><span class="lab-check-q" id="hazQ"></span><span id="hazOpts" style="display:flex;gap:6px;flex-wrap:wrap"></span><span class="lab-check-fb" id="hazFb" aria-live="polite"></span></div>' +
+    '<div class="share-row"><button type="button" class="btn" id="hazNewQ">New question</button>' +
+    '<button type="button" class="btn" data-hazlink="kmap">Open the Karnaugh map minimiser →</button></div>' +
+    '<p class="timing-note">The lesson, plainly: the cheapest circuit is not always the correct one. Minimisation optimises the steady-state function — it says nothing about the journey between two rows of the truth table. The consensus term covers exactly the boundary between the two K-map groups (the B·C cell pair that both terms border), so during the one transition that crosses that boundary, something is always driving the output. Real designs either add the redundant term, register the output, or guarantee downstream logic never samples during the transition window.</p>' +
+    '<p class="cp-formal adv-only">Static-1 hazard on the A 1→0 transition at B = C = 1: t(A·C falls) = 10 ns after the edge of A, so the OR loses that input at 20 ns; t(Ā·B rises) = 10 (NOT) + 10 (AND) = 20 ns, reaching the OR output at 30 ns. Glitch width = path difference = 30 − 20 = 10 ns, measured on the simulated waveform at load. With B·C present, that AND\'s output is a constant 1 across the transition and the OR never sees an all-zero input. Delays: NOT = AND = OR = 10 ns from the site delay table (74-series typical); the width scales with the path imbalance, not with any single gate.</p>';
+  if (hamEl && hamEl.parentNode) hamEl.parentNode.insertBefore(hazSec, crcSec.nextSibling);
+  else { const cv2 = $Y("circuitsView"); if (cv2) cv2.appendChild(hazSec); }
+  hazSec.querySelectorAll("[data-hazlink]").forEach(b => b.addEventListener("click", () => { if (!clickMenuKeyY("kmap")) jumpY("hazardCard"); }));
+  function hazX(t) { return 108 + (t - HAZ_T0) * 7.2; }
+  function hazPath(wave, y) {
+    let d = "";
+    for (let i = 0; i < wave.length; i++) {
+      const x = hazX(HAZ_T0 + i), yy = y - wave[i] * 24;
+      if (i === 0) d += "M" + x.toFixed(1) + " " + yy;
+      else { const px = hazX(HAZ_T0 + i - 1); d += "L" + x.toFixed(1) + " " + (y - wave[i - 1] * 24) + " L" + x.toFixed(1) + " " + yy; }
+    }
+    return d;
+  }
+  function hazRender() {
+    hazSec.querySelector("#hazSvgB").textContent = haz.B;
+    hazSec.querySelector("#hazSvgC").textContent = haz.C;
+    const cons = hazSec.querySelector("#hazSvgCons");
+    if (cons) cons.innerHTML = haz.consensus
+      ? '<rect x="420" y="176" width="170" height="26" rx="7" style="fill:var(--amber-soft);stroke:var(--amber)"/><text class="ry-sub" x="505" y="193" style="text-anchor:middle">AND · B·C (consensus) — ON · 10 ns</text>'
+      : '<rect x="420" y="176" width="170" height="26" rx="7" style="fill:var(--panel);stroke:var(--line2);stroke-dasharray:4 3"/><text class="ry-sub" x="505" y="193" style="text-anchor:middle">AND · B·C (consensus) — off</text>';
+    const m = hazMeasureT(haz.consensus, haz.trans.from, haz.trans.to, haz.B, haz.C);
+    const rows = [["A", m.wave.A, "ry-wa"], ["A·C", m.wave.T1, "ry-w1"], ["Ā·B", m.wave.T2, "ry-w2"]];
+    if (haz.consensus) rows.push(["B·C", m.wave.T3, "ry-w1"]);
+    rows.push(["F", m.wave.F, "ry-wf"]);
+    const yStep = rows.length > 5 ? 46 : 52, y0 = 58;
+    let s = "";
+    if (m.glitch) s += '<rect class="ry-glitch" x="' + hazX(m.glitch.start) + '" y="16" width="' + (hazX(m.glitch.end) - hazX(m.glitch.start)) + '" height="' + (y0 + yStep * (rows.length - 1) + 18) + '"/>';
+    [0, 20, 40, 60, 80].forEach(t => { s += '<line x1="' + hazX(t) + '" y1="16" x2="' + hazX(t) + '" y2="' + (y0 + yStep * (rows.length - 1) + 22) + '" style="stroke:var(--line);stroke-width:1"/><text class="ry-sub" x="' + hazX(t) + '" y="' + (y0 + yStep * (rows.length - 1) + 36) + '" style="text-anchor:middle">' + t + " ns</text>"; });
+    s += '<line x1="' + hazX(0) + '" y1="10" x2="' + hazX(0) + '" y2="' + (y0 + yStep * (rows.length - 1) + 22) + '" style="stroke:var(--amber);stroke-width:1.6;stroke-dasharray:4 3"/><text class="ry-sub" x="' + (hazX(0) + 4) + '" y="12">A flips here</text>';
+    rows.forEach(([lab, w, cls], ri) => {
+      const y = y0 + ri * yStep;
+      s += '<text class="ry-lab" x="14" y="' + (y - 8) + '">' + lab + "</text>";
+      s += '<path class="ry-wave ' + cls + '" d="' + hazPath(w, y) + '"/>';
+    });
+    if (m.glitch) s += '<text class="ry-vlab" x="' + ((hazX(m.glitch.start) + hazX(m.glitch.end)) / 2) + '" y="' + (y0 + yStep * (rows.length - 1) - 32) + '" style="text-anchor:middle">glitch: F = 0 for ' + m.glitch.width + " ns</text>";
+    const svg = hazSec.querySelector("#hazSvg");
+    svg.setAttribute("viewBox", "0 0 920 " + (y0 + yStep * (rows.length - 1) + 44));
+    svg.innerHTML = s;
+    const msg = hazSec.querySelector("#hazMsg");
+    const timing = consensus => (consensus ? hazDefs.cons : hazDefs.plain).timing.total;
+    if (haz.B !== 1 || haz.C !== 1) msg.innerHTML = "With B = " + haz.B + ", C = " + haz.C + " there is no handover to fumble: F settles to " + m.finalF + " and stays there. The hazard needs B = C = 1 — both terms armed, the output depending on which path wins the race. Set B and C to 1 and flip A down.";
+    else if (m.glitch) msg.innerHTML = "<b>Glitch — measured on the waveform: F falls to 0 at " + m.glitch.start + " ns and recovers at " + m.glitch.end + " ns, a " + m.glitch.width + " ns pulse</b> the truth table never asked for. The A·C path (AND + OR = 20 ns) lets go before the Ā·B path (NOT + AND + OR = 30 ns) takes hold. If anything downstream samples F in that window — a counter, a latch — it sees a 0 that never existed. Now add the consensus term and flip A again.";
+    else if (haz.consensus) msg.innerHTML = "<b>No glitch.</b> B·C = 1 holds the OR's input up through the whole handover: while A·C lets go and Ā·B is still travelling through the inverter, the redundant term is already there. Same truth table — the engine checks both netlists compute identical functions — different behaviour in time.";
+    else msg.innerHTML = "<b>Glitch on the way down only.</b> Flip A 0 → 1 and the handover runs the safe way (the direct term arrives first, the inverter path is late to <i>leave</i>, which cannot open a gap). Flip A back down, 1 → 0, to see the hazard.";
+    const cost = hazSec.querySelector("#hazCost"); cost.innerHTML = "";
+    [["gates in the circuit", haz.consensus ? "5" : "4"], ["settled delay A → F", timing(haz.consensus) + " ns"], ["glitch on A 1→0 (B=C=1)", m.glitch ? m.glitch.width + " ns wide" : "none"], ["price of the fix", haz.consensus ? "+1 AND gate (+25% gates), +0 ns settled delay" : "—"]].forEach(([k, v]) => {
+      const c = document.createElement("div"); c.className = "seq-cell";
+      c.innerHTML = "<b>" + v + '</b><span class="ry-role">' + k + "</span>"; cost.appendChild(c);
+    });
+    hazSec.querySelector("#hazFlip").textContent = haz.trans.from === 1 ? "Showing A: 1 → 0 — flip it back below" : "Flip A: 1 → 0 ▸";
+    hazSec.querySelector("#hazFlipBack").textContent = haz.trans.from === 0 ? "Showing A: 0 → 1 — the safe direction" : "Flip A back: 0 → 1 ▸";
+  }
+  function hazSegWire(segId, attr, set) {
+    hazSec.querySelector(segId).querySelectorAll("button").forEach(b => b.addEventListener("click", () => {
+      hazSec.querySelector(segId).querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x === b ? "true" : "false"));
+      set(b.dataset[attr]); hazRender();
+    }));
+  }
+  hazSegWire("#hazBSeg", "hb", v => haz.B = +v);
+  hazSegWire("#hazCSeg", "hc", v => haz.C = +v);
+  hazSegWire("#hazConsSeg", "hcons", v => haz.consensus = v === "on");
+  hazSec.querySelector("#hazFlip").addEventListener("click", () => { haz.trans = { from: 1, to: 0 }; hazRender(); });
+  hazSec.querySelector("#hazFlipBack").addEventListener("click", () => { haz.trans = { from: 0, to: 1 }; hazRender(); });
+  let hazQn = 0;
+  function hazQuestion() {
+    const rng = mulberryY(909 + hazQn * 77);
+    const withCons = hazQn % 2 === 1;
+    const m = hazMeasure(withCons, 1, 1);
+    const fb = hazSec.querySelector("#hazFb"), host = hazSec.querySelector("#hazOpts");
+    fb.textContent = ""; host.innerHTML = "";
+    if (!withCons) {
+      const expected = m.glitch ? m.glitch.width : 0;
+      hazSec.querySelector("#hazQ").textContent = "Check: B = C = 1, no consensus term, A falls 1 → 0. How wide is the glitch on F, in nanoseconds?";
+      [0, 10, 20, 30].forEach(v => {
+        const b = document.createElement("button"); b.type = "button"; b.className = "btn"; b.textContent = v + " ns";
+        b.addEventListener("click", () => fbSetY(fb, v === expected, v === expected
+          ? "Right — the direct path lets go at 20 ns, the inverter path arrives at 30 ns, and the difference, " + expected + " ns, is the pulse. It is the path imbalance, not any single gate's delay."
+          : "Not that — run the transition above with the consensus term off and read the shaded width off the waveform; then ask which two arrival times it is the difference of."));
+        host.appendChild(b);
+      });
+      window.__hazQuestion = { kind: "width", expected };
+    } else {
+      hazSec.querySelector("#hazQ").textContent = "Check: now add the consensus term. On the same transition (B = C = 1, A falls 1 → 0), what does F do?";
+      optBtnsY(host, ["Glitches for 10 ns, as before", "Stays 1 — B·C holds the OR up", "Falls to 0 and stays there", "Glitches twice, 5 ns each"], i => fbSetY(fb, i === 1, i === 1
+        ? "Right — B·C does not change during the transition (neither B nor C moves), so it pins the OR output at 1 while the other two terms swap. One extra gate buys a clean handover."
+        : "Not that — toggle the consensus term on above and flip A down: watch the B·C row sit at 1 across the whole transition."));
+      window.__hazQuestion = { kind: "cons", expected: 1 };
+    }
+  }
+  hazSec.querySelector("#hazNewQ").addEventListener("click", () => { hazQn++; hazQuestion(); });
+  /* render both directions honestly: default view is the 1->0 transition */
+  hazRender(); hazQuestion();
+
+  /* ================================================================
+     3) MESI — two CPUs, private caches, one memory, a snooping bus.
+     Lines: 3 lines x 2 words. Coherence acts on whole lines, which
+     is exactly what makes false sharing possible — and the model
+     supports it honestly, as the script's last steps show.
+     ================================================================ */
+  function mesiNew() {
+    return { mem: [[0, 0], [0, 0], [0, 0]],
+      st: [["I", "I", "I"], ["I", "I", "I"]],
+      dat: [[null, null, null], [null, null, null]],
+      n: { busRd: 0, busRdX: 0, busUpgr: 0, wb: 0, inv: 0 }, wc: 0, log: [] };
+  }
+  function mesiStep(s, cpu, op, line, word) {
+    const o = 1 - cpu, acts = [];
+    const my = s.st[cpu][line], ot = s.st[o][line];
+    const tag = "P" + cpu + " " + (op === "R" ? "reads" : "writes") + " line " + line + ", word " + word;
+    if (op === "R") {
+      if (my !== "I") { acts.push(tag + ": hit — the copy is already " + my + ", no bus traffic"); return { acts, value: s.dat[cpu][line][word] }; }
+      s.n.busRd++; acts.push(tag + ": miss — BusRd on the bus");
+      if (ot === "M") { s.mem[line] = s.dat[o][line].slice(); s.n.wb++; s.st[o][line] = "S"; s.st[cpu][line] = "S"; s.dat[cpu][line] = s.dat[o][line].slice(); acts.push("P" + o + " holds it Modified: it flushes the line (write-back — memory was stale) and drops to S; P" + cpu + " loads S from P" + o + "'s copy (intervention)"); }
+      else if (ot === "E") { s.st[o][line] = "S"; s.st[cpu][line] = "S"; s.dat[cpu][line] = s.mem[line].slice(); acts.push("P" + o + " holds it Exclusive: no write-back needed (memory is current), P" + o + " drops E→S and P" + cpu + " loads S from memory"); }
+      else if (ot === "S") { s.st[cpu][line] = "S"; s.dat[cpu][line] = s.mem[line].slice(); acts.push("P" + o + " already shares it: P" + cpu + " loads S from memory, nothing changes hands"); }
+      else { s.st[cpu][line] = "E"; s.dat[cpu][line] = s.mem[line].slice(); acts.push("nobody else has it: P" + cpu + " takes it Exclusive from memory"); }
+      return { acts, value: s.dat[cpu][line][word] };
+    }
+    const val = ++s.wc;
+    if (my === "M") { s.dat[cpu][line][word] = val; acts.push(tag + ": hit — already Modified, the write is silent and memory stays stale by design"); }
+    else if (my === "E") { s.st[cpu][line] = "M"; s.dat[cpu][line][word] = val; acts.push(tag + ": E→M — no other copy exists, so the upgrade is silent, not even a bus whisper"); }
+    else if (my === "S") { s.n.busUpgr++; if (ot === "S") { s.st[o][line] = "I"; s.dat[o][line] = null; s.n.inv++; } s.st[cpu][line] = "M"; s.dat[cpu][line][word] = val; acts.push(tag + ": Shared is not enough to write — BusUpgr invalidates P" + o + "'s copy (S→I) and P" + cpu + " promotes to M. No data crosses the bus; only permission"); }
+    else { s.n.busRdX++;
+      if (ot === "M") { s.mem[line] = s.dat[o][line].slice(); s.n.wb++; acts.push(tag + ": miss — BusRdX; P" + o + " holds it Modified, so it flushes first (write-back) so P" + cpu + " allocates the current line, not stale memory"); }
+      else acts.push(tag + ": miss — BusRdX (read-for-ownership): fetch the line and take it exclusively in one motion");
+      if (ot !== "I") { s.st[o][line] = "I"; s.dat[o][line] = null; s.n.inv++; acts.push("P" + o + "'s copy is invalidated (" + ot + "→I)"); }
+      s.dat[cpu][line] = s.mem[line].slice(); s.st[cpu][line] = "M"; s.dat[cpu][line][word] = val;
+    }
+    return { acts, value: val };
+  }
+  const MESI_SCRIPT = [
+    { cpu: 0, op: "R", line: 0, word: 0, why: "A cold read: nobody has line 0, so P0 takes it Exclusive — taking it Shared would claim company that does not exist." },
+    { cpu: 0, op: "W", line: 0, word: 0, why: "Writing an Exclusive line costs nothing: no other copy can exist, so E→M is silent. Memory is now quietly stale." },
+    { cpu: 1, op: "R", line: 0, word: 0, why: "The downgrade: P1's read finds P0's Modified copy. P0 must flush it (write-back) and fall to S; P1 reads the fresh value, not the stale one in memory." },
+    { cpu: 1, op: "W", line: 0, word: 1, why: "The invalidating write: P1 holds only a Shared copy, so BusUpgr kills P0's copy before the write lands. Note P1 writes word 1 — the whole line still changes owner." },
+    { cpu: 0, op: "R", line: 0, word: 1, why: "P0 reads back the word P1 just wrote: another flush, another M→S downgrade. Shared, current, and memory agrees again." },
+    { cpu: 0, op: "W", line: 1, word: 0, why: "False sharing begins. Line 1 holds two unrelated words. P0 writes only word 0 — and takes the whole line Modified." },
+    { cpu: 1, op: "W", line: 1, word: 1, why: "P1 writes only word 1 — a different variable entirely — yet BusRdX steals the whole line from P0, flush and invalidation included. The two CPUs never share a single datum; the coherence protocol cannot tell." },
+    { cpu: 0, op: "W", line: 1, word: 0, why: "And back again: every alternation costs a BusRdX, a flush and an invalidation. That ping-pong — line bouncing between caches while the data never overlaps — is false sharing, and padding the two words onto separate lines is the standard cure." }
+  ];
+  function mesiInvariants(s) {
+    for (let l = 0; l < 3; l++) {
+      const a = s.st[0][l], b = s.st[1][l];
+      if ((a === "M" || a === "E") && b !== "I") return false;
+      if ((b === "M" || b === "E") && a !== "I") return false;
+      const valid = [0, 1].filter(c => s.st[c][l] !== "I");
+      if (valid.length === 2 && s.dat[0][l].join() !== s.dat[1][l].join()) return false;
+      if (!valid.some(c => s.st[c][l] === "M")) for (const c of valid) if (s.dat[c][l].join() !== s.mem[l].join()) return false;
+    }
+    return true;
+  }
+  function mesiVerify() {
+    const s = mesiNew(); const expect = [
+      ["E", "I"], ["M", "I"], ["S", "S"], ["I", "M"], ["S", "S"], null, null, null ];
+    let traceOk = true;
+    MESI_SCRIPT.forEach((st, i) => {
+      mesiStep(s, st.cpu, st.op, st.line, st.word);
+      if (!mesiInvariants(s)) traceOk = false;
+      if (expect[i]) { const got = [s.st[0][st.line], s.st[1][st.line]]; if (got.join() !== expect[i].join()) traceOk = false; }
+    });
+    const countsOk = s.n.busRd === 3 && s.n.busRdX === 3 && s.n.busUpgr === 1 && s.n.wb === 4 && s.n.inv === 3;
+    const rng = mulberryY(20261113);
+    const s2 = mesiNew(); const shadow = [[0, 0], [0, 0], [0, 0]]; let cohOk = true;
+    for (let i = 0; i < 2000 && cohOk; i++) {
+      const c = rng() < 0.5 ? 0 : 1, op = rng() < 0.5 ? "R" : "W", l = Math.floor(rng() * 3), w = Math.floor(rng() * 2);
+      const r = mesiStep(s2, c, op, l, w);
+      if (op === "W") shadow[l][w] = r.value; else if (r.value !== shadow[l][w]) cohOk = false;
+      if (!mesiInvariants(s2)) cohOk = false;
+    }
+    return { traceOk, countsOk, cohOk, finalCounts: s.n, pass: traceOk && countsOk && cohOk };
+  }
+
+  let mesi = mesiNew();
+  let mesiScriptIdx = 0;
+  const mesiSel = { cpu: 0, op: "R", line: 0, word: 0 };
+  const mesiSec = document.createElement("section");
+  mesiSec.className = "card stage-card"; mesiSec.id = "mesiCard"; mesiSec.style.marginTop = "16px"; mesiSec.style.marginBottom = "16px";
+  mesiSec.innerHTML =
+    "<h2>MESI — keeping two caches honest</h2>" +
+    '<p class="what">Give two CPUs private caches and one shared memory and you have invented a problem: the moment both hold the same line, one can change it and the other will happily read the past. The <b>MESI protocol</b> is the standard answer — every line in every cache carries one of four states: <b>Modified</b> (mine, changed, memory is stale), <b>Exclusive</b> (mine, unchanged, memory agrees), <b>Shared</b> (we both hold it, memory agrees), <b>Invalid</b> (not really here). A snooping bus connects them: every miss is announced — <b>BusRd</b>, <b>BusRdX</b> (read-for-ownership), <b>BusUpgr</b> (permission only, no data) — and the other cache reacts: flushing, downgrading, invalidating. Step the demonstration, then drive it yourself. This machine has three lines of two words each and never evicts — capacity is a different lab; here every state change is coherence and nothing else. It is the hardware mirror of <b>The Race</b> in Operating Systems: there, threads lose updates without a lock; here, caches would too, without a protocol.</p>' +
+    '<div class="share-row"><button type="button" class="btn primary" id="mesiScriptBtn">Run the demonstration — step 1 ▸</button>' +
+    '<button type="button" class="btn" id="mesiReset">Reset the machine</button></div>' +
+    '<div class="decimal-line" id="mesiWhy" aria-live="polite"></div>' +
+    '<div class="tool-controls">' +
+    '<label>CPU <span class="seg" role="group" aria-label="CPU" id="mesiCpuSeg"><button type="button" data-mc="0" aria-pressed="true">P0</button><button type="button" data-mc="1" aria-pressed="false">P1</button></span></label>' +
+    '<label>Operation <span class="seg" role="group" aria-label="Operation" id="mesiOpSeg"><button type="button" data-mo="R" aria-pressed="true">Read</button><button type="button" data-mo="W" aria-pressed="false">Write</button></span></label>' +
+    '<label>Line <span class="seg" role="group" aria-label="Line" id="mesiLineSeg"><button type="button" data-ml="0" aria-pressed="true">Line 0</button><button type="button" data-ml="1" aria-pressed="false">Line 1</button><button type="button" data-ml="2" aria-pressed="false">Line 2</button></span></label>' +
+    '<label>Word <span class="seg" role="group" aria-label="Word" id="mesiWordSeg"><button type="button" data-mw="0" aria-pressed="true">Word 0</button><button type="button" data-mw="1" aria-pressed="false">Word 1</button></span></label>' +
+    '<button type="button" class="btn primary" id="mesiDo">Do it ▸</button></div>' +
+    '<div class="ry-mgrid" id="mesiGrid" role="img" aria-label="Cache states: for each line, main memory and the state and contents of each CPU cache"></div>' +
+    '<div class="seq-state" id="mesiCounts" style="margin-top:6px"></div>' +
+    '<div class="decimal-line" id="mesiMsg" aria-live="polite"></div>' +
+    '<div class="lab-check"><span class="lab-check-q" id="mesiQ"></span><span id="mesiOpts" style="display:flex;gap:6px;flex-wrap:wrap"></span><span class="lab-check-fb" id="mesiFb" aria-live="polite"></span></div>' +
+    '<div class="share-row"><button type="button" class="btn" id="mesiNewQ">New question</button>' +
+    '<button type="button" class="btn" data-mesilink="race">The Race — the same fight, in software →</button>' +
+    '<button type="button" class="btn" data-mesilink="repl">Cache replacement shootout →</button></div>' +
+    '<p class="cp-formal adv-only">Transition rules as implemented — PrRd on I: BusRd; a Modified holder flushes and both go S (intervention), an Exclusive holder drops to S, a Shared holder stays, else E. PrWr on S: BusUpgr, other S copies → I, self → M. PrWr on I: BusRdX, a Modified holder flushes first, all other copies → I, self → M (write-allocate). PrWr on E: silent → M. The state machine was verified two ways at load: the 8-step script above reproduces the hand-derived trace and bus counts (BusRd 3 · BusRdX 3 · BusUpgr 1 · write-backs 4 · invalidations 3), and 2,000 seeded random operations never return a stale read and never break the MESI invariants.</p>';
+  const archHost = $Y("sysArch"); if (archHost) archHost.appendChild(mesiSec);
+  mesiSec.querySelectorAll("[data-mesilink]").forEach(b => b.addEventListener("click", () => {
+    if (b.dataset.mesilink === "race") { if (!clickMenuKeyY("os-race")) jumpY("mesiCard"); }
+    else { if (!clickMenuKeyY("arch-repl")) jumpY("mesiCard"); }
+  }));
+  function mesiSegWire(segId, attr, set) {
+    mesiSec.querySelector(segId).querySelectorAll("button").forEach(b => b.addEventListener("click", () => {
+      mesiSec.querySelector(segId).querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x === b ? "true" : "false"));
+      set(b.dataset[attr]); }));
+  }
+  mesiSegWire("#mesiCpuSeg", "mc", v => mesiSel.cpu = +v);
+  mesiSegWire("#mesiOpSeg", "mo", v => mesiSel.op = v);
+  mesiSegWire("#mesiLineSeg", "ml", v => mesiSel.line = +v);
+  mesiSegWire("#mesiWordSeg", "mw", v => mesiSel.word = +v);
+  function mesiStale(l) { return [0, 1].some(c => mesi.st[c][l] === "M" && mesi.dat[c][l] && mesi.dat[c][l].join() !== mesi.mem[l].join()); }
+  function mesiRender() {
+    const g = mesiSec.querySelector("#mesiGrid"); g.innerHTML = "";
+    ["", "Memory", "P0 cache", "P1 cache"].forEach(h => { const d = document.createElement("div"); d.className = "ry-mhead"; d.textContent = h; g.appendChild(d); });
+    for (let l = 0; l < 3; l++) {
+      const lab = document.createElement("div"); lab.className = "ry-mhead"; lab.textContent = "Line " + l; g.appendChild(lab);
+      const mem = document.createElement("div"); mem.className = "ry-mcell mem";
+      mem.innerHTML = "w0=" + mesi.mem[l][0] + " · w1=" + mesi.mem[l][1] + (mesiStale(l) ? '<span class="ry-stale">STALE — a cache holds newer</span>' : '<span class="ry-fresh">current</span>');
+      g.appendChild(mem);
+      [0, 1].forEach(c => {
+        const cell = document.createElement("div"); const st = mesi.st[c][l];
+        cell.className = "ry-mcell st-" + st;
+        cell.innerHTML = '<span class="ry-st">' + st + "</span>" + (st === "I" ? "no copy" : "w0=" + mesi.dat[c][l][0] + " · w1=" + mesi.dat[c][l][1]);
+        g.appendChild(cell);
+      });
+    }
+    const counts = mesiSec.querySelector("#mesiCounts"); counts.innerHTML = "";
+    [["BusRd", mesi.n.busRd], ["BusRdX", mesi.n.busRdX], ["BusUpgr", mesi.n.busUpgr], ["write-backs", mesi.n.wb], ["invalidations", mesi.n.inv], ["writes so far", mesi.wc]].forEach(([k, v]) => {
+      const c = document.createElement("div"); c.className = "seq-cell";
+      c.innerHTML = "<b>" + v + '</b><span class="ry-role">' + k + "</span>"; counts.appendChild(c);
+    });
+    const sb = mesiSec.querySelector("#mesiScriptBtn");
+    sb.textContent = mesiScriptIdx < MESI_SCRIPT.length ? "Run the demonstration — step " + (mesiScriptIdx + 1) + " of " + MESI_SCRIPT.length + " ▸" : "Demonstration complete — reset to run it again";
+    sb.disabled = mesiScriptIdx >= MESI_SCRIPT.length;
+  }
+  function mesiApply(cpu, op, line, word, why) {
+    const r = mesiStep(mesi, cpu, op, line, word);
+    mesiSec.querySelector("#mesiMsg").innerHTML = r.acts.map(escY).join("<br>") + (op === "R" ? "<br><b>P" + cpu + " read the value " + r.value + "</b> — the last value written to that word, wherever it was living." : "<br><b>P" + cpu + " wrote the value " + r.value + "</b> (writes are stamped with fresh values so you can follow them).");
+    mesiSec.querySelector("#mesiWhy").textContent = why || "";
+    mesiRender();
+  }
+  mesiSec.querySelector("#mesiDo").addEventListener("click", () => mesiApply(mesiSel.cpu, mesiSel.op, mesiSel.line, mesiSel.word, ""));
+  mesiSec.querySelector("#mesiScriptBtn").addEventListener("click", () => {
+    if (mesiScriptIdx >= MESI_SCRIPT.length) return;
+    const st = MESI_SCRIPT[mesiScriptIdx]; mesiScriptIdx++;
+    mesiApply(st.cpu, st.op, st.line, st.word, "Step " + mesiScriptIdx + " — " + st.why);
+  });
+  mesiSec.querySelector("#mesiReset").addEventListener("click", () => {
+    mesi = mesiNew(); mesiScriptIdx = 0;
+    mesiSec.querySelector("#mesiMsg").textContent = "Reset: every line Invalid, memory all zeros. Run the demonstration, or drive the machine yourself.";
+    mesiSec.querySelector("#mesiWhy").textContent = "";
+    mesiRender();
+  });
+  let mesiQn = 0;
+  function mesiQuestion() {
+    const scenarios = [
+      { ops: [[0, "R", 0, 0], [0, "W", 0, 0], [1, "R", 0, 0]], ask: [0, 0], text: "From reset: P0 reads line 0, P0 writes line 0, then P1 reads line 0. What state is P0's copy of line 0 in now?" },
+      { ops: [[0, "R", 0, 0], [1, "R", 0, 0], [1, "W", 0, 1]], ask: [0, 0], text: "From reset: P0 reads line 0, P1 reads line 0, then P1 writes line 0. What state is P0's copy of line 0 in now?" },
+      { ops: [[1, "W", 2, 0], [0, "R", 2, 0], [0, "W", 2, 0]], ask: [1, 2], text: "From reset: P1 writes line 2, P0 reads line 2, then P0 writes line 2. What state is P1's copy of line 2 in now?" },
+      { ops: [[0, "R", 1, 0], [0, "W", 1, 0]], ask: [0, 1], text: "From reset: P0 reads line 1, then P0 writes line 1. No bus upgrade was needed — what state is P0's copy in?" }
+    ];
+    const sc = scenarios[mesiQn % scenarios.length];
+    const s = mesiNew(); sc.ops.forEach(([c, op, l, w]) => mesiStep(s, c, op, l, w));
+    const expected = s.st[sc.ask[0]][sc.ask[1]];
+    mesiSec.querySelector("#mesiQ").textContent = "Check: " + sc.text;
+    const fb = mesiSec.querySelector("#mesiFb"), host = mesiSec.querySelector("#mesiOpts");
+    fb.textContent = "";
+    optBtnsY(host, ["M — Modified", "E — Exclusive", "S — Shared", "I — Invalid"], i => {
+      const picked = "MESI"[i];
+      fbSetY(fb, picked === expected, picked === expected
+        ? "Right — replaying those steps through the state machine leaves P" + sc.ask[0] + "'s copy at " + expected + ". Try it on the machine above from a reset and watch the same thing happen."
+        : "Not that state — reset the machine above and perform exactly those steps: the grid will show where P" + sc.ask[0] + "'s copy lands, and the narration names each transition.");
+    });
+    window.__mesiQuestion = { expected, scenario: mesiQn % scenarios.length };
+  }
+  mesiSec.querySelector("#mesiNewQ").addEventListener("click", () => { mesiQn++; mesiQuestion(); });
+  mesiSec.querySelector("#mesiMsg").textContent = "Every line Invalid, memory all zeros. Run the demonstration for the guided tour — including the false-sharing trap at the end — or drive the machine yourself.";
+  mesiRender(); mesiQuestion();
+
+  /* ================= verification handles ================= */
+  window.__crcCheck = { stepNet: crcStepNet, encode: crcEncode, checkWord: crcCheckWord, division: crcDivRemainder, verify: crcVerify, G: CRC_G.slice() };
+  window.__hazCheck = { def: hazDef, wave: hazWave, measure: hazMeasure, verify: hazVerify, delays: Object.assign({}, LABE.GATE_DELAYS) };
+  window.__mesiCheck = { newState: mesiNew, step: mesiStep, script: MESI_SCRIPT, verify: mesiVerify };
+
+  /* ================= MENU REGISTRATION + COUNT REBUILD ================= */
+  function addMenuItemY(groupName, afterKey, spec) {
+    const list = $Y("menuList"); if (!list) return false;
+    if (list.querySelector('[data-key="' + spec.key + '"]')) return false;
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "menu-item"; b.dataset.key = spec.key;
+    b.dataset.search = (spec.label + " " + spec.hint + " " + spec.search).toLowerCase();
+    if (spec.level) b.dataset.uxlevel = spec.level;
+    b.innerHTML = '<span class="mi-dot" aria-hidden="true"></span><span class="mi-label"></span><small></small>';
+    b.querySelector(".mi-label").textContent = spec.label;
+    b.querySelector("small").textContent = spec.hint;
+    b.addEventListener("click", () => { const p = $Y("menuPanel"); if (p) p.hidden = true; const mb = $Y("menuBtn"); if (mb) mb.setAttribute("aria-expanded", "false"); spec.go(); });
+    if (afterKey) {
+      const anchor = list.querySelector('[data-key="' + afterKey + '"]');
+      if (anchor) { anchor.parentNode.insertBefore(b, anchor.nextSibling); return true; }
+    }
+    let sib = null, inGroup = false;
+    Array.prototype.slice.call(list.children).forEach(el => {
+      if (el.classList.contains("menu-group")) inGroup = (el.dataset.group || "").trim() === groupName;
+      else if (inGroup && el.classList.contains("menu-item")) sib = el;
+    });
+    if (sib) sib.parentNode.insertBefore(b, sib.nextSibling); else list.appendChild(b);
+    return true;
+  }
+  addMenuItemY("Logic & Circuits", "hamming-ecc", {
+    key: "crc-lab", label: "CRC error-detection lab — the dividing shift register",
+    hint: "Clock a message through the LFSR, read the remainder, inject errors and bursts — then meet the one error CRC cannot see",
+    search: "crc cyclic redundancy check burst error lfsr shift register generator polynomial division remainder error detection serial uart checksum frame ethernet simulator",
+    level: "intermediate",
+    go: () => { setTopArea("circuits"); syncRail("circuits"); jumpY("crcCard"); }
+  });
+  addMenuItemY("Logic & Circuits", "crc-lab", {
+    key: "hazard-lab", label: "Static hazard lab — the glitch in the cheapest circuit",
+    hint: "The K-map minimum F = A·C + Ā·B spikes on one transition; add the consensus term and watch the spike die",
+    search: "glitch hazard spike static hazard consensus term redundant karnaugh kmap minimised minimized timing race paths delay transient pulse simulator",
+    level: "intermediate",
+    go: () => { setTopArea("circuits"); syncRail("circuits"); jumpY("hazardCard"); }
+  });
+  addMenuItemY("Computer Architecture", "arch-repl", {
+    key: "mesi-lab", label: "MESI cache-coherence lab",
+    hint: "Two CPUs, private caches, one memory: step reads and writes and watch lines move between Modified, Exclusive, Shared and Invalid",
+    search: "mesi coherence cache coherence snooping shared cache busrd busrdx busupgr invalidate write-back intervention false sharing multiprocessor smp simulator",
+    level: "intermediate",
+    go: () => { setTopArea("systems"); syncRail("systems"); const pb = document.querySelector('#sysPicker [data-sys="arch"]'); if (pb) pb.click(); jumpY("mesiCard"); }
+  });
+  (function rebuildCountsY() {
+    const RJ = window.__uxRoundJ; if (!RJ) return;
+    const groups = RJ.menuGroups(); const counts = {}; let total = 0;
+    groups.forEach(g => {
+      counts[g.name] = g.items.length; total += g.items.length;
+      const c = g.header.querySelector(".mi-count"); if (c) c.textContent = g.items.length;
+    });
+    window.LAB_MENU = { groups: groups.map(g => ({ name: g.name, items: g.items.map(b => { const l = b.querySelector(".mi-label"); return l ? l.textContent : ""; }) })), count: total };
+    window.LAB_MODULES = { modules: groups.map(g => ({ name: g.name, count: g.items.length })), total };
+    RJ.buildRailAndList(counts);
+    RJ.buildGallery();
+    ["boards", "arch", "os", "org"].forEach(id => {
+      const h = document.querySelector("#module-" + id + " .mh-count");
+      if (!h) return;
+      const name = { boards: "Boards, Modulation & Projects", arch: "Computer Architecture", os: "Operating Systems", org: "Computer Organization" }[id];
+      if (counts[name]) h.textContent = counts[name] + " items";
+    });
+    window.__countsY = { total, counts };
+  })();
+
+  /* ================= load-time self-tests (evidence handles) ================= */
+  try {
+    window.__roundYSelfTest = { crc: crcVerify(), hazard: hazVerify(), mesi: mesiVerify() };
+  } catch (e) { window.__roundYSelfTest = { error: String(e && e.message || e) }; }
+})();
+</script>
