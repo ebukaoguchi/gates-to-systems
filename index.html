@@ -15111,7 +15111,10 @@ renderStage = function () {
   }
   $J("uxStep1").addEventListener("click", () => $J("uxDemo").scrollIntoView({ behavior: "smooth", block: "center" }));
   $J("uxStep2").addEventListener("click", () => clickMenuItem(b => /gate lab/i.test(b.textContent)));
-  $J("uxStep3").addEventListener("click", () => clickMenuItem(b => /^Lab 1\b/i.test(b.querySelector(".mi-label") ? b.querySelector(".mi-label").textContent.trim() : "")) || clickMenuItem(b => /lab/i.test(b.dataset.key || "")));
+  /* Step 3 is Org Lab 1 (lab-org-1) — the lab its Done tick tracks.
+     Match the exact activity key: the old fuzzy fallback (/lab/ on the
+     key) matched circ-gatelab first and opened Gate Lab instead. */
+  $J("uxStep3").addEventListener("click", () => clickMenuItem(b => b.dataset.key === "lab-org-1"));
   (function continueLine() {
     let n = visited.size;
     try { const p = JSON.parse(window.localStorage.getItem("lbl-progress") || "{}"); if (p.circuits) n = Math.max(n, Object.keys(p.circuits).length); } catch (e) {}
@@ -23824,5 +23827,216 @@ select.rx-sel{max-width:100%}
   try {
     window.__roundAASelfTest = { cmos: CMOS_V, flags: FLAGS_V, serial: SER_V };
   } catch (e) { window.__roundAASelfTest = { error: String(e && e.message || e) }; }
+})();
+</script>
+<script>
+"use strict";
+/* ================================================================
+   ROUND AB — findability fixes (driven pass, 2026-11-15):
+   1) The instructor area (Gate Lab card → "My progress &
+      instructor" → "Instructor — class digest & set an
+      assignment") was invisible to the site's own navigation:
+      search returned 0 matches for "assignment" / "instructor"
+      and the Menu had no entry for it. Fixes, using the site's
+      existing mechanisms and the Round W signpost pattern:
+      (a) the Gate Lab menu item's search haystack gains the
+          instructor terms, so the Menu filter, the live search
+          dropdown and the gallery filter all match on
+          "assignment", "instructor", "class digest" and
+          "set an assignment"; the live dropdown and the filtered
+          gallery additionally gain a dedicated result/card
+          labelled "Instructor — class digest & set an
+          assignment" — clicking any of them lands on the Gate
+          Lab card with the instructor disclosure opened and
+          scrolled into view.
+      (b) a Menu child row (a .fgs-menu-sub signpost, deliberately
+          NOT a .menu-item, so it is not counted as an activity,
+          never enters the gallery registry or the assignment
+          picker, and adds no Menu parent) sits under the Gate
+          Lab item in the Logic & Circuits group, folds with its
+          parent, is governed by the Menu filter, and navigates
+          the same way. The instructor area itself is not moved
+          and the FGA1 mechanics are untouched.
+   2) Start Here step 3: Round J's handler is fixed at source to
+      the exact lab-org-1 key (see there); this round adds a
+      late, definitive navigation to the same target so the
+      step's landing cannot be won by Gate Lab's scroll-to-top
+      in a smooth-scroll race. Label and Done tracking (Round L)
+      are unchanged.
+   ================================================================ */
+(function roundAB() {
+  const $B = id => document.getElementById(id);
+  const reducedB = () => !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  const behB = () => reducedB() ? "auto" : "smooth";
+  const INSTR_LABEL = "Instructor — class digest & set an assignment";
+  const INSTR_Q = /assignment|instructor|class digest|digest/;
+  const isInstrQuery = q => INSTR_Q.test(String(q || "").toLowerCase());
+
+  /* ---------- the instructor disclosure, and how to land on it ---------- */
+  function instructorDetails() {
+    const card = $B("fgsCard"); if (!card) return null;
+    const ds = card.querySelectorAll("details");
+    for (let i = 0; i < ds.length; i++) {
+      const s = ds[i].querySelector("summary");
+      if (s && /instructor/i.test(s.textContent || "")) return ds[i];
+    }
+    return card.querySelector("details.details-disclosure");
+  }
+  function openInstructor() {
+    window.__uxInteracted = true;
+    try { setTopArea("circuits"); syncRail("circuits"); } catch (e) {}
+    try { selectCircuit("gatelab"); } catch (e) {}
+    const card = $B("fgsCard");
+    const det = instructorDetails();
+    if (!card && !det) return false;
+    if (det && !det.id) det.id = "fgsInstructor";
+    [40, 320, 750].forEach((t, i) => setTimeout(() => {
+      const d = instructorDetails();
+      if (d) d.open = true;
+      const target = d || card;
+      if (card) card.classList.add("fgs-hl");
+      if (target) { try { target.scrollIntoView({ behavior: behB(), block: "start" }); } catch (e) {} }
+      if (i === 2) setTimeout(() => { if (card) card.classList.remove("fgs-hl"); }, 2000);
+    }, t));
+    return true;
+  }
+  window.__fgsOpenInstructor = openInstructor;
+  (function tagDetails() { const d = instructorDetails(); if (d && !d.id) d.id = "fgsInstructor"; })();
+
+  /* ---------- (a1) extend the Gate Lab search haystack ---------- */
+  (function enrichGateLab() {
+    const it = document.querySelector('#menuList .menu-item[data-key="circ-gatelab"]');
+    if (!it || it.dataset.fgsInstrSyn) return;
+    it.dataset.fgsInstrSyn = "1";
+    it.dataset.search = ((it.dataset.search || "") + " instructor class digest set an assignment assignment assignments fga1 progress codes").trim();
+  })();
+
+  /* ---------- (b) Menu child entry under Gate Lab ---------- */
+  let menuChild = null;
+  (function addMenuChild() {
+    const list = $B("menuList"); if (!list) return;
+    if (list.querySelector("[data-fgs-instructor]")) { menuChild = list.querySelector("[data-fgs-instructor]"); return; }
+    let header = null, gateItem = null;
+    Array.prototype.slice.call(list.children).forEach(el => {
+      if (el.classList.contains("menu-group") && (el.dataset.group || "").trim() === "Logic & Circuits") header = el;
+      else if (el.classList.contains("menu-item") && el.dataset.key === "circ-gatelab") gateItem = el;
+    });
+    if (!header) return;
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "fgs-menu-sub"; b.dataset.fgsInstructor = "1";
+    b.innerHTML = '<span class="mi-dot" aria-hidden="true"></span><span class="mi-label"></span><small></small>';
+    b.querySelector(".mi-label").textContent = INSTR_LABEL;
+    b.querySelector("small").textContent = "Gate Lab · My progress & instructor";
+    b.addEventListener("click", () => {
+      const p = $B("menuPanel"); if (p) p.hidden = true;
+      const mb = $B("menuBtn"); if (mb) mb.setAttribute("aria-expanded", "false");
+      openInstructor();
+    });
+    if (gateItem && gateItem.parentNode === list) gateItem.parentNode.insertBefore(b, gateItem.nextSibling);
+    else header.parentNode.insertBefore(b, header.nextSibling);
+    menuChild = b;
+    /* fold in step with its parent, exactly like the Round W
+       breadboard signpost rows */
+    const syncFold = () => { b.classList.toggle("menu-folded", header.dataset.folded === "true"); };
+    syncFold();
+    if ("MutationObserver" in window) new MutationObserver(syncFold).observe(header, { attributes: true, attributeFilter: ["data-folded"] });
+    /* the Menu filter governs this row too */
+    const mf = $B("menuFilter");
+    if (mf) mf.addEventListener("input", () => {
+      const q = (mf.value || "").trim().toLowerCase();
+      const match = !q || b.textContent.toLowerCase().indexOf(q) >= 0 || isInstrQuery(q);
+      b.style.display = match ? "" : "none";
+      if (q && match) header.style.display = "";
+    });
+  })();
+
+  /* ---------- (a2) dedicated result in the live search dropdown ---------- */
+  function injectDropdownResult() {
+    const inp = $B("uxSearch"); if (!inp) return;
+    if (!isInstrQuery(inp.value)) return;
+    const box = document.querySelector(".ux-results"); if (!box) return;
+    if (box.querySelector("[data-fgs-instr-result]")) { box.hidden = false; return; }
+    const btn = document.createElement("button");
+    btn.type = "button"; btn.className = "ux-result"; btn.dataset.fgsInstrResult = "1";
+    btn.dataset.key = "instructor-digest"; btn.setAttribute("role", "option");
+    btn.innerHTML = "<span></span><small></small>";
+    btn.querySelector("span").textContent = INSTR_LABEL;
+    btn.querySelector("small").textContent = "Gate Lab · My progress & instructor";
+    btn.addEventListener("click", () => { box.hidden = true; openInstructor(); });
+    const count = box.querySelector(".ux-rcount");
+    if (count && count.nextSibling) box.insertBefore(btn, count.nextSibling);
+    else box.insertBefore(btn, box.firstChild);
+    box.hidden = false;
+  }
+  (function watchDropdown() {
+    const box = document.querySelector(".ux-results");
+    if (box && "MutationObserver" in window) new MutationObserver(() => injectDropdownResult()).observe(box, { childList: true });
+    const inp = $B("uxSearch");
+    if (inp) {
+      inp.addEventListener("input", () => { setTimeout(injectDropdownResult, 420); setTimeout(injectDropdownResult, 750); });
+      inp.addEventListener("focus", () => { setTimeout(injectDropdownResult, 200); setTimeout(injectDropdownResult, 500); });
+    }
+    /* The live dropdown re-renders itself on input/focus from
+       several older handlers, and a render that lands after the
+       timed injections above wipes the injected result. A short
+       poll while a matching query sits in the box re-adds it
+       after any such render; it is a no-op for other queries. */
+    setInterval(() => {
+      const i2 = $B("uxSearch");
+      if (i2 && isInstrQuery(i2.value)) injectDropdownResult();
+    }, 600);
+  })();
+
+  /* ---------- (a3) dedicated card in the filtered gallery ---------- */
+  function injectGalleryCard() {
+    const inp = $B("uxSearch"), gal = $B("uxGallery"); if (!inp || !gal) return;
+    if (!isInstrQuery(inp.value)) return;
+    if (gal.querySelector("[data-fgs-instr-card]")) return;
+    const gateCard = gal.querySelector('.ux-act[data-key="circ-gatelab"]');
+    const grid = gateCard ? gateCard.parentNode : gal.querySelector(".ux-cards");
+    if (!grid) return;
+    const card = document.createElement("button");
+    card.type = "button"; card.className = "ux-act"; card.dataset.key = "instructor-digest"; card.dataset.fgsInstrCard = "1";
+    card.innerHTML = '<span class="ux-thumb" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5" stroke-linecap="round"/></svg></span>' +
+      '<span class="ux-main"><span class="ux-title"></span>' +
+      '<span class="ux-out">In the Gate Lab card, under “My progress &amp; instructor” — build a class digest from student progress codes, or set an assignment (FGA1 code &amp; link).</span>' +
+      '<span class="ux-meta"><span class="ux-badge">Tool</span><span class="ux-badge">Instructor</span></span></span>';
+    card.querySelector(".ux-title").textContent = INSTR_LABEL;
+    card.addEventListener("click", () => openInstructor());
+    if (gateCard && gateCard.nextSibling) grid.insertBefore(card, gateCard.nextSibling);
+    else grid.appendChild(card);
+    const nr = gal.querySelector(".ux-noresults"); if (nr) nr.remove();
+  }
+  (function watchGallery() {
+    const gal = $B("uxGallery");
+    if (gal && "MutationObserver" in window) new MutationObserver(() => injectGalleryCard()).observe(gal, { childList: true });
+    const inp = $B("uxSearch");
+    if (inp) inp.addEventListener("input", () => { setTimeout(injectGalleryCard, 450); setTimeout(injectGalleryCard, 800); });
+  })();
+
+  /* a shared #a=instructor-digest link lands the same way */
+  function routeInstrHash() {
+    if (/[#&]a=instructor-digest\b/.test(location.hash || "")) openInstructor();
+  }
+  window.addEventListener("hashchange", routeInstrHash);
+  if (/[#&]a=instructor-digest\b/.test(location.hash || "")) setTimeout(routeInstrHash, 600);
+
+  /* ---------- Fix 2 backstop: Start Here step 3 → Org Lab 1 ---------- */
+  function goOrgLab1() {
+    window.__uxInteracted = true;
+    const it = document.querySelector('#menuList .menu-item[data-key="lab-org-1"]');
+    if (it) it.click();
+    else { try { reGo("org:lab-org-1"); } catch (e) {} }
+    [260, 650, 1100].forEach(t => setTimeout(() => {
+      const el = $B("lab-org-1"); if (!el) return;
+      el.classList.add("fgs-hl");
+      try { el.scrollIntoView({ behavior: behB(), block: "start" }); } catch (e) {}
+      setTimeout(() => el.classList.remove("fgs-hl"), 1400);
+    }, t));
+  }
+  const s3 = $B("uxStep3");
+  if (s3) s3.addEventListener("click", () => setTimeout(goOrgLab1, 220));
+
+  window.__fgsAB = { openInstructor, goOrgLab1, menuChild: () => menuChild, details: instructorDetails };
 })();
 </script>
