@@ -23242,3 +23242,587 @@ select.rx-sel{max-width:100%}
   } catch (e) { window.__roundZSelfTest = { error: String(e && e.message || e) }; }
 })();
 </script>
+
+<style>
+/* ===== Round AA — CMOS gates · ALU flags & branches · bit-serial adder ===== */
+.aa-bchips{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.aa-bchip{border:1.6px solid var(--line2);border-radius:8px;padding:5px 10px;font-family:"IBM Plex Mono",monospace;font-size:12.5px;background:var(--panel2);color:var(--muted)}
+.aa-bchip b{color:var(--ink)}
+.aa-bchip.taken{border-color:var(--green);background:var(--panel);color:var(--ink)}
+.aa-bchip.taken b{color:var(--green)}
+.aa-fetlab{font-size:12px;font-weight:700;fill:var(--ink);text-anchor:middle}
+.aa-fetsub{font-size:10px;fill:var(--muted);text-anchor:middle}
+.aa-raillab{font-size:12px;font-weight:700;fill:var(--ink)}
+</style>
+<script>
+"use strict";
+/* ================================================================
+   ROUND AA — three new labs, each computed by its own model:
+   1) CMOS transistor-level gates — a NOT (1 PMOS + 1 NMOS) and a
+      NAND (2 PMOS in parallel over 2 NMOS in series). The output
+      is never looked up: each transistor is a switch (PMOS on
+      when its gate is 0, NMOS on when its gate is 1), the pull-up
+      and pull-down networks' conductance is computed from the
+      switch states, and Y is whatever the conducting network
+      drives — 1 from VDD, 0 to GND. verify() enumerates every
+      input combination and checks Y against the gate function
+      AND that exactly one network conducts (never contention,
+      never floating) — the complementary-switch guarantee.
+   2) ALU flags & conditional branches — 4-bit add / subtract.
+      The result and carry come from the site's own ALU netlist
+      (window.LAB.defAlu, OP 00 = add, 01 = subtract); N, Z, V, C
+      are then derived from those result bits by the flag rules,
+      and every branch condition (equal, carry, overflow,
+      negative, signed and unsigned comparisons) is evaluated
+      from the flags alone. verify() cross-checks all 512
+      A x B x op combinations: result + carry against the ALU
+      netlist, overflow against independent signed arithmetic.
+   3) Bit-serial adder — ONE full adder (the site netlist,
+      evaluated once per cycle) plus two 4-bit shift registers
+      and a carry flip-flop adds two 4-bit numbers LSB-first
+      over 4 clock cycles. verify() runs all 256 input pairs
+      through the cycle model and compares {Cout, S} with A + B.
+      The closing comparison reads its gate counts and delays
+      live from the site's ripple and carry-lookahead netlists.
+   All three start paused: nothing auto-runs.
+   ================================================================ */
+(function roundAA() {
+  const $A = id => document.getElementById(id);
+  function mulberryAA(seed) { let a = seed >>> 0; return function () { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+  function jumpAA(id) { const el = id && $A(id); if (el) setTimeout(() => el.scrollIntoView({ behavior: "smooth", block: "start" }), 60); }
+  function clickMenuKeyAA(key) { const it = document.querySelector('#menuList .menu-item[data-key="' + key + '"]'); if (it) { it.click(); return true; } return false; }
+  function fbSetAA(el, ok, msg) { if (!el) return; el.textContent = (ok ? "✓ " : "✗ ") + msg; el.style.color = ok ? "var(--green)" : "var(--red)"; }
+  function optBtnsAA(host, labels, onPick) {
+    host.innerHTML = "";
+    labels.forEach((lab, i) => {
+      const b = document.createElement("button"); b.type = "button"; b.className = "btn"; b.textContent = lab;
+      b.addEventListener("click", () => onPick(i, b));
+      host.appendChild(b);
+    });
+  }
+  const LABE = window.LAB;
+  const bin4AA = v => [(v >> 3) & 1, (v >> 2) & 1, (v >> 1) & 1, v & 1].join("");
+
+  /* ================================================================
+     1) CMOS — transistors as switches; Y from the networks.
+     PMOS: on when gate = 0 (it pulls UP toward VDD).
+     NMOS: on when gate = 1 (it pulls DOWN toward GND).
+     ================================================================ */
+  function cmosDrive(pu, pd) {
+    if (pu && !pd) return { y: 1, how: "pull-up network conducts, pull-down is off — Y is tied to VDD" };
+    if (pd && !pu) return { y: 0, how: "pull-down network conducts, pull-up is off — Y is tied to GND" };
+    if (pu && pd) return { y: null, how: "BOTH networks conduct — contention, VDD shorted toward GND (a wiring error, never a valid CMOS state)" };
+    return { y: null, how: "NEITHER network conducts — Y floats, holding whatever charge it had (never a valid CMOS state)" };
+  }
+  function cmosNot(A) {
+    const pOn = A === 0, nOn = A === 1;
+    const d = cmosDrive(pOn, nOn);
+    return { gate: "NOT", A, fets: [{ name: "P1 · PMOS", kind: "PMOS", gateNet: "A", gateVal: A, on: pOn }, { name: "N1 · NMOS", kind: "NMOS", gateNet: "A", gateVal: A, on: nOn }], pu: pOn, pd: nOn, y: d.y, how: d.how };
+  }
+  function cmosNand(A, B) {
+    const pA = A === 0, pB = B === 0, nA = A === 1, nB = B === 1;
+    const pu = pA || pB;   /* PMOS pair in PARALLEL: either one ties Y to VDD */
+    const pd = nA && nB;   /* NMOS pair in SERIES: both are needed to tie Y to GND */
+    const d = cmosDrive(pu, pd);
+    return { gate: "NAND", A, B, fets: [
+      { name: "PA · PMOS", kind: "PMOS", gateNet: "A", gateVal: A, on: pA },
+      { name: "PB · PMOS", kind: "PMOS", gateNet: "B", gateVal: B, on: pB },
+      { name: "NA · NMOS", kind: "NMOS", gateNet: "A", gateVal: A, on: nA },
+      { name: "NB · NMOS", kind: "NMOS", gateNet: "B", gateVal: B, on: nB } ], pu, pd, y: d.y, how: d.how,
+      puWhy: "parallel PMOS: PA " + (pA ? "ON" : "off") + ", PB " + (pB ? "ON" : "off") + " — the network conducts if either does",
+      pdWhy: "series NMOS: NA " + (nA ? "ON" : "off") + ", NB " + (nB ? "ON" : "off") + " — the network conducts only if both do" };
+  }
+  function cmosVerify() {
+    let ok = true, combos = 0;
+    for (let A = 0; A < 2; A++) { combos++; const r = cmosNot(A); if (r.y !== (A ^ 1) || r.pu === r.pd) ok = false; }
+    for (let A = 0; A < 2; A++) for (let B = 0; B < 2; B++) { combos++; const r = cmosNand(A, B); if (r.y !== ((A & B) ^ 1) || r.pu === r.pd) ok = false; }
+    return { combos, pass: ok };
+  }
+  const CMOS_V = cmosVerify();
+
+  const cmos = { mode: "NAND", A: 1, B: 0 };
+  const cmosSec = document.createElement("section");
+  cmosSec.className = "card stage-card"; cmosSec.id = "cmosCard"; cmosSec.style.marginTop = "16px";
+  cmosSec.innerHTML =
+    "<h2>CMOS gates — the transistors under the symbols</h2>" +
+    '<p class="what">Every gate in the Gate Lab is a symbol. This lab opens the symbol. A real CMOS gate is two networks of <b>MOSFET switches</b> stacked between the supply rails: a <b>pull-up network</b> of <b>PMOS</b> transistors between <b>VDD</b> and the output, and a <b>pull-down network</b> of <b>NMOS</b> transistors between the output and <b>GND</b>. The one rule that runs everything: a <b>PMOS is ON when its gate is 0</b>, an <b>NMOS is ON when its gate is 1</b> — the two kinds answer the same input oppositely, which is exactly why one network is always off when the other is on. The output below is <b>not a truth table</b>: the lab works out which switches are closed, asks whether the pull-up path (transistors in <b>parallel</b> for NAND) or the pull-down path (transistors in <b>series</b> for NAND) conducts, and Y is simply whichever rail that path ties it to. Watch the NAND closely: the series/parallel swap between the two networks is not decoration — the pull-down needs <i>both</i> inputs at 1 to conduct, so the pull-up must release Y in exactly that one case, and a parallel pair is what releases it in all the others. Gates are built from switches, not magic — and the switch count is the honest price: 2 transistors for NOT, 4 for NAND.</p>' +
+    '<div class="tool-controls">' +
+    '<label>Gate <span class="seg" role="group" aria-label="CMOS gate" id="cmosModeSeg"><button type="button" data-cmode="NOT" aria-pressed="false">NOT — 2 transistors</button><button type="button" data-cmode="NAND" aria-pressed="true">NAND — 4 transistors</button></span></label>' +
+    '<label>A <span class="seg" role="group" aria-label="Input A" id="cmosASeg"><button type="button" data-ca="0" aria-pressed="false">0</button><button type="button" data-ca="1" aria-pressed="true">1</button></span></label>' +
+    '<label id="cmosBWrap">B <span class="seg" role="group" aria-label="Input B" id="cmosBSeg"><button type="button" data-cb="0" aria-pressed="true">0</button><button type="button" data-cb="1" aria-pressed="false">1</button></span></label></div>' +
+    '<div class="schematic-box"><svg id="cmosSvg" viewBox="0 0 920 320" role="img" aria-label="CMOS transistor network: PMOS pull-up network between VDD and the output, NMOS pull-down network between the output and ground, switch states live" style="display:block;width:100%;height:auto"></svg></div>' +
+    '<div class="decimal-line" id="cmosStage" aria-live="polite"></div>' +
+    '<div class="seq-state" id="cmosFets" style="margin-top:6px"></div>' +
+    '<div class="decimal-line" id="cmosVerifyLine" aria-live="polite"></div>' +
+    '<div class="lab-check"><span class="lab-check-q" id="cmosQ"></span><span id="cmosOpts" style="display:flex;gap:6px;flex-wrap:wrap"></span><span class="lab-check-fb" id="cmosFb" aria-live="polite"></span></div>' +
+    '<div class="share-row"><button type="button" class="btn" id="cmosNewQ">New question</button>' +
+    '<button type="button" class="btn" data-cmoslink="gatelab">Gate Lab — these same gates as symbols →</button>' +
+    '<button type="button" class="btn" data-cmoslink="components">Components library — the transistor as a part →</button></div>' +
+    '<p class="cp-formal adv-only">Duality, stated once: the pull-down network computes the condition under which Y must be 0, with NMOS in series for AND-of-conditions and in parallel for OR-of-conditions; the pull-up network is its exact dual — same graph, series and parallel swapped, PMOS for NMOS — and computes the complement condition. That is why a CMOS gate is always an inverting gate at this level (NOT, NAND, NOR): a non-inverting AND needs a NAND plus a NOT, 6 transistors. Static CMOS draws (ideally) no current in either settled state, because exactly one network is off — the load-time check below verifies that property on every input combination of both gates, alongside the output values.</p>';
+  const shElAA = $A("shifterCard");
+  if (shElAA && shElAA.parentNode) shElAA.parentNode.insertBefore(cmosSec, shElAA.nextSibling);
+  else { const cv = $A("circuitsView"); if (cv) cv.appendChild(cmosSec); }
+  cmosSec.querySelectorAll("[data-cmoslink]").forEach(b => b.addEventListener("click", () => {
+    if (b.dataset.cmoslink === "gatelab") { if (!clickMenuKeyAA("circ-gatelab")) jumpAA("cmosCard"); }
+    else { if (!clickMenuKeyAA("adv-components")) jumpAA("cmosCard"); }
+  }));
+  function cmosEvalNow() { return cmos.mode === "NOT" ? cmosNot(cmos.A) : cmosNand(cmos.A, cmos.B); }
+  function fetBoxAA(x, y, f, w) {
+    w = w || 150;
+    const fill = f.on ? "var(--amber-soft)" : "var(--panel)", stroke = f.on ? "var(--amber)" : "var(--line2)";
+    return '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="52" rx="8" style="fill:' + fill + ';stroke:' + stroke + ';stroke-width:' + (f.on ? "2.2" : "1.4") + (f.on ? "" : ";stroke-dasharray:5 4") + '"/>' +
+      '<text class="aa-fetlab" x="' + (x + w / 2) + '" y="' + (y + 22) + '">' + f.name + "</text>" +
+      '<text class="aa-fetsub" x="' + (x + w / 2) + '" y="' + (y + 39) + '">gate ' + f.gateNet + " = " + f.gateVal + " · switch " + (f.on ? "ON — conducting" : "off — open") + "</text>";
+  }
+  function cmosRender() {
+    const r = cmosEvalNow();
+    cmosSec.querySelector("#cmosBWrap").style.display = cmos.mode === "NOT" ? "none" : "";
+    let s = "";
+    if (cmos.mode === "NOT") {
+      s += '<text class="aa-raillab" x="30" y="36">VDD (+ supply)</text><line x1="120" y1="30" x2="800" y2="30" style="stroke:var(--ink);stroke-width:2.4"/>';
+      s += '<line x1="460" y1="30" x2="460" y2="58" style="stroke:' + (r.fets[0].on ? "var(--amber)" : "var(--line2)") + ';stroke-width:2.4"/>';
+      s += fetBoxAA(385, 58, r.fets[0]);
+      s += '<line x1="460" y1="110" x2="460" y2="150" style="stroke:' + (r.pu ? "var(--amber)" : "var(--line2)") + ';stroke-width:2.4"/>';
+      s += '<circle cx="460" cy="150" r="5" style="fill:var(--ink)"/><line x1="460" y1="150" x2="700" y2="150" style="stroke:var(--ink);stroke-width:2"/>' +
+        '<circle cx="742" cy="150" r="17" style="fill:' + (r.y ? "var(--amber)" : "var(--panel2)") + ';stroke:var(--line2);stroke-width:2"/><text class="aa-fetlab" x="742" y="155">' + (r.y === null ? "?" : r.y) + '</text><text class="aa-raillab" x="772" y="155">Y</text>';
+      s += '<line x1="460" y1="150" x2="460" y2="196" style="stroke:' + (r.pd ? "var(--amber)" : "var(--line2)") + ';stroke-width:2.4"/>';
+      s += fetBoxAA(385, 196, r.fets[1]);
+      s += '<line x1="460" y1="248" x2="460" y2="282" style="stroke:' + (r.fets[1].on ? "var(--amber)" : "var(--line2)") + ';stroke-width:2.4"/>';
+      s += '<text class="aa-raillab" x="30" y="288">GND (0 V)</text><line x1="120" y1="282" x2="800" y2="282" style="stroke:var(--ink);stroke-width:2.4"/>';
+      s += '<text class="aa-fetsub" x="120" y="90">input A = ' + cmos.A + ' drives both gates — PMOS answers 0, NMOS answers 1</text>';
+      cmosSec.querySelector("#cmosSvg").setAttribute("viewBox", "0 0 920 306");
+    } else {
+      s += '<text class="aa-raillab" x="30" y="36">VDD (+ supply)</text><line x1="120" y1="30" x2="800" y2="30" style="stroke:var(--ink);stroke-width:2.4"/>';
+      s += '<text class="aa-fetsub" x="330" y="20" style="text-anchor:middle">pull-up: PMOS in PARALLEL</text>';
+      s += '<line x1="330" y1="30" x2="330" y2="52" style="stroke:' + (r.fets[0].on ? "var(--amber)" : "var(--line2)") + ';stroke-width:2.4"/><line x1="590" y1="30" x2="590" y2="52" style="stroke:' + (r.fets[1].on ? "var(--amber)" : "var(--line2)") + ';stroke-width:2.4"/>';
+      s += fetBoxAA(255, 52, r.fets[0]) + fetBoxAA(515, 52, r.fets[1]);
+      s += '<line x1="330" y1="104" x2="330" y2="128" style="stroke:var(--line2);stroke-width:2"/><line x1="590" y1="104" x2="590" y2="128" style="stroke:var(--line2);stroke-width:2"/><line x1="330" y1="128" x2="590" y2="128" style="stroke:' + (r.pu ? "var(--amber)" : "var(--line2)") + ';stroke-width:2.4"/><line x1="460" y1="128" x2="460" y2="150" style="stroke:' + (r.pu ? "var(--amber)" : "var(--line2)") + ';stroke-width:2.4"/>';
+      s += '<circle cx="460" cy="150" r="5" style="fill:var(--ink)"/><line x1="460" y1="150" x2="700" y2="150" style="stroke:var(--ink);stroke-width:2"/>' +
+        '<circle cx="742" cy="150" r="17" style="fill:' + (r.y ? "var(--amber)" : "var(--panel2)") + ';stroke:var(--line2);stroke-width:2"/><text class="aa-fetlab" x="742" y="155">' + (r.y === null ? "?" : r.y) + '</text><text class="aa-raillab" x="772" y="155">Y</text>';
+      s += '<text class="aa-fetsub" x="640" y="196" style="text-anchor:middle">pull-down: NMOS in SERIES</text>';
+      s += '<line x1="460" y1="150" x2="460" y2="176" style="stroke:' + (r.pd ? "var(--amber)" : "var(--line2)") + ';stroke-width:2.4"/>';
+      s += fetBoxAA(385, 176, r.fets[2]);
+      s += '<line x1="460" y1="228" x2="460" y2="240" style="stroke:' + (r.pd ? "var(--amber)" : "var(--line2)") + ';stroke-width:2.4"/>';
+      s += fetBoxAA(385, 240, r.fets[3]);
+      s += '<line x1="460" y1="292" x2="460" y2="308" style="stroke:' + (r.fets[3].on ? "var(--amber)" : "var(--line2)") + ';stroke-width:2.4"/>';
+      s += '<text class="aa-raillab" x="30" y="314">GND (0 V)</text><line x1="120" y1="308" x2="800" y2="308" style="stroke:var(--ink);stroke-width:2.4"/>';
+      cmosSec.querySelector("#cmosSvg").setAttribute("viewBox", "0 0 920 330");
+    }
+    cmosSec.querySelector("#cmosSvg").innerHTML = s;
+    const stage = cmosSec.querySelector("#cmosStage");
+    stage.innerHTML = "<b>Stage 1 — the switches:</b> " + r.fets.map(f => f.name + " is " + (f.on ? "ON" : "off") + " (its gate " + f.gateNet + " = " + f.gateVal + (f.kind === "PMOS" ? "; PMOS conducts on 0" : "; NMOS conducts on 1") + ")").join(" · ") +
+      ".<br><b>Stage 2 — the networks:</b> " + (r.gate === "NAND" ? r.puWhy + "; " + r.pdWhy + "." : "the single PMOS is the whole pull-up network; the single NMOS is the whole pull-down network.") +
+      "<br><b>Stage 3 — the output:</b> " + r.how + " — so <b>Y = " + (r.y === null ? "undefined" : r.y) + "</b>.";
+    const fh = cmosSec.querySelector("#cmosFets"); fh.innerHTML = "";
+    r.fets.concat([{ name: "pull-up network", on: r.pu, role: "VDD → Y path" }, { name: "pull-down network", on: r.pd, role: "Y → GND path" }, { name: "Y", on: r.y === 1, role: "output" }]).forEach(f => {
+      const c = document.createElement("div"); c.className = "seq-cell" + (f.on ? " one" : "");
+      c.innerHTML = "<b>" + (f.role ? (f.on ? "ON" : "OFF") : (f.on ? "ON" : "off")) + '</b><span class="ry-role">' + (f.role || f.name) + (f.role ? " · " + f.name : "") + "</span>";
+      fh.appendChild(c);
+    });
+    cmosSec.querySelector("#cmosVerifyLine").textContent = "Switch-network check, run at load: all " + CMOS_V.combos + " input combinations of NOT and NAND were evaluated through the transistor networks — every output matches the gate's function, and in every combination exactly one network conducts (never both, never neither).";
+  }
+  function cmosSegWire(segId, attr, set) {
+    cmosSec.querySelector(segId).querySelectorAll("button").forEach(b => b.addEventListener("click", () => {
+      cmosSec.querySelector(segId).querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x === b ? "true" : "false"));
+      set(b.dataset[attr]); cmosRender();
+    }));
+  }
+  cmosSegWire("#cmosModeSeg", "cmode", v => cmos.mode = v);
+  cmosSegWire("#cmosASeg", "ca", v => cmos.A = +v);
+  cmosSegWire("#cmosBSeg", "cb", v => cmos.B = +v);
+  let cmosQn = 0;
+  function cmosQuestion() {
+    const rng = mulberryAA(5150 + cmosQn * 97);
+    const useNand = cmosQn % 2 === 0;
+    const A = Math.floor(rng() * 2), B = Math.floor(rng() * 2);
+    const r = useNand ? cmosNand(A, B) : cmosNot(A);
+    const expected = r.y;
+    cmosSec.querySelector("#cmosQ").textContent = "Predict, then check: " + (useNand ? "in the CMOS NAND, A = " + A + " and B = " + B : "in the CMOS NOT, A = " + A) + ". Before any truth table — which network conducts, and what is Y?";
+    const host = cmosSec.querySelector("#cmosOpts"), fb = cmosSec.querySelector("#cmosFb");
+    fb.textContent = "";
+    optBtnsAA(host, ["Pull-up conducts — Y = 1", "Pull-down conducts — Y = 0"], i => {
+      const pickedY = i === 0 ? 1 : 0;
+      fbSetAA(fb, pickedY === expected, pickedY === expected
+        ? "Right — " + r.how + ". Set the lab above to the same inputs and watch the switch states land exactly as you predicted."
+        : "Not that network — work the switches: PMOS on at gate 0, NMOS on at gate 1" + (useNand ? ", PMOS in parallel (either conducts), NMOS in series (both needed)" : "") + ", then ask which rail Y is tied to. The diagram above shows this exact case if you set the same inputs.");
+    });
+    window.__cmosQuestion = { gate: useNand ? "NAND" : "NOT", A, B: useNand ? B : null, expected };
+  }
+  cmosSec.querySelector("#cmosNewQ").addEventListener("click", () => { cmosQn++; cmosQuestion(); });
+  cmosRender(); cmosQuestion();
+
+  /* ================================================================
+     2) ALU FLAGS — result bits from the site ALU netlist; flags
+     derived from the bits; branches evaluated from the flags.
+     defAlu OP: 00 = add, 01 = subtract (OP1 OP0); its Carry
+     output is the adder's carry for both (gated only by ¬OP1).
+     ================================================================ */
+  const aluDefAA = LABE.computeLevels(LABE.defAlu());
+  function aluRunAA(A, B, sub) {
+    const ins = { OP1: 0, OP0: sub ? 1 : 0 };
+    for (let i = 0; i < 4; i++) { ins["A" + i] = (A >> i) & 1; ins["B" + i] = (B >> i) & 1; }
+    const v = LABE.evaluateAll(aluDefAA, ins);
+    return { R: v.R3 * 8 + v.R2 * 4 + v.R1 * 2 + v.R0, C: v.Carry };
+  }
+  function flagsCompute(A, B, sub) {
+    const run = aluRunAA(A, B, sub);
+    const R = run.R;
+    const N = (R >> 3) & 1;
+    const Z = R === 0 ? 1 : 0;
+    let V;
+    if (!sub) V = (((A ^ R) & (B ^ R) & 8) !== 0) ? 1 : 0;        /* signs of operands agree, result sign differs */
+    else V = (((A ^ B) & (A ^ R) & 8) !== 0) ? 1 : 0;            /* signs differ, result sign differs from A */
+    return { R, N, Z, V, C: run.C };
+  }
+  function sgn4(v) { return v >= 8 ? v - 16 : v; }
+  function flagsVerify() {
+    let n = 0, ok = 0;
+    for (let A = 0; A < 16; A++) for (let B = 0; B < 16; B++) for (let sub = 0; sub < 2; sub++) {
+      n++;
+      const f = flagsCompute(A, B, sub);
+      const trueRes = sub ? sgn4(A) - sgn4(B) : sgn4(A) + sgn4(B);
+      const vRef = (trueRes > 7 || trueRes < -8) ? 1 : 0;
+      const rRef = ((sub ? A - B : A + B) % 16 + 16) % 16;
+      const cRef = sub ? (A >= B ? 1 : 0) : ((A + B) >= 16 ? 1 : 0);
+      if (f.R === rRef && f.C === cRef && f.V === vRef && f.N === ((rRef >> 3) & 1) && f.Z === (rRef === 0 ? 1 : 0)) ok++;
+    }
+    return { combos: n, ok, pass: ok === n };
+  }
+  const FLAGS_V = flagsVerify();
+  const BRANCHES_AA = [
+    ["BEQ", "equal — Z = 1", F => F.Z === 1], ["BNE", "not equal — Z = 0", F => F.Z === 0],
+    ["BCS", "carry set — unsigned ≥ after a subtract", F => F.C === 1], ["BCC", "carry clear — unsigned < after a subtract", F => F.C === 0],
+    ["BMI", "minus — N = 1", F => F.N === 1], ["BPL", "plus — N = 0", F => F.N === 0],
+    ["BVS", "overflow set — V = 1", F => F.V === 1], ["BVC", "overflow clear — V = 0", F => F.V === 0],
+    ["BGE", "signed ≥ — N = V", F => F.N === F.V], ["BLT", "signed < — N ≠ V", F => F.N !== F.V],
+    ["BGT", "signed > — Z = 0 and N = V", F => F.Z === 0 && F.N === F.V], ["BLE", "signed ≤ — Z = 1 or N ≠ V", F => F.Z === 1 || F.N !== F.V],
+    ["BHI", "unsigned > — C = 1 and Z = 0", F => F.C === 1 && F.Z === 0], ["BLS", "unsigned ≤ — C = 0 or Z = 1", F => F.C === 0 || F.Z === 1]
+  ];
+  function branchTakenAA(name, F) { const b = BRANCHES_AA.find(x => x[0] === name); return b ? !!b[2](F) : null; }
+
+  const fl = { A: 7, B: 1, sub: 0 };
+  const flSec = document.createElement("section");
+  flSec.className = "card stage-card"; flSec.id = "flagsCard"; flSec.style.marginTop = "16px"; flSec.style.marginBottom = "16px";
+  flSec.innerHTML =
+    "<h2>ALU flags &amp; conditional branches — where comparisons live</h2>" +
+    '<p class="what">The site\'s 4-bit ALU reports a result and two hints — Carry and Zero. Real processors report four <b>flags</b>, and every conditional branch you will ever write is a small Boolean function of them. Set an operation below: the result bits come from the <b>site\'s own ALU netlist</b>, and the flags are then read off those bits by rule — <b>N</b> is simply result bit 3 (the sign bit), <b>Z</b> is 1 exactly when the result is 0000, <b>C</b> is the adder\'s carry out (for a subtract, C = 1 means <i>no borrow was needed</i>: read unsigned, A ≥ B), and <b>V</b> is signed overflow — the result\'s sign is impossible for the operands\' signs. Then the branches: a comparison is not hardware at all. <i>Compare A with B</i> means <i>subtract A − B and keep only the flags</i>, and each branch name is one fixed test on them — equal is just Z, but signed less-than is <b>N ≠ V</b>, because overflow flips the sign bit and V is the correction. That one line is why getting V right matters. Drive it: make 7 + 1 overflow in signed reading while the unsigned reading stays perfectly happy, then read the two verdicts off the branch row.</p>' +
+    '<div class="ctrl-label">Operand A — 4 bits, click to set (A3 A2 A1 A0)</div>' +
+    '<div class="seq-state" id="flA" style="margin-top:4px"></div>' +
+    '<div class="ctrl-label">Operand B — 4 bits, click to set (B3 B2 B1 B0)</div>' +
+    '<div class="seq-state" id="flB" style="margin-top:4px"></div>' +
+    '<div class="tool-controls"><label>Operation <span class="seg" role="group" aria-label="ALU operation" id="flOpSeg"><button type="button" data-fop="0" aria-pressed="true">Add — A + B</button><button type="button" data-fop="1" aria-pressed="false">Subtract — A − B (compare)</button></span></label></div>' +
+    '<div class="ctrl-label">Result — from the ALU netlist</div>' +
+    '<div class="seq-state" id="flR" style="margin-top:4px"></div>' +
+    '<div class="decimal-line" id="flRead" aria-live="polite"></div>' +
+    '<div class="ctrl-label" style="margin-top:12px">The four flags — each computed from the result bits above</div>' +
+    '<div class="seq-state" id="flFlags" style="margin-top:4px"></div>' +
+    '<div class="ctrl-label" style="margin-top:12px">Branches on these flags — taken or not taken, nothing else consulted</div>' +
+    '<div class="aa-bchips" id="flBranches"></div>' +
+    '<div class="decimal-line" id="flCmp" aria-live="polite"></div>' +
+    '<div class="decimal-line" id="flVerifyLine" aria-live="polite"></div>' +
+    '<div class="lab-check"><span class="lab-check-q" id="flQ"></span><span id="flOpts" style="display:flex;gap:6px;flex-wrap:wrap"></span><span class="lab-check-fb" id="flFb" aria-live="polite"></span></div>' +
+    '<div class="share-row"><button type="button" class="btn" id="flNewQ">New question</button>' +
+    '<button type="button" class="btn" data-fllink="alucontrol">ALU control — the decode behind the operation →</button>' +
+    '<button type="button" class="btn" data-fllink="targets">Branch &amp; jump target calculator →</button>' +
+    '<button type="button" class="btn" data-fllink="sap">The SAP-1 capstone — JZ is a Z-flag branch →</button></div>' +
+    '<p class="cp-formal adv-only">Flag rules as implemented — N = R3. Z = ¬(R3 + R2 + R1 + R0). C = the adder\'s carry out (on subtract, the two\'s-complement adder computes A + ¬B + 1, so C = 1 ⟺ A ≥ B unsigned: no borrow). V on add = (A3 = B3) ∧ (R3 ≠ A3); V on subtract = (A3 ≠ B3) ∧ (R3 ≠ A3) — both evaluated here in bit form from A, B and R. Signed comparisons after A − B: A ≥ B ⟺ N = V; A &lt; B ⟺ N ≠ V; the overflow flag is what makes the sign bit trustworthy. Unsigned comparisons use C and Z only. All 512 combinations were cross-checked at load: result and carry against the ALU netlist\'s own outputs, V against independent signed arithmetic in the range −8…7.</p>';
+  const archHostAA = $A("sysArch"); if (archHostAA) archHostAA.appendChild(flSec);
+  flSec.querySelectorAll("[data-fllink]").forEach(b => b.addEventListener("click", () => {
+    const k = b.dataset.fllink;
+    if (k === "alucontrol") { if (!clickMenuKeyAA("org-alucontrol")) jumpAA("flagsCard"); }
+    else if (k === "targets") { if (!clickMenuKeyAA("org-targets")) jumpAA("flagsCard"); }
+    else { if (!clickMenuKeyAA("lab-arch-10")) jumpAA("flagsCard"); }
+  }));
+  function flBitCells(host, value, prefix, setter) {
+    host.innerHTML = "";
+    [3, 2, 1, 0].forEach(i => {
+      const bit = (value >> i) & 1;
+      const c = document.createElement(setter ? "button" : "div");
+      if (setter) c.type = "button";
+      c.className = "seq-cell" + (bit ? " one" : "");
+      c.innerHTML = "<b>" + bit + '</b><span class="ry-role">' + prefix + i + "</span>";
+      if (setter) c.addEventListener("click", () => { setter(value ^ (1 << i)); flRender(); });
+      host.appendChild(c);
+    });
+  }
+  function flRender() {
+    const F = flagsCompute(fl.A, fl.B, fl.sub);
+    flBitCells(flSec.querySelector("#flA"), fl.A, "A", v => fl.A = v);
+    flBitCells(flSec.querySelector("#flB"), fl.B, "B", v => fl.B = v);
+    flBitCells(flSec.querySelector("#flR"), F.R, "R", null);
+    flSec.querySelector("#flRead").innerHTML = (fl.sub
+      ? "A − B = " + fl.A + " − " + fl.B + " → result <b>" + bin4AA(F.R) + "</b> (" + F.R + " unsigned · " + sgn4(F.R) + " signed). Read as a compare: the result itself is thrown away by a real CMP — only the flags below survive."
+      : "A + B = " + fl.A + " + " + fl.B + " → result <b>" + bin4AA(F.R) + "</b> (" + F.R + " unsigned · " + sgn4(F.R) + " signed). Signed reading: " + sgn4(fl.A) + " + " + sgn4(fl.B) + " = " + (sgn4(fl.A) + sgn4(fl.B)) + (F.V ? " — <b>outside −8…7, so V = 1 and the stored sign bit lies</b>." : " — inside −8…7, so V = 0."));
+    const fh = flSec.querySelector("#flFlags"); fh.innerHTML = "";
+    [["N — negative", F.N, "result bit 3 (the sign bit)"], ["Z — zero", F.Z, "result is exactly 0000"], ["V — overflow", F.V, "signed result impossible for the operands' signs"], ["C — carry", F.C, fl.sub ? "1 = no borrow (A ≥ B unsigned)" : "1 = sum carried out of bit 3"]].forEach(([k, v, why]) => {
+      const c = document.createElement("div"); c.className = "seq-cell" + (v ? " one" : "");
+      c.innerHTML = "<b>" + v + '</b><span class="ry-role">' + k + " · " + why + "</span>"; fh.appendChild(c);
+    });
+    const bh = flSec.querySelector("#flBranches"); bh.innerHTML = "";
+    BRANCHES_AA.forEach(([name, why, test]) => {
+      const taken = !!test(F);
+      const c = document.createElement("span"); c.className = "aa-bchip" + (taken ? " taken" : "");
+      c.innerHTML = "<b>" + name + "</b> " + (taken ? "TAKEN" : "not taken") + " · " + why;
+      bh.appendChild(c);
+    });
+    flSec.querySelector("#flCmp").innerHTML = fl.sub
+      ? "As a comparison of A = " + fl.A + " with B = " + fl.B + ": <b>signed</b> — A " + (sgn4(fl.A) < sgn4(fl.B) ? "<" : sgn4(fl.A) > sgn4(fl.B) ? ">" : "=") + " B, so " + (branchTakenAA("BLT", F) ? "BLT" : branchTakenAA("BGT", F) ? "BGT" : "BEQ") + " is the taken signed branch (N " + (F.N === F.V ? "=" : "≠") + " V is the whole test). <b>Unsigned</b> — A " + (fl.A < fl.B ? "<" : fl.A > fl.B ? ">" : "=") + " B, decided by C and Z alone. Same flags, two readings — the branch name chooses which."
+      : "These branches are shown for the add's flags, but they earn their keep after a subtract: switch the operation to Subtract and the same row becomes a full comparison of A against B, signed and unsigned at once.";
+    flSec.querySelector("#flVerifyLine").textContent = "Engine check, run at load: " + FLAGS_V.ok + " of " + FLAGS_V.combos + " combinations (every A × B × add/subtract) agree three ways — result and carry from the ALU netlist, overflow from independent signed arithmetic, N and Z read straight off the result bits.";
+  }
+  flSec.querySelector("#flOpSeg").querySelectorAll("button").forEach(b => b.addEventListener("click", () => {
+    flSec.querySelector("#flOpSeg").querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x === b ? "true" : "false"));
+    fl.sub = +b.dataset.fop; flRender();
+  }));
+  let flQn = 0;
+  function flQuestion() {
+    const rng = mulberryAA(8080 + flQn * 131);
+    const A = Math.floor(rng() * 16), B = Math.floor(rng() * 16);
+    const kind = flQn % 3;
+    const sub = kind === 0 ? (Math.floor(flQn / 3) % 2) : 1;
+    const F = flagsCompute(A, B, sub);
+    const fb = flSec.querySelector("#flFb"), host = flSec.querySelector("#flOpts");
+    fb.textContent = "";
+    const opTxt = sub ? A + " − " + B : A + " + " + B;
+    if (kind === 0) {
+      flSec.querySelector("#flQ").textContent = "Check: the ALU computes " + opTxt + " (4-bit). What is the overflow flag V?";
+      optBtnsAA(host, ["V = 0", "V = 1"], i => fbSetAA(fb, i === F.V, i === F.V
+        ? "Right — signed, that is " + sgn4(A) + (sub ? " − " : " + ") + sgn4(B) + " = " + (sub ? sgn4(A) - sgn4(B) : sgn4(A) + sgn4(B)) + ", and V = " + F.V + " is exactly whether that lands outside −8…7. Set the lab to the same values and read it off the flag row."
+        : "Not that V — redo it signed: " + sgn4(A) + (sub ? " − " : " + ") + sgn4(B) + " = " + (sub ? sgn4(A) - sgn4(B) : sgn4(A) + sgn4(B)) + ". Inside −8…7 means V = 0; outside means the stored sign bit is lying and V = 1."));
+      window.__flagsQuestion = { A, B, sub, ask: "V", expected: F.V };
+    } else if (kind === 1) {
+      flSec.querySelector("#flQ").textContent = "Check: compare A = " + A + " with B = " + B + " (the ALU subtracts A − B). Is the signed branch BLT (A < B, signed) taken?";
+      const exp = branchTakenAA("BLT", F) ? 1 : 0;
+      optBtnsAA(host, ["Taken", "Not taken"], i => { const picked = i === 0 ? 1 : 0; fbSetAA(fb, picked === exp, picked === exp
+        ? "Right — the subtraction leaves N = " + F.N + ", V = " + F.V + ", and BLT tests N ≠ V: " + (exp ? "they differ, so the branch goes" : "they agree, so it falls through") + ". Signed, " + sgn4(A) + (sgn4(A) < sgn4(B) ? " < " : sgn4(A) > sgn4(B) ? " > " : " = ") + sgn4(B) + " confirms it."
+        : "Not that outcome — BLT never looks at the result, only at N ≠ V after the subtraction. Here N = " + F.N + " and V = " + F.V + "; run the same A and B above with Subtract and read the branch row."); });
+      window.__flagsQuestion = { A, B, sub: 1, ask: "BLT", expected: exp };
+    } else {
+      flSec.querySelector("#flQ").textContent = "Check: compare A = " + A + " with B = " + B + " (subtract). Is the unsigned branch BHI (A > B, unsigned) taken?";
+      const exp = branchTakenAA("BHI", F) ? 1 : 0;
+      optBtnsAA(host, ["Taken", "Not taken"], i => { const picked = i === 0 ? 1 : 0; fbSetAA(fb, picked === exp, picked === exp
+        ? "Right — BHI tests C = 1 and Z = 0: here C = " + F.C + " (no borrow, so unsigned A ≥ B) and Z = " + F.Z + ", and unsigned " + A + (A > B ? " > " : A < B ? " < " : " = ") + B + " agrees."
+        : "Not that outcome — unsigned branches ignore N and V entirely: BHI needs C = 1 (the subtract borrowed nothing) and Z = 0. Here C = " + F.C + ", Z = " + F.Z + ". Run it above and check the BHI chip."); });
+      window.__flagsQuestion = { A, B, sub: 1, ask: "BHI", expected: exp };
+    }
+  }
+  flSec.querySelector("#flNewQ").addEventListener("click", () => { flQn++; flQuestion(); });
+  flRender(); flQuestion();
+
+  /* ================================================================
+     3) BIT-SERIAL ADDER — one full adder, reused four times.
+     Each cycle evaluates the site's full-adder netlist on the
+     two registers' current LSBs and the carry flip-flop.
+     ================================================================ */
+  const faDefAA = LABE.computeLevels(LABE.defFullAdder());
+  function faEvalAA(a, b, cin) { const v = LABE.evaluateAll(faDefAA, { A: a, B: b, Cin: cin }); return { sum: v.Sum, cout: v.Cout }; }
+  function serialRunAA(A, B) {
+    let regA = A, regB = B, carry = 0, sumReg = 0; const trace = [];
+    for (let i = 0; i < 4; i++) {
+      const aBit = regA & 1, bBit = regB & 1;
+      const r = faEvalAA(aBit, bBit, carry);
+      sumReg |= (r.sum << i);
+      trace.push({ cycle: i + 1, bit: i, aBit, bBit, cin: carry, sum: r.sum, cout: r.cout, regAIn: regA, regBIn: regB, regAAfter: regA >> 1, regBAfter: regB >> 1, sumRegAfter: sumReg });
+      regA >>= 1; regB >>= 1; carry = r.cout;
+    }
+    return { trace, S: sumReg, Cout: carry, total: carry * 16 + sumReg };
+  }
+  function serialVerifyAA() {
+    let n = 0, ok = 0;
+    for (let A = 0; A < 16; A++) for (let B = 0; B < 16; B++) { n++; if (serialRunAA(A, B).total === A + B) ok++; }
+    const rip = LABE.computeLevels(LABE.defRipple()), cla = LABE.computeLevels(LABE.defCLA());
+    return { combos: n, ok, pass: ok === n,
+      faGates: faDefAA.gates.length, rippleGates: rip.gates.length, claGates: cla.gates.length,
+      rippleDelay: rip.timing.total, claDelay: cla.timing.total, faDelay: faDefAA.timing.total };
+  }
+  const SER_V = serialVerifyAA();
+
+  const ser = { A: 9, B: 5, cycle: 0, regA: 9, regB: 5, carry: 0, sumReg: 0, trace: [] };
+  function serReset() { ser.cycle = 0; ser.regA = ser.A; ser.regB = ser.B; ser.carry = 0; ser.sumReg = 0; ser.trace = []; }
+  const serSec = document.createElement("section");
+  serSec.className = "card stage-card"; serSec.id = "serialCard"; serSec.style.marginTop = "16px";
+  serSec.innerHTML =
+    "<h2>Bit-serial adder — one adder, four clock cycles</h2>" +
+    '<p class="what">The ripple and lookahead adders spend <b>hardware</b>: a full adder per bit, all working at once. This machine spends <b>time</b> instead. It owns exactly <b>one full adder</b> — the site\'s own netlist, evaluated once per cycle — plus two <b>shift registers</b> holding the operands and a single <b>carry flip-flop</b>. Each clock cycle does four things, in order: the registers present their <b>least significant bits</b>; the full adder adds that pair plus the carry-in held in the flip-flop; the <b>sum bit is stored</b> into the result register at this bit position; and the <b>carry out is fed back</b> into the flip-flop, becoming next cycle\'s carry-in — while both operand registers shift right, bringing the next bit pair to the adder. Four cycles, one bit at a time, and the 4-bit sum is complete. Load two numbers and step it: the per-cycle table is the whole computation, nothing hidden. Then read the comparison at the bottom — it is the oldest trade in computer architecture, area against time, with this site\'s own gate counts as the prices.</p>' +
+    '<div class="ctrl-label">Operand A — 4 bits, click to set (loads the A shift register)</div>' +
+    '<div class="seq-state" id="serA" style="margin-top:4px"></div>' +
+    '<div class="ctrl-label">Operand B — 4 bits, click to set (loads the B shift register)</div>' +
+    '<div class="seq-state" id="serB" style="margin-top:4px"></div>' +
+    '<div class="share-row"><button type="button" class="btn primary" id="serStep">Clock one cycle ▸</button>' +
+    '<button type="button" class="btn" id="serRun">Run all 4 cycles</button>' +
+    '<button type="button" class="btn" id="serReset">Reset (reload registers)</button></div>' +
+    '<div class="progress-dots" id="serDots" aria-label="Cycles completed"></div>' +
+    '<div class="ctrl-label">Machine state — registers shift right each cycle; the sum register fills from bit 0 up</div>' +
+    '<div class="seq-state" id="serState" style="margin-top:4px"></div>' +
+    '<div class="ry-trace" id="serTrace" aria-live="polite"></div>' +
+    '<div class="decimal-line" id="serMsg" aria-live="polite"></div>' +
+    '<div class="seq-state" id="serCost" style="margin-top:6px"></div>' +
+    '<div class="decimal-line" id="serVerifyLine" aria-live="polite"></div>' +
+    '<div class="lab-check"><span class="lab-check-q" id="serQ"></span><span id="serOpts" style="display:flex;gap:6px;flex-wrap:wrap"></span><span class="lab-check-fb" id="serFb" aria-live="polite"></span></div>' +
+    '<div class="share-row"><button type="button" class="btn" id="serNewQ">New question</button>' +
+    '<button type="button" class="btn" data-serlink="ripple">The 4-bit ripple adder — all bits at once →</button>' +
+    '<button type="button" class="btn" data-serlink="cla">The carry-lookahead adder →</button>' +
+    '<button type="button" class="btn" data-serlink="shift">The shift-register pack this borrows →</button></div>' +
+    '<p class="cp-formal adv-only">Cost accounting, honestly: the serial machine\'s combinational logic is one full adder — ' + SER_V.faGates + ' gates by the site netlist — but it also needs state the parallel adders do not: two 4-bit shift registers, a 4-bit sum register and the carry flip-flop, 13 flip-flops in all, plus the clock. The parallel machines need no registers and no clock for the addition itself, but pay ' + SER_V.rippleGates + ' gates (ripple) or ' + SER_V.claGates + ' gates (lookahead) and settle in ' + SER_V.rippleDelay + ' ns / ' + SER_V.claDelay + ' ns by the site delay model. The serial machine\'s cycle cannot be shorter than one full-adder delay (' + SER_V.faDelay + ' ns on the same model) and it needs 4 of them — so on 4 bits it is roughly four times slower with roughly a quarter of the adder gates. Widen the operands and the trade sharpens: parallel gate count grows with n, serial cycle count grows with n, and serial gate count does not grow at all. That is why serial links and tiny controllers still add this way.</p>';
+  if (cmosSec.parentNode) cmosSec.parentNode.insertBefore(serSec, cmosSec.nextSibling);
+  else { const cv2 = $A("circuitsView"); if (cv2) cv2.appendChild(serSec); }
+  serSec.querySelectorAll("[data-serlink]").forEach(b => b.addEventListener("click", () => {
+    const k = b.dataset.serlink;
+    if (k === "ripple") { if (!clickMenuKeyAA("circ-ripple")) jumpAA("serialCard"); }
+    else if (k === "cla") { if (!clickMenuKeyAA("circ-cla")) jumpAA("serialCard"); }
+    else { if (!clickMenuKeyAA("seq")) jumpAA("serialCard"); }
+  }));
+  function serBitCells(host, value, prefix, setter) {
+    host.innerHTML = "";
+    [3, 2, 1, 0].forEach(i => {
+      const bit = (value >> i) & 1;
+      const c = document.createElement(setter ? "button" : "div");
+      if (setter) c.type = "button";
+      c.className = "seq-cell" + (bit ? " one" : "");
+      c.innerHTML = "<b>" + bit + '</b><span class="ry-role">' + prefix + i + "</span>";
+      if (setter) c.addEventListener("click", () => { setter(value ^ (1 << i)); serReset(); serRender(); });
+      host.appendChild(c);
+    });
+  }
+  function serRender() {
+    serBitCells(serSec.querySelector("#serA"), ser.A, "A", v => ser.A = v);
+    serBitCells(serSec.querySelector("#serB"), ser.B, "B", v => ser.B = v);
+    const dots = serSec.querySelector("#serDots"); dots.innerHTML = "";
+    for (let i = 0; i < 4; i++) { const d = document.createElement("i"); if (i < ser.cycle) d.className = "done"; dots.appendChild(d); }
+    const dl = document.createElement("span"); dl.textContent = ser.cycle >= 4 ? "done — 4 of 4 cycles" : "cycle " + ser.cycle + " of 4 done"; dots.appendChild(dl);
+    const st = serSec.querySelector("#serState"); st.innerHTML = "";
+    [["A register (still to add)", bin4AA(ser.regA)], ["B register (still to add)", bin4AA(ser.regB)], ["carry flip-flop", String(ser.carry)], ["sum register so far", bin4AA(ser.sumReg)], ["next bits at the adder", "A₀ = " + (ser.regA & 1) + " · B₀ = " + (ser.regB & 1)]].forEach(([k, v]) => {
+      const c = document.createElement("div"); c.className = "seq-cell";
+      c.innerHTML = "<b>" + v + '</b><span class="ry-role">' + k + "</span>"; st.appendChild(c);
+    });
+    const tr = serSec.querySelector("#serTrace");
+    if (!ser.trace.length) tr.textContent = "Not clocked yet. Each cycle will appear here: bits in, carry in, sum bit stored, carry out fed back.";
+    else tr.innerHTML = ser.trace.map(t => (t.cycle === ser.trace.length ? '<span class="ry-cur">' : "") + "cycle " + t.cycle + " (bit " + t.bit + ") · A₀ " + t.aBit + " + B₀ " + t.bBit + " + carry-in " + t.cin + " → sum bit " + t.sum + " stored at position " + t.bit + " · carry-out " + t.cout + " → flip-flop · registers shifted: A " + bin4AA(t.regAAfter) + ", B " + bin4AA(t.regBAfter) + (t.cycle === ser.trace.length ? "</span>" : "")).join("\n");
+    const msg = serSec.querySelector("#serMsg");
+    if (ser.cycle >= 4) {
+      const total = ser.carry * 16 + ser.sumReg;
+      msg.innerHTML = "<b>Done: " + ser.A + " + " + ser.B + " = " + total + "</b> — sum register <b>" + bin4AA(ser.sumReg) + "</b> (" + ser.sumReg + ") with final carry-out <b>" + ser.carry + "</b> still in the flip-flop, so the full 5-bit answer is " + ser.carry + " " + bin4AA(ser.sumReg) + ". One full adder did all of it, four times.";
+    } else msg.textContent = "Cycle " + (ser.cycle + 1) + " is next: the adder will see A₀ = " + (ser.regA & 1) + ", B₀ = " + (ser.regB & 1) + " and carry-in " + ser.carry + " from the flip-flop. Predict the sum bit before you clock it.";
+    const cost = serSec.querySelector("#serCost"); cost.innerHTML = "";
+    [["this machine — full adders", "1 (" + SER_V.faGates + " gates) + 13 flip-flops"], ["this machine — cycles for 4 bits", "4"], ["ripple adder — gates", SER_V.rippleGates + " · settles in " + SER_V.rippleDelay + " ns, 1 pass"], ["carry-lookahead — gates", SER_V.claGates + " · settles in " + SER_V.claDelay + " ns, 1 pass"]].forEach(([k, v]) => {
+      const c = document.createElement("div"); c.className = "seq-cell";
+      c.innerHTML = "<b>" + v + '</b><span class="ry-role">' + k + "</span>"; cost.appendChild(c);
+    });
+    serSec.querySelector("#serVerifyLine").textContent = "Engine self-check, run at load: all " + SER_V.ok + " of " + SER_V.combos + " input pairs (every 4-bit A × B) were clocked through this cycle model — each cycle evaluated on the full-adder netlist — and every final {carry, sum} equals A + B.";
+    serSec.querySelector("#serStep").disabled = ser.cycle >= 4;
+    serSec.querySelector("#serRun").disabled = ser.cycle >= 4;
+  }
+  function serStepOnce() {
+    if (ser.cycle >= 4) return;
+    const i = ser.cycle;
+    const aBit = ser.regA & 1, bBit = ser.regB & 1;
+    const r = faEvalAA(aBit, bBit, ser.carry);
+    ser.sumReg |= (r.sum << i);
+    const t = { cycle: i + 1, bit: i, aBit, bBit, cin: ser.carry, sum: r.sum, cout: r.cout, regAAfter: ser.regA >> 1, regBAfter: ser.regB >> 1 };
+    ser.regA >>= 1; ser.regB >>= 1; ser.carry = r.cout; ser.cycle++;
+    ser.trace.push(t);
+  }
+  serSec.querySelector("#serStep").addEventListener("click", () => { serStepOnce(); serRender(); });
+  serSec.querySelector("#serRun").addEventListener("click", () => { while (ser.cycle < 4) serStepOnce(); serRender(); });
+  serSec.querySelector("#serReset").addEventListener("click", () => { serReset(); serRender(); });
+  let serQn = 0;
+  function serQuestion() {
+    const rng = mulberryAA(6161 + serQn * 149);
+    const A = 1 + Math.floor(rng() * 15), B = 1 + Math.floor(rng() * 15);
+    const run = serialRunAA(A, B);
+    const fb = serSec.querySelector("#serFb"), host = serSec.querySelector("#serOpts");
+    fb.textContent = "";
+    if (serQn % 2 === 0) {
+      const k = Math.floor(rng() * 4), t = run.trace[k];
+      serSec.querySelector("#serQ").textContent = "Predict, then check: adding A = " + A + " (" + bin4AA(A) + ") and B = " + B + " (" + bin4AA(B) + ") serially, what sum bit does cycle " + (k + 1) + " (bit " + k + ") store?";
+      optBtnsAA(host, ["0", "1"], i => fbSetAA(fb, i === t.sum, i === t.sum
+        ? "Right — cycle " + (k + 1) + " adds A₀ = " + t.aBit + ", B₀ = " + t.bBit + " and carry-in " + t.cin + " (fed back from cycle " + k + "), and " + t.aBit + " + " + t.bBit + " + " + t.cin + " gives sum bit " + t.sum + ", carry-out " + t.cout + ". Load " + A + " and " + B + " above and clock to cycle " + (k + 1) + " to watch it happen."
+        : "Not that bit — the carry-in is the trap: cycle " + (k + 1) + " sees carry-in " + t.cin + ", not 0, because cycle " + k + " fed its carry out back. Add " + t.aBit + " + " + t.bBit + " + " + t.cin + " and take the low bit."));
+      window.__serialQuestion = { A, B, ask: "sumBit", cycle: k + 1, expected: t.sum };
+    } else {
+      serSec.querySelector("#serQ").textContent = "Predict, then check: after all 4 cycles of " + A + " + " + B + ", what is left in the carry flip-flop?";
+      optBtnsAA(host, ["0", "1"], i => fbSetAA(fb, i === run.Cout, i === run.Cout
+        ? "Right — " + A + " + " + B + " = " + run.total + ", which " + (run.Cout ? "needs a fifth bit, so the flip-flop ends holding 1 and the full answer is 1 " + bin4AA(run.S) : "fits in 4 bits (" + bin4AA(run.S) + "), so the flip-flop ends at 0") + ". Run the same numbers above and read the final state."
+        : "Not that — the flip-flop ends holding the sum's fifth bit: " + A + " + " + B + " = " + run.total + " = " + run.Cout + " " + bin4AA(run.S) + " in binary. Run it above and watch the last cycle's carry-out land there."));
+      window.__serialQuestion = { A, B, ask: "finalCarry", expected: run.Cout };
+    }
+  }
+  serSec.querySelector("#serNewQ").addEventListener("click", () => { serQn++; serQuestion(); });
+  serReset(); serRender(); serQuestion();
+
+  /* ================= verification handles ================= */
+  window.__cmosCheck = { not: cmosNot, nand: cmosNand, verify: cmosVerify };
+  window.__flagsCheck = { compute: flagsCompute, aluRun: aluRunAA, branch: branchTakenAA, branches: BRANCHES_AA.map(b => b[0]), verify: flagsVerify };
+  window.__serialCheck = { run: serialRunAA, faEval: faEvalAA, verify: serialVerifyAA };
+
+  /* ================= MENU REGISTRATION + COUNT REBUILD ================= */
+  function addMenuItemAA(groupName, afterKey, spec) {
+    const list = $A("menuList"); if (!list) return false;
+    if (list.querySelector('[data-key="' + spec.key + '"]')) return false;
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "menu-item"; b.dataset.key = spec.key;
+    b.dataset.search = (spec.label + " " + spec.hint + " " + spec.search).toLowerCase();
+    if (spec.level) b.dataset.uxlevel = spec.level;
+    b.innerHTML = '<span class="mi-dot" aria-hidden="true"></span><span class="mi-label"></span><small></small>';
+    b.querySelector(".mi-label").textContent = spec.label;
+    b.querySelector("small").textContent = spec.hint;
+    b.addEventListener("click", () => { const p = $A("menuPanel"); if (p) p.hidden = true; const mb = $A("menuBtn"); if (mb) mb.setAttribute("aria-expanded", "false"); spec.go(); });
+    if (afterKey) {
+      const anchor = list.querySelector('[data-key="' + afterKey + '"]');
+      if (anchor) { anchor.parentNode.insertBefore(b, anchor.nextSibling); return true; }
+    }
+    let sib = null, inGroup = false;
+    Array.prototype.slice.call(list.children).forEach(el => {
+      if (el.classList.contains("menu-group")) inGroup = (el.dataset.group || "").trim() === groupName;
+      else if (inGroup && el.classList.contains("menu-item")) sib = el;
+    });
+    if (sib) sib.parentNode.insertBefore(b, sib.nextSibling); else list.appendChild(b);
+    return true;
+  }
+  addMenuItemAA("Logic & Circuits", "barrel-shifter", {
+    key: "cmos-lab", label: "CMOS transistor-level gate lab — gates are switches",
+    hint: "Build NOT and NAND from MOSFETs: PMOS pull-up and NMOS pull-down networks, output computed from the switch states",
+    search: "cmos mosfet transistor pmos nmos pull-up pull-down network switches vdd gnd nand not gate level transistors complementary simulator",
+    level: "intermediate",
+    go: () => { setTopArea("circuits"); syncRail("circuits"); jumpAA("cmosCard"); }
+  });
+  addMenuItemAA("Logic & Circuits", "cmos-lab", {
+    key: "bit-serial-adder", label: "Bit-serial adder lab — one adder, four cycles",
+    hint: "One full adder plus two shift registers and a carry flip-flop add 4-bit numbers bit by bit — 256 of 256 pairs checked, priced against ripple and lookahead",
+    search: "bit serial adder serial addition shift register carry flip-flop clock cycles lsb first area time tradeoff ripple carry lookahead cla simulator",
+    level: "intermediate",
+    go: () => { setTopArea("circuits"); syncRail("circuits"); jumpAA("serialCard"); }
+  });
+  addMenuItemAA("Computer Architecture", "sap1-assembler", {
+    key: "alu-flags", label: "ALU flags & conditional-branch lab",
+    hint: "N, Z, V, C computed from a 4-bit add or subtract on the site ALU, then every branch condition read off the flags",
+    search: "alu flags nzvc negative zero overflow carry conditional branch compare beq bne blt bge bhi signed unsigned comparison sap-1 jz simulator",
+    level: "intermediate",
+    go: () => { setTopArea("systems"); syncRail("systems"); const pb = document.querySelector('#sysPicker [data-sys="arch"]'); if (pb) pb.click(); jumpAA("flagsCard"); }
+  });
+  (function rebuildCountsAA() {
+    const RJ = window.__uxRoundJ; if (!RJ) return;
+    const groups = RJ.menuGroups(); const counts = {}; let total = 0;
+    groups.forEach(g => {
+      counts[g.name] = g.items.length; total += g.items.length;
+      const c = g.header.querySelector(".mi-count"); if (c) c.textContent = g.items.length;
+    });
+    window.LAB_MENU = { groups: groups.map(g => ({ name: g.name, items: g.items.map(b => { const l = b.querySelector(".mi-label"); return l ? l.textContent : ""; }) })), count: total };
+    window.LAB_MODULES = { modules: groups.map(g => ({ name: g.name, count: g.items.length })), total };
+    RJ.buildRailAndList(counts);
+    RJ.buildGallery();
+    ["boards", "arch", "os", "org"].forEach(id => {
+      const h = document.querySelector("#module-" + id + " .mh-count");
+      if (!h) return;
+      const name = { boards: "Boards, Modulation & Projects", arch: "Computer Architecture", os: "Operating Systems", org: "Computer Organization" }[id];
+      if (counts[name]) h.textContent = counts[name] + " items";
+    });
+    window.__countsAA = { total, counts };
+  })();
+
+  /* ================= load-time self-tests (evidence handles) ================= */
+  try {
+    window.__roundAASelfTest = { cmos: CMOS_V, flags: FLAGS_V, serial: SER_V };
+  } catch (e) { window.__roundAASelfTest = { error: String(e && e.message || e) }; }
+})();
+</script>
