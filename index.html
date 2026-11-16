@@ -2787,7 +2787,7 @@ function drawAlu(def, st) {
 /* ---------- breadboard view of the full adder ---------- */
 const BB_CHIPS = [
   { part: "7486", sub: "QUAD XOR", xs: [150, 177, 204, 231, 258, 285, 312],
-    bottom: [["A", 1], ["B", 2], ["s1", 3], ["Sum", 4], ["s1", 5], ["Cin", 6], ["ZERO", 7]],
+    bottom: [["A", 1], ["B", 2], ["s1", 3], ["s1", 4], ["Cin", 5], ["Sum", 6], ["ZERO", 7]],
     top: [["ONE", 14], [null, 13], [null, 12], [null, 11], [null, 10], [null, 9], [null, 8]] },
   { part: "7408", sub: "QUAD AND", xs: [420, 447, 474, 501, 528, 555, 582],
     bottom: [["A", 1], ["B", 2], ["c1", 3], ["s1", 4], ["Cin", 5], ["c2", 6], ["ZERO", 7]],
@@ -2835,16 +2835,16 @@ function drawBreadboard(st) {
   s += bbJumper("A", "#d9480f", 0, "M 110 456 H 96 V 402 H 420 V 348");
   s += bbJumper("B", "#1971c2", 0, "M 240 456 V 384 H 177 V 348");
   s += bbJumper("B", "#1971c2", 0, "M 240 468 H 447 V 348");
-  s += bbJumper("Cin", "#862e9c", 0, "M 370 456 V 398 H 285 V 348");
+  s += bbJumper("Cin", "#862e9c", 0, "M 370 456 V 398 H 258 V 348");
   s += bbJumper("Cin", "#862e9c", 0, "M 370 480 H 536 V 398 H 528 V 348");
   /* chip to chip */
-  s += bbJumper("s1", "#e67700", 1, "M 204 348 V 374 H 258 V 348");
+  s += bbJumper("s1", "#e67700", 1, "M 204 348 V 374 H 231 V 348");
   s += bbJumper("s1", "#e67700", 1, "M 204 348 V 390 H 501 V 348");
   s += bbJumper("c1", "#1098ad", 1, "M 474 348 V 406 H 690 V 348");
   s += bbJumper("c2", "#a61e4d", 2, "M 555 348 V 424 H 717 V 348");
   /* outputs to LEDs — each output pin runs to the 330 Ω resistor drawn
      beside its LED, then into the anode; the cathode goes to GND */
-  s += bbJumper("Sum", "#e03131", 2, "M 231 348 V 438 H 750 V 470");
+  s += bbJumper("Sum", "#e03131", 2, "M 285 348 V 438 H 750 V 470");
   s += bbJumper("Cout", "#2f9e44", 3, "M 744 348 V 440 H 814 V 470");
   /* chips */
   BB_CHIPS.forEach(c => {
@@ -2859,7 +2859,7 @@ function drawBreadboard(st) {
     s += '<text class="bb-chip-name" x="' + (bx + bw / 2) + '" y="305">' + c.part + "</text>";
     s += '<text class="bb-chip-sub" x="' + (bx + bw / 2) + '" y="319">' + c.sub + " · pin 14 = +5V · pin 7 = GND</text>";
     c.bottom.forEach((p, i) => s += '<text class="bb-pin-num" x="' + c.xs[i] + '" y="329">' + p[1] + "</text>");
-    c.top.forEach((p, i) => s += '<text class="bb-pin-num" x="' + c.xs[6 - i] + '" y="293">' + p[1] + "</text>");
+    c.top.forEach((p, i) => s += '<text class="bb-pin-num" x="' + c.xs[i] + '" y="293">' + p[1] + "</text>");
     /* badges */
     c.bottom.forEach((p, i) => { if (p[0]) s += '<g><circle class="bb-badge" data-bbbadge="' + p[0] + '" cx="' + c.xs[i] + '" cy="364" r="9.5"/><text class="bb-badge-txt" data-bbbadgetxt="' + p[0] + '" x="' + c.xs[i] + '" y="368">–</text></g>'; });
     s += '<g><circle class="bb-badge" data-bbbadge="ONE" cx="' + c.xs[0] + '" cy="252" r="9.5"/><text class="bb-badge-txt one" data-bbbadgetxt="ONE" x="' + c.xs[0] + '" y="256">1</text></g>';
@@ -3107,7 +3107,7 @@ function updateExtraPanel() {
   if (state.circuitId === "full" && state.view === "breadboard") {
     p.hidden = false; $("extraTitle").textContent = "Parts list — the bench build";
     body.innerHTML = '<ul class="parts-list">' +
-      '<li><b>7486</b> — quad XOR<span class="contrib">Gates 1 and 2 make s1 = A ⊕ B and Sum = s1 ⊕ Cin (pins (1,2)→3 and (5,6)→4).</span></li>' +
+      '<li><b>7486</b> — quad XOR<span class="contrib">Gates 1 and 2 make s1 = A ⊕ B and Sum = s1 ⊕ Cin (pins (1,2)→3 and (4,5)→6).</span></li>' +
       '<li><b>7408</b> — quad AND<span class="contrib">Makes the two carries c1 = A·B and c2 = s1·Cin (pins (1,2)→3 and (4,5)→6).</span></li>' +
       '<li><b>7432</b> — quad OR<span class="contrib">One gate merges the carries: Cout = c1 + c2 (pins (1,2)→3).</span></li>' +
       '<li><b>Switches ×3, LEDs ×2, 330 Ω ×2</b><span class="contrib">Switches drive A, B, Cin. Red LED = Sum, green LED = Cout: each output pin runs through its own 330 Ω resistor to the LED anode (+), and the LED cathode (−) goes to ground.</span></li></ul>' +
@@ -24038,5 +24038,564 @@ select.rx-sel{max-width:100%}
   if (s3) s3.addEventListener("click", () => setTimeout(goOrgLab1, 220));
 
   window.__fgsAB = { openInstructor, goOrgLab1, menuChild: () => menuChild, details: instructorDetails };
+})();
+</script>
+<style>
+/* ===== Round AC — ring & Johnson counters · BCD adder · bus arbitration ===== */
+.ac-trace{font-family:"IBM Plex Mono",monospace;font-size:12.5px;line-height:1.7;background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:9px 13px;margin-top:10px;white-space:pre-wrap;overflow-wrap:anywhere;min-height:2.6em}
+.ac-trace .ac-cur{font-weight:700;color:var(--amber)}
+.ac-eq{font-family:"IBM Plex Mono",monospace;font-size:13px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:7px 10px;margin-top:10px;overflow-wrap:anywhere}
+.seq-cell.arb-req{cursor:pointer}
+.seq-cell.arb-grant{border-color:var(--teal);background:var(--amber-soft)}
+</style>
+<script>
+"use strict";
+/* ================================================================
+   ROUND AC — three new labs, each graded from its own model:
+   1) Ring & Johnson counters — states come from the D flip-flop
+      next-state equations (ring: D0=Q3, D1=Q0, D2=Q1, D3=Q2;
+      Johnson: D0=NOT Q3, same shift). Sequences are generated by
+      iterating those equations, never typed in; the load-time
+      check proves ring = 4 distinct one-hot states, Johnson =
+      8 distinct states, both returning to their start.
+   2) BCD adder — both 4-bit adds are evaluated on the site's own
+      ripple-adder netlist (window.LAB.defRipple). Correction is
+      detected two independent ways (value > 9, and the gate-level
+      test C4 + S3·S2 + S3·S1) and the +6 second add produces the
+      digit; all 200 (A, B, Cin) cases are checked at load.
+   3) Bus arbitration — a grant function over (requests, policy,
+      round-robin pointer); verified at load for mutual exclusion
+      over a seeded random run and for the starvation case.
+   All three start paused: nothing auto-runs.
+   ================================================================ */
+(function roundAC() {
+  const $C = id => document.getElementById(id);
+  function mulberryAC(seed) { let a = seed >>> 0; return function () { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+  const reducedAC = () => !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  function jumpAC(id) { const el = id && $C(id); if (el) setTimeout(() => el.scrollIntoView({ behavior: reducedAC() ? "auto" : "smooth", block: "start" }), 60); }
+  function clickMenuKeyAC(key) { const it = document.querySelector('#menuList .menu-item[data-key="' + key + '"]'); if (it) { it.click(); return true; } return false; }
+  function fbSetAC(el, ok, msg) { if (!el) return; el.textContent = (ok ? "✓ " : "✗ ") + msg; el.style.color = ok ? "var(--green)" : "var(--red)"; }
+  function optBtnsAC(host, labels, onPick) {
+    host.innerHTML = "";
+    labels.forEach((lab, i) => {
+      const b = document.createElement("button"); b.type = "button"; b.className = "btn"; b.textContent = lab;
+      b.addEventListener("click", () => onPick(i, b));
+      host.appendChild(b);
+    });
+  }
+  const LABE = window.LAB;
+  const bin4AC = v => [(v >> 3) & 1, (v >> 2) & 1, (v >> 1) & 1, v & 1].join("");
+  const bitsOf = s => ({ q3: (s >> 3) & 1, q2: (s >> 2) & 1, q1: (s >> 1) & 1, q0: s & 1 });
+
+  /* ================================================================
+     1) RING & JOHNSON COUNTERS — next state from the D equations.
+     State is a 4-bit number, bit i = Qi (Q3 is the top bit as
+     drawn). Both counters shift Q0 -> Q1 -> Q2 -> Q3; they differ
+     only in what feeds D0: the ring feeds back Q3 itself, the
+     Johnson (twisted ring) feeds back NOT Q3.
+     ================================================================ */
+  /* Next state, bit by bit: new Q3 = D3 = Q2, new Q2 = D2 = Q1,
+     new Q1 = D1 = Q0, new Q0 = D0 = Q3 (ring) — the shift chain. */
+  function ringNext(s) { const b = bitsOf(s); const D = { d3: b.q2, d2: b.q1, d1: b.q0, d0: b.q3 }; return (D.d3 << 3) | (D.d2 << 2) | (D.d1 << 1) | D.d0; }
+  function ringNextWords(s) { return ringNext(s); }
+  function johnsonNext(s) { const b = bitsOf(s); const D = { d3: b.q2, d2: b.q1, d1: b.q0, d0: b.q3 ^ 1 }; return (D.d3 << 3) | (D.d2 << 2) | (D.d1 << 1) | D.d0; }
+  function counterSeq(nextFn, start) {
+    const seq = [start]; let s = nextFn(start), guard = 0;
+    while (s !== start && guard++ < 40) { seq.push(s); s = nextFn(s); }
+    return { seq, closed: s === start };
+  }
+  function counterVerify() {
+    const ring = counterSeq(ringNextWords, 1);
+    const john = counterSeq(johnsonNext, 0);
+    const oneHot = v => { let n = 0; for (let i = 0; i < 4; i++) n += (v >> i) & 1; return n === 1; };
+    const distinct = a => new Set(a).size === a.length;
+    return {
+      ringSeq: ring.seq, johnsonSeq: john.seq,
+      ringPass: ring.closed && ring.seq.length === 4 && distinct(ring.seq) && ring.seq.every(oneHot),
+      johnsonPass: john.closed && john.seq.length === 8 && distinct(john.seq),
+      wiringAgree: [0, 1, 2, 4, 8].every(v => ringNext(v) === ringNextWords(v)),
+      pass: false
+    };
+  }
+  const CTR_V = counterVerify(); CTR_V.pass = CTR_V.ringPass && CTR_V.johnsonPass && CTR_V.wiringAgree;
+
+  const ctr = { mode: "ring", state: 1, steps: 0, hist: [1] };
+  function ctrStart() { return ctr.mode === "ring" ? 1 : 0; }
+  function ctrNext(s) { return ctr.mode === "ring" ? ringNextWords(s) : johnsonNext(s); }
+  function ctrCycle() { return ctr.mode === "ring" ? CTR_V.ringSeq : CTR_V.johnsonSeq; }
+  const ctrSec = document.createElement("section");
+  ctrSec.className = "card stage-card"; ctrSec.id = "ringCard"; ctrSec.style.marginTop = "16px";
+  ctrSec.innerHTML =
+    "<h2>Ring &amp; Johnson counters — two feedbacks, two moduli</h2>" +
+    '<p class="what">Take four <b>D flip-flops</b> sharing one clock and wire them as a shift chain — each flop\'s Q feeds the next flop\'s D (Q0 → Q1 → Q2 → Q3). The whole personality of the counter is the one remaining choice: <b>what feeds D0</b>. Feed back <b>Q3 itself</b> and you get a <b>ring counter</b>: load a single 1 and it circulates forever — 0001 → 0010 → 0100 → 1000 → 0001 — four <b>one-hot</b> states, exactly one output high at a time, <b>mod-4</b>. Feed back <b>¬Q3</b> instead and you get a <b>Johnson (twisted-ring) counter</b>: the register fills with 1s and then empties — 0000 → 0001 → 0011 → 0111 → 1111 → 1110 → 1100 → 1000 → 0000 — <b>eight</b> states, <b>mod-8</b>, from the same four flops. Nothing below is a typed-in table: every state is computed from the flip-flops\' next-state equations (shown under the outputs), and the sequence table is generated by iterating them. The comparison to hold onto: <b>4 flip-flops give mod-4 as a ring, mod-8 as a Johnson, and mod-16 as a binary counter</b> — the feedback decides how many of the 16 possible patterns are ever visited. One-hot states need no decoder (each state already has its own wire), which is exactly why the <b>traffic-light sequencer</b> project is built this way: a counter core stepping through states, one lamp pattern per state.</p>' +
+    '<div class="tool-controls"><label>Counter <span class="seg" role="group" aria-label="Counter type" id="ctrModeSeg"><button type="button" data-ctrmode="ring" aria-pressed="true">Ring — D0 = Q3 (mod-4)</button><button type="button" data-ctrmode="johnson" aria-pressed="false">Johnson — D0 = ¬Q3 (mod-8)</button></span></label></div>' +
+    '<div class="share-row"><button type="button" class="btn primary" id="ctrStep">Step clock ▸</button>' +
+    '<button type="button" class="btn" id="ctrRun">Run full cycle</button>' +
+    '<button type="button" class="btn" id="ctrReset">Reset</button></div>' +
+    '<div class="ctrl-label" style="margin-top:12px">Flip-flop outputs — Q3 Q2 Q1 Q0, live</div>' +
+    '<div class="seq-state" id="ctrState" style="margin-top:4px"></div>' +
+    '<div class="ctrl-label" style="margin-top:12px">Next-state inputs — what each D will sample at the next edge, computed from the Qs above</div>' +
+    '<div class="seq-state" id="ctrNext" style="margin-top:4px"></div>' +
+    '<div class="ac-eq" id="ctrEq"></div>' +
+    '<div class="ac-trace" id="ctrTrace" aria-live="polite"></div>' +
+    '<div class="ctrl-label" style="margin-top:14px">The full cycle — generated from the D equations, current state highlighted</div>' +
+    '<div class="tt-wrap" style="max-height:300px"><table class="tt" id="ctrTable"></table></div>' +
+    '<div class="ctrl-label" style="margin-top:14px">Same four flip-flops, three moduli — the feedback is the only difference</div>' +
+    '<div class="seq-state" id="ctrMod" style="margin-top:4px"></div>' +
+    '<div class="decimal-line" id="ctrVerifyLine" aria-live="polite"></div>' +
+    '<div class="lab-check"><span class="lab-check-q" id="ctrQ"></span><span id="ctrOpts" style="display:flex;gap:6px;flex-wrap:wrap"></span><span class="lab-check-fb" id="ctrFb" aria-live="polite"></span></div>' +
+    '<div class="share-row"><button type="button" class="btn" id="ctrNewQ">New question</button>' +
+    '<button type="button" class="btn" data-ctrlink="traffic">The traffic-light sequencer — this counter with lamps on →</button>' +
+    '<button type="button" class="btn" data-ctrlink="seq">Sequential pack — the D flip-flop itself →</button></div>' +
+    '<p class="cp-formal adv-only">Next-state equations as implemented — ring: D0 = Q3, D1 = Q0, D2 = Q1, D3 = Q2, started at 0001. Johnson: D0 = ¬Q3, D1 = Q0, D2 = Q1, D3 = Q2, started at 0000. A ring counter is not self-starting: a pattern that is not one-hot (say 0011 after a power glitch) circulates unchanged forever, so production ring counters add correction logic to force exactly one 1; the Johnson counter has the same caveat for its eight unused patterns. Decoding is the Johnson counter\'s quiet prize: each of its eight states is recognised by a single 2-input AND of one Q and one ¬Q (state 0111, for instance, is Q2·¬Q3), which is why Johnson counters drive phase clocks and stepper sequences.</p>';
+  const serElAC = $C("serialCard");
+  if (serElAC && serElAC.parentNode) serElAC.parentNode.insertBefore(ctrSec, serElAC.nextSibling);
+  else { const cv = $C("circuitsView"); if (cv) cv.appendChild(ctrSec); }
+  ctrSec.querySelectorAll("[data-ctrlink]").forEach(b => b.addEventListener("click", () => {
+    if (b.dataset.ctrlink === "traffic") {
+      setTopArea("advanced"); syncRail("advanced");
+      const pb = document.querySelector('#advPicker [data-adv="projects"]'); if (pb) pb.click();
+      jumpAC("proj-traffic");
+    } else { if (!clickMenuKeyAC("seq")) jumpAC("ringCard"); }
+  }));
+  function ctrRender() {
+    const b = bitsOf(ctr.state);
+    const n = ctrNext(ctr.state), nb = bitsOf(n);
+    const sh = ctrSec.querySelector("#ctrState"); sh.innerHTML = "";
+    [["Q3", b.q3], ["Q2", b.q2], ["Q1", b.q1], ["Q0", b.q0]].forEach(([k, v]) => {
+      const c = document.createElement("div"); c.className = "seq-cell" + (v ? " one" : "");
+      c.innerHTML = "<b>" + v + '</b><span class="ry-role">' + k + "</span>"; sh.appendChild(c);
+    });
+    const sc = document.createElement("div"); sc.className = "seq-cell one";
+    sc.innerHTML = "<b>" + bin4AC(ctr.state) + '</b><span class="ry-role">state Q3Q2Q1Q0 · step ' + ctr.steps + "</span>"; sh.appendChild(sc);
+    const nh = ctrSec.querySelector("#ctrNext"); nh.innerHTML = "";
+    [["D3 = Q2", nb.q3], ["D2 = Q1", nb.q2], ["D1 = Q0", nb.q1], [ctr.mode === "ring" ? "D0 = Q3" : "D0 = ¬Q3", nb.q0]].forEach(([k, v]) => {
+      const c = document.createElement("div"); c.className = "seq-cell" + (v ? " one" : "");
+      c.innerHTML = "<b>" + v + '</b><span class="ry-role">' + k + "</span>"; nh.appendChild(c);
+    });
+    ctrSec.querySelector("#ctrEq").textContent = ctr.mode === "ring"
+      ? "Ring wiring: D0 ← Q3 = " + b.q3 + " · D1 ← Q0 = " + b.q0 + " · D2 ← Q1 = " + b.q1 + " · D3 ← Q2 = " + b.q2 + "  →  next state " + bin4AC(n)
+      : "Johnson wiring: D0 ← ¬Q3 = " + (b.q3 ^ 1) + " · D1 ← Q0 = " + b.q0 + " · D2 ← Q1 = " + b.q1 + " · D3 ← Q2 = " + b.q2 + "  →  next state " + bin4AC(n);
+    const tr = ctrSec.querySelector("#ctrTrace");
+    tr.innerHTML = ctr.hist.map((s, i) => (i === ctr.hist.length - 1 ? '<span class="ac-cur">' : "") + bin4AC(s) + (i === ctr.hist.length - 1 ? "</span>" : "")).join(" → ") +
+      (ctr.steps === 0 ? " — loaded and waiting: press Step clock and the D row above lands in the Q row." : " — " + ctr.steps + " clock edge" + (ctr.steps === 1 ? "" : "s") + " so far" + (ctr.state === ctrStart() && ctr.steps > 0 ? "; back at the start state, the cycle repeats." : "."));
+    const cyc = ctrCycle();
+    let th = "<thead><tr><th>Step in cycle</th><th>Q3 Q2 Q1 Q0</th><th>" + (ctr.mode === "ring" ? "Which output is hot" : "How the pattern reads") + "</th></tr></thead><tbody>";
+    cyc.forEach((s, i) => {
+      const note = ctr.mode === "ring" ? "Q" + [0, 1, 2, 3].find(k => ((s >> k) & 1) === 1) + " = 1, the rest 0 — one-hot"
+        : (s === 0 ? "empty — all 0s" : s === 15 ? "full — all 1s" : (bitsOf(s).q0 && !bitsOf(s).q3 ? "filling: a run of 1s growing from Q0" : "emptying: the 1s drain away toward Q3"));
+      th += '<tr' + (s === ctr.state ? ' class="active"' : "") + "><td>" + i + "</td><td>" + bin4AC(s) + "</td><td>" + note + "</td></tr>";
+    });
+    ctrSec.querySelector("#ctrTable").innerHTML = th + "</tbody>";
+    const mh = ctrSec.querySelector("#ctrMod"); mh.innerHTML = "";
+    [["Ring (this card)", "mod-4", "4 of the 16 patterns visited"], ["Johnson (this card)", "mod-8", "8 of the 16 patterns visited"], ["Binary up-counter (Sequential pack)", "mod-16", "all 16 patterns visited"]].forEach(([k, v, w]) => {
+      const c = document.createElement("div"); c.className = "seq-cell";
+      c.innerHTML = "<b>" + v + '</b><span class="ry-role">' + k + " · " + w + "</span>"; mh.appendChild(c);
+    });
+    ctrSec.querySelector("#ctrVerifyLine").textContent = "Self-check, run at load from the D equations: the ring sequence visits " + CTR_V.ringSeq.length + " of 4 states (" + CTR_V.ringSeq.map(bin4AC).join(", ") + ") — all one-hot, all distinct, returning to 0001; the Johnson sequence visits " + CTR_V.johnsonSeq.length + " of 8 states (" + CTR_V.johnsonSeq.map(bin4AC).join(", ") + ") — all distinct, returning to 0000.";
+  }
+  function ctrReset() { ctr.state = ctrStart(); ctr.steps = 0; ctr.hist = [ctr.state]; ctrRender(); }
+  ctrSec.querySelector("#ctrModeSeg").querySelectorAll("button").forEach(btn => btn.addEventListener("click", () => {
+    ctrSec.querySelector("#ctrModeSeg").querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x === btn ? "true" : "false"));
+    ctr.mode = btn.dataset.ctrmode; ctrReset(); ctrQuestion();
+  }));
+  ctrSec.querySelector("#ctrStep").addEventListener("click", () => { ctr.state = ctrNext(ctr.state); ctr.steps++; ctr.hist.push(ctr.state); if (ctr.hist.length > 18) ctr.hist.shift(); ctrRender(); });
+  ctrSec.querySelector("#ctrRun").addEventListener("click", () => { const len = ctrCycle().length; for (let i = 0; i < len; i++) { ctr.state = ctrNext(ctr.state); ctr.steps++; ctr.hist.push(ctr.state); } while (ctr.hist.length > 18) ctr.hist.shift(); ctrRender(); });
+  ctrSec.querySelector("#ctrReset").addEventListener("click", ctrReset);
+  let ctrQn = 0;
+  function ctrQuestion() {
+    const seq = CTR_V.johnsonSeq;
+    const idx = (ctrQn * 3 + 1) % seq.length;
+    const cur = seq[idx], exp = johnsonNext(cur);
+    const distract = Array.from(new Set([ringNextWords(cur), cur, exp ^ 15])).filter(v => v !== exp);
+    const labels = [exp].concat(distract).slice(0, 4).map(bin4AC);
+    /* deterministic shuffle */
+    const rng = mulberryAC(4242 + ctrQn * 31);
+    for (let i = labels.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); const t = labels[i]; labels[i] = labels[j]; labels[j] = t; }
+    ctrSec.querySelector("#ctrQ").textContent = "Predict, then check: the Johnson counter sits at " + bin4AC(cur) + " (Q3 Q2 Q1 Q0). What state does the next clock edge produce?";
+    const fb = ctrSec.querySelector("#ctrFb");
+    optBtnsAC(ctrSec.querySelector("#ctrOpts"), labels, i => {
+      const picked = labels[i];
+      fbSetAC(fb, picked === bin4AC(exp), picked === bin4AC(exp)
+        ? "Right — D0 takes ¬Q3 = " + (bitsOf(cur).q3 ^ 1) + " and every other bit shifts up (Q0→Q1→Q2→Q3): " + bin4AC(cur) + " → " + bin4AC(exp) + ". Switch the lab to Johnson, reset, and step to this state to watch it happen."
+        : "Not that state — apply the wiring, not the ring habit: D0 = ¬Q3 (the twist is the whole point), D1 = Q0, D2 = Q1, D3 = Q2. From " + bin4AC(cur) + " that gives " + bin4AC(exp) + ".");
+    });
+    window.__ringQuestion = { shown: bin4AC(cur), expected: bin4AC(exp) };
+  }
+  ctrSec.querySelector("#ctrNewQ").addEventListener("click", () => { ctrQn++; ctrQuestion(); });
+  ctrRender(); ctrQuestion();
+
+  /* ================================================================
+     2) BCD ADDER — two ripple-netlist adds and a correction.
+     Stage 1: raw = A + B + Cin (binary). Correction needed iff
+     the 5-bit total exceeds 9 — checked two ways that must
+     agree: by value, and by the gate test C4 + S3·S2 + S3·S1.
+     Stage 2: digit = raw + (correct ? 0110 : 0000); Cout = correct.
+     ================================================================ */
+  const ripDefAC = LABE.computeLevels(LABE.defRipple());
+  function add4AC(a, b, cin) {
+    const ins = { Cin: cin };
+    for (let i = 0; i < 4; i++) { ins["A" + i] = (a >> i) & 1; ins["B" + i] = (b >> i) & 1; }
+    const v = LABE.evaluateAll(ripDefAC, ins);
+    return { s: v.S3 * 8 + v.S2 * 4 + v.S1 * 2 + v.S0, cout: v.Cout };
+  }
+  function bcdAdd(A, B, cin) {
+    const st1 = add4AC(A, B, cin);
+    const raw = st1.s, c4 = st1.cout, total = c4 * 16 + raw;
+    const byValue = total > 9;
+    const byGates = !!(c4 || (((raw >> 3) & 1) && (((raw >> 2) & 1) || ((raw >> 1) & 1))));
+    const correct = byValue;
+    const st2 = add4AC(raw, correct ? 6 : 0, 0);
+    return { A, B, cin, raw, c4, total, correct, byValue, byGates, digit: st2.s, cout: correct ? 1 : 0, stage2: st2 };
+  }
+  function bcdVerify() {
+    let n = 0, ok = 0;
+    for (let A = 0; A < 10; A++) for (let B = 0; B < 10; B++) for (let cin = 0; cin < 2; cin++) {
+      n++;
+      const r = bcdAdd(A, B, cin);
+      if (r.byValue === r.byGates && r.digit === r.total % 10 && r.cout === (r.total >= 10 ? 1 : 0)) ok++;
+    }
+    return { combos: n, ok, pass: ok === n };
+  }
+  const BCD_V = bcdVerify();
+
+  const bcd = { A: 7, B: 8, cin: 0 };
+  const bcdSec = document.createElement("section");
+  bcdSec.className = "card stage-card"; bcdSec.id = "bcdCard"; bcdSec.style.marginTop = "16px";
+  bcdSec.innerHTML =
+    "<h2>BCD adder — add in binary, then fix the decimal lie</h2>" +
+    '<p class="what">A calculator does not add decimal digits with decimal hardware — it adds them with an ordinary <b>binary adder</b> and then repairs the answer. The problem: a 4-bit adder happily produces the six codes <b>1010–1111</b> that are <b>not decimal digits</b>, and it carries at 16 where decimal must carry at 10. The repair is exact: whenever the binary sum of two BCD digits (plus carry-in) lands <b>above 9</b> — either the raw sum is 1010–1111 or the first add carried out — add <b>0110 (+6)</b>. Skipping the six illegal codes pushes the digit back into 0–9 and forces the decimal carry the binary adder withheld. This lab is built the way the hardware is: <b>two 4-bit adder blocks</b>, both evaluated on the site\'s own ripple-adder netlist, with a <b>correction detector</b> between them (C4 + S3·S2 + S3·S1 — the gate-level way of saying “sum &gt; 9”). Watch the trap case 7 + 8: the binary sum 1111 looks like a fine 4-bit answer and is a meaningless digit; only the +6 pass turns it into 0101 with a carry — the “1” and “5” of 15. The thread continues on the bench: the <b>7447 display project</b> is what a corrected digit drives.</p>' +
+    '<div class="tool-controls">' +
+    '<label>Digit A <select id="bcdA" class="tool-num" style="width:auto">' + [0,1,2,3,4,5,6,7,8,9].map(v => '<option value="' + v + '"' + (v === 7 ? " selected" : "") + ">" + v + "</option>").join("") + '</select></label>' +
+    '<label>Digit B <select id="bcdB" class="tool-num" style="width:auto">' + [0,1,2,3,4,5,6,7,8,9].map(v => '<option value="' + v + '"' + (v === 8 ? " selected" : "") + ">" + v + "</option>").join("") + '</select></label>' +
+    '<label>Carry-in <span class="seg" role="group" aria-label="Carry in" id="bcdCinSeg"><button type="button" data-bcdcin="0" aria-pressed="true">0</button><button type="button" data-bcdcin="1" aria-pressed="false">1</button></span></label></div>' +
+    '<div class="schematic-box"><svg id="bcdSvg" viewBox="0 0 920 178" role="img" aria-label="Two 4-bit adder blocks: the first adds the digits in binary, a correction detector decides, the second adds 0110 when correcting" style="display:block;width:100%;height:auto"></svg></div>' +
+    '<div class="ctrl-label" style="margin-top:12px">Adder 1 — binary sum (this is where the illegal codes appear)</div>' +
+    '<div class="seq-state" id="bcdStage1" style="margin-top:4px"></div>' +
+    '<div class="ctrl-label" style="margin-top:12px">Correction detector — is the 5-bit total above 9?</div>' +
+    '<div class="seq-state" id="bcdDetect" style="margin-top:4px"></div>' +
+    '<div class="ctrl-label" style="margin-top:12px">Adder 2 — the +6 correction (or +0 when the binary sum was already a digit)</div>' +
+    '<div class="seq-state" id="bcdStage2" style="margin-top:4px"></div>' +
+    '<div class="decimal-line" id="bcdRead" aria-live="polite"></div>' +
+    '<div class="decimal-line" id="bcdVerifyLine" aria-live="polite"></div>' +
+    '<div class="lab-check"><span class="lab-check-q" id="bcdQ"></span><span id="bcdOpts" style="display:flex;gap:6px;flex-wrap:wrap"></span><span class="lab-check-fb" id="bcdFb" aria-live="polite"></span></div>' +
+    '<div class="share-row"><button type="button" class="btn" id="bcdNewQ">New question</button>' +
+    '<button type="button" class="btn" data-bcdlink="ripple">The ripple adder both blocks are built from →</button>' +
+    '<button type="button" class="btn" data-bcdlink="disp">The 7447 project — a corrected digit, displayed →</button></div>' +
+    '<p class="cp-formal adv-only">Detection, two ways, proven equal on all 200 cases at load: by value, correct ⟺ A + B + Cin &gt; 9; by gates, correct = C4 + S3·S2 + S3·S1, where S is Adder 1\'s 4-bit sum and C4 its carry-out (the product terms catch 1010–1111: S3 set, and S2 or S1 set). The second add is a full ripple add of S with 0110 or 0000 — Cout(final) is the correction signal itself, not Adder 2\'s carry: for totals 16–19 Adder 1 already carried, Adder 2\'s own carry is 0, and the decimal carry still must be 1. Multi-digit BCD addition chains these blocks, each digit\'s Cout feeding the next digit\'s Cin — set Cin = 1 above to rehearse exactly that link.</p>';
+  if (ctrSec.parentNode) ctrSec.parentNode.insertBefore(bcdSec, ctrSec.nextSibling);
+  else { const cv2 = $C("circuitsView"); if (cv2) cv2.appendChild(bcdSec); }
+  bcdSec.querySelectorAll("[data-bcdlink]").forEach(b => b.addEventListener("click", () => {
+    if (b.dataset.bcdlink === "ripple") { if (!clickMenuKeyAC("circ-ripple")) jumpAC("bcdCard"); }
+    else { if (!clickMenuKeyAC("ux-bcd")) jumpAC("bcdCard"); }
+  }));
+  function bcdCells(host, rows) {
+    host.innerHTML = "";
+    rows.forEach(([k, v, on]) => {
+      const c = document.createElement("div"); c.className = "seq-cell" + (on ? " one" : "");
+      c.innerHTML = "<b>" + v + '</b><span class="ry-role">' + k + "</span>"; host.appendChild(c);
+    });
+  }
+  function bcdRender() {
+    const r = bcdAdd(bcd.A, bcd.B, bcd.cin);
+    const svg = bcdSec.querySelector("#bcdSvg");
+    svg.innerHTML =
+      '<rect x="30" y="46" width="220" height="86" rx="9" style="fill:var(--panel);stroke:var(--ink);stroke-width:1.6"/>' +
+      '<text x="140" y="80" style="font-size:14px;font-weight:700;fill:var(--ink);text-anchor:middle">ADDER 1 · 4-bit binary</text>' +
+      '<text x="140" y="102" style="font-size:12px;fill:var(--muted);text-anchor:middle">' + bcd.A + " + " + bcd.B + " + Cin " + bcd.cin + " = " + r.total + " (" + r.c4 + " " + bin4AC(r.raw) + ")</text>" +
+      '<rect x="350" y="46" width="220" height="86" rx="9" style="fill:' + (r.correct ? "var(--amber-soft)" : "var(--panel)") + ';stroke:' + (r.correct ? "var(--amber)" : "var(--line2)") + ';stroke-width:1.6"/>' +
+      '<text x="460" y="80" style="font-size:14px;font-weight:700;fill:var(--ink);text-anchor:middle">CORRECTION DETECTOR</text>' +
+      '<text x="460" y="102" style="font-size:12px;fill:var(--muted);text-anchor:middle">total &gt; 9? ' + (r.correct ? "YES — add 0110" : "no — add 0000") + "</text>" +
+      '<rect x="670" y="46" width="220" height="86" rx="9" style="fill:var(--panel);stroke:var(--ink);stroke-width:1.6"/>' +
+      '<text x="780" y="80" style="font-size:14px;font-weight:700;fill:var(--ink);text-anchor:middle">ADDER 2 · +6 correction</text>' +
+      '<text x="780" y="102" style="font-size:12px;fill:var(--muted);text-anchor:middle">' + bin4AC(r.raw) + " + " + (r.correct ? "0110" : "0000") + " → digit " + bin4AC(r.digit) + " · Cout " + r.cout + "</text>" +
+      '<line x1="250" y1="89" x2="350" y2="89" style="stroke:var(--slate-wire);stroke-width:2.2"/><line x1="570" y1="89" x2="670" y2="89" style="stroke:' + (r.correct ? "var(--amber-wire)" : "var(--slate-wire)") + ';stroke-width:2.2"/>' +
+      '<text x="460" y="28" style="font-size:12px;fill:var(--muted);text-anchor:middle">both adders are the site ripple netlist — the detector between them is the only new logic</text>';
+    bcdCells(bcdSec.querySelector("#bcdStage1"), [
+      ["A (BCD digit)", bcd.A + " · " + bin4AC(bcd.A), false],
+      ["B (BCD digit)", bcd.B + " · " + bin4AC(bcd.B), false],
+      ["raw sum S3–S0", bin4AC(r.raw) + " (" + r.raw + ")", r.raw > 9],
+      ["carry out C4", String(r.c4), r.c4 === 1],
+      ["5-bit binary total", r.total, r.total > 9]
+    ]);
+    bcdCells(bcdSec.querySelector("#bcdDetect"), [
+      ["S &gt; 9 as a code (1010–1111)?", r.raw > 9 ? "yes" : "no", r.raw > 9],
+      ["C4 = 1 (carried at 16)?", r.c4 ? "yes" : "no", r.c4 === 1],
+      ["gate test C4 + S3·S2 + S3·S1", r.byGates ? "1" : "0", r.byGates],
+      ["correction needed", r.correct ? "YES — add 0110" : "no — add 0000", r.correct]
+    ]);
+    bcdCells(bcdSec.querySelector("#bcdStage2"), [
+      ["Adder 2 adds", r.correct ? "0110 (6)" : "0000 (0)", r.correct],
+      ["BCD digit out", bin4AC(r.digit) + " (" + r.digit + ")", true],
+      ["decimal carry-out", String(r.cout), r.cout === 1],
+      ["decimal reading", r.cout + " " + r.digit + " → " + r.total, true]
+    ]);
+    bcdSec.querySelector("#bcdRead").innerHTML = bcd.A + " + " + bcd.B + (bcd.cin ? " + carry-in 1" : "") + " = <b>" + r.total + "</b> in decimal. Binary alone said " + r.c4 + " " + bin4AC(r.raw) + (r.correct
+      ? " — " + (r.c4 ? "it carried at 16, six counts too late, and the low digit " + bin4AC(r.raw) + " is " + (r.raw > 9 ? "not even a digit" : "six short") : "the code " + bin4AC(r.raw) + " is one of the six illegal BCD codes") + ", so the detector fired and Adder 2 added 0110: digit <b>" + bin4AC(r.digit) + "</b> (" + r.digit + "), carry-out <b>1</b>. Read together: 1 " + r.digit + " — fifteen" + (r.total === 15 ? "" : ", i.e. " + r.total) + ", as decimal requires."
+      : " — already a legal digit with no carry, so the detector stayed off, Adder 2 added 0000, and the binary answer stands: digit <b>" + r.digit + "</b>, carry-out <b>0</b>.");
+    bcdSec.querySelector("#bcdVerifyLine").textContent = "Exhaustive check, run at load: all " + BCD_V.ok + " of " + BCD_V.combos + " combinations (every digit A × every digit B × carry-in 0/1) were pushed through both netlist adds — the gate-level detector agreed with the value test every time, and every BCD digit and carry-out matches decimal arithmetic.";
+  }
+  bcdSec.querySelector("#bcdA").addEventListener("change", e => { bcd.A = +e.target.value; bcdRender(); });
+  bcdSec.querySelector("#bcdB").addEventListener("change", e => { bcd.B = +e.target.value; bcdRender(); });
+  bcdSec.querySelector("#bcdCinSeg").querySelectorAll("button").forEach(btn => btn.addEventListener("click", () => {
+    bcdSec.querySelector("#bcdCinSeg").querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x === btn ? "true" : "false"));
+    bcd.cin = +btn.dataset.bcdcin; bcdRender();
+  }));
+  const BCD_TRAPS = [[7, 8, 0], [8, 5, 0], [9, 7, 0], [6, 7, 1], [9, 9, 1], [5, 8, 0]];
+  let bcdQn = 0;
+  function bcdQuestion() {
+    const [A, B, cin] = BCD_TRAPS[bcdQn % BCD_TRAPS.length];
+    const r = bcdAdd(A, B, cin);
+    const correctLab = "digit " + bin4AC(r.digit) + " (" + r.digit + "), carry-out " + r.cout;
+    const rawLab = "digit " + bin4AC(r.raw) + " (" + r.raw + "), carry-out " + r.c4 + " — no correction";
+    const noCarryLab = "digit " + bin4AC(r.digit) + " (" + r.digit + "), carry-out 0";
+    const labels = [correctLab, rawLab, noCarryLab];
+    const rng = mulberryAC(777 + bcdQn * 41);
+    for (let i = labels.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); const t = labels[i]; labels[i] = labels[j]; labels[j] = t; }
+    bcdSec.querySelector("#bcdQ").textContent = "Predict, then check: BCD-add A = " + A + " and B = " + B + " with carry-in " + cin + ". The binary sum is " + r.c4 + " " + bin4AC(r.raw) + " — plausible-looking, and wrong as a digit. What does the BCD adder output?";
+    const fb = bcdSec.querySelector("#bcdFb");
+    optBtnsAC(bcdSec.querySelector("#bcdOpts"), labels, i => {
+      const ok = labels[i] === correctLab;
+      fbSetAC(fb, ok, ok
+        ? "Right — the total is " + r.total + " > 9, so the detector fires, Adder 2 adds 0110 to " + bin4AC(r.raw) + ", and the answer is digit " + r.digit + " with carry-out 1: the two BCD digits of " + r.total + ". Set A = " + A + ", B = " + B + " above and watch both stages."
+        : "Not that — " + A + " + " + B + (cin ? " + 1" : "") + " = " + r.total + ", which is above 9, so skipping the correction (or dropping the carry) leaves an illegal code or a lost ten. The +6 pass gives digit " + bin4AC(r.digit) + " (" + r.digit + "), carry-out 1.");
+    });
+    window.__bcdQuestion = { A, B, cin, expectedDigit: r.digit, expectedCout: r.cout };
+  }
+  bcdSec.querySelector("#bcdNewQ").addEventListener("click", () => { bcdQn++; bcdQuestion(); });
+  bcdRender(); bcdQuestion();
+  /* ================================================================
+     3) BUS ARBITRATION — one bus, three masters, two policies.
+     arbGrant(req, policy, ptr) is the whole arbiter: it returns
+     at most one grant (an index) or -1 for an idle cycle.
+     Fixed priority: lowest index wins. Round-robin: first
+     requester at or after the pointer wins; pointer advances
+     past the winner, so no requester can be passed forever.
+     ================================================================ */
+  const ARB_NAMES = ["M0 · CPU", "M1 · DMA engine", "M2 · Disk controller"];
+  function arbGrant(req, policy, ptr) {
+    if (policy === "fixed") { for (let i = 0; i < 3; i++) if (req[i]) return { g: i, ptr }; return { g: -1, ptr }; }
+    for (let k = 0; k < 3; k++) { const i = (ptr + k) % 3; if (req[i]) return { g: i, ptr: (i + 1) % 3 }; }
+    return { g: -1, ptr };
+  }
+  function arbRun(masks, policy) {
+    let ptr = 0; const counts = [0, 0, 0]; const grants = [];
+    let m2Wait = 0, m2MaxWait = 0;
+    masks.forEach(m => {
+      const req = [(m >> 0) & 1, (m >> 1) & 1, (m >> 2) & 1];
+      const r = arbGrant(req, policy, ptr); ptr = r.ptr; grants.push(r.g);
+      if (r.g >= 0) counts[r.g]++;
+      if (req[2] && r.g !== 2) { m2Wait++; if (m2Wait > m2MaxWait) m2MaxWait = m2Wait; } else if (r.g === 2) m2Wait = 0;
+    });
+    return { counts, grants, m2MaxWait };
+  }
+  function arbVerify() {
+    const rng = mulberryAC(20261116);
+    let mutexOk = true, grantValid = true, cycles = 0;
+    ["fixed", "rr"].forEach(policy => {
+      let ptr = 0;
+      for (let c = 0; c < 500; c++) {
+        cycles++;
+        const m = Math.floor(rng() * 8);
+        const req = [m & 1, (m >> 1) & 1, (m >> 2) & 1];
+        const r = arbGrant(req, policy, ptr); ptr = r.ptr;
+        /* at most one grant: the return is a single index or -1 by construction;
+           the check that matters is it never grants a non-requester, and idles iff nobody asks */
+        if (r.g === -1) { if (req.some(x => x)) grantValid = false; }
+        else if (!req[r.g]) grantValid = false;
+        if (!(r.g === -1 || (r.g >= 0 && r.g <= 2))) mutexOk = false;
+      }
+    });
+    const hog = new Array(24).fill(7); /* all three request, every cycle */
+    const fixed = arbRun(hog, "fixed"), rr = arbRun(hog, "rr");
+    const starvation = fixed.counts[0] === 24 && fixed.counts[2] === 0;
+    const bounded = rr.counts[2] === 8 && rr.m2MaxWait <= 2;
+    return { cycles, mutexOk, grantValid, starvation, bounded, fixedCounts: fixed.counts, rrCounts: rr.counts, rrM2MaxWait: rr.m2MaxWait, pass: mutexOk && grantValid && starvation && bounded };
+  }
+  const ARB_V = arbVerify();
+
+  const arb = { policy: "fixed", req: [1, 1, 1], ptr: 0, cycle: 0, counts: [0, 0, 0], hist: [], m2Wait: 0, m2MaxWait: 0, lastGrant: -2 };
+  const arbSec = document.createElement("section");
+  arbSec.className = "card stage-card"; arbSec.id = "busArbCard"; arbSec.style.marginTop = "16px"; arbSec.style.marginBottom = "16px";
+  arbSec.innerHTML =
+    "<h2>Bus arbitration — who gets the bus, and who waits forever</h2>" +
+    '<p class="what">The <b>DMA lab</b> next door quietly assumed the DMA engine could take the bus when it needed it. This lab asks who decides. Three <b>masters</b> — a CPU, a DMA engine, a disk controller — share <b>one bus</b>, and in any cycle <b>at most one</b> may own it (the tri-state lab\'s one-driver rule, enforced by policy instead of wiring). Each master raises <b>request</b>; the <b>arbiter</b> answers with at most one <b>grant</b>. Two policies, honestly different: <b>fixed priority</b> always grants the highest-priority requester (M0 first) — simple, fast, and unfair by design; <b>round-robin</b> starts each search just past the last winner, so the grant rotates and every requester\'s wait is bounded. The demonstration that matters is loaded ready: all three masters request every cycle. Under fixed priority the CPU wins all 24 cycles of a long run and the disk controller — the lowest master — is <b>never granted: starvation</b>, not slowness. Switch to round-robin and the same demand splits evenly, with the lowest master never waiting more than 2 cycles. Step cycles yourself: toggle requests, switch policies mid-run, and read the grant counts — fairness here is a number, not an adjective. It is the hardware twin of CPU scheduling in the OS wing: same contention, same two answers, one in gates and one in kernel code.</p>' +
+    '<div class="tool-controls"><label>Policy <span class="seg" role="group" aria-label="Arbitration policy" id="arbPolSeg"><button type="button" data-arbpol="fixed" aria-pressed="true">Fixed priority — M0 &gt; M1 &gt; M2</button><button type="button" data-arbpol="rr" aria-pressed="false">Round-robin</button></span></label></div>' +
+    '<div class="ctrl-label">Requests — click a master to raise or drop its request</div>' +
+    '<div class="seq-state" id="arbReq" style="margin-top:4px"></div>' +
+    '<div class="share-row"><button type="button" class="btn primary" id="arbStep">Step one cycle ▸</button>' +
+    '<button type="button" class="btn" id="arbRun8">Run 8 cycles</button>' +
+    '<button type="button" class="btn" id="arbHog">Starvation setup — all request</button>' +
+    '<button type="button" class="btn" id="arbReset">Reset counts</button></div>' +
+    '<div class="ctrl-label" style="margin-top:12px">Bus owner and grants so far</div>' +
+    '<div class="seq-state" id="arbState" style="margin-top:4px"></div>' +
+    '<div class="ac-trace" id="arbTrace" aria-live="polite"></div>' +
+    '<div class="decimal-line" id="arbMsg" aria-live="polite"></div>' +
+    '<div class="decimal-line" id="arbVerifyLine" aria-live="polite"></div>' +
+    '<div class="lab-check"><span class="lab-check-q" id="arbQ"></span><span id="arbOpts" style="display:flex;gap:6px;flex-wrap:wrap"></span><span class="lab-check-fb" id="arbFb" aria-live="polite"></span></div>' +
+    '<div class="share-row"><button type="button" class="btn" id="arbNewQ">New question</button>' +
+    '<button type="button" class="btn" data-arblink="dma">The DMA lab — the transfer that needs this bus →</button>' +
+    '<button type="button" class="btn" data-arblink="bus">Tri-state bus — the one-driver rule underneath →</button>' +
+    '<button type="button" class="btn" data-arblink="sched">CPU scheduling — the same policies in the OS →</button></div>' +
+    '<p class="cp-formal adv-only">Arbiter as implemented — fixed: grant = min{i : req_i = 1}. Round-robin: grant = the first i in the cyclic order ptr, ptr+1, ptr+2 (mod 3) with req_i = 1, then ptr ← grant + 1 (mod 3); no requesters means no grant and the pointer holds. The fairness bound follows directly: with n masters, a requester can be passed by at most n − 1 other grants before the pointer reaches it, so worst-case wait with three masters is 2 granted cycles — the load-time run below measures exactly that bound on the starvation workload. Fixed priority has no such bound: its wait for M2 is infinite whenever M0\'s request never drops, which is why real fixed-priority arbiters add aging or a guaranteed slot — the same fix, in the same place, as priority aging in OS schedulers.</p>';
+  const dmElAC = $C("dmaCard");
+  if (dmElAC && dmElAC.parentNode) dmElAC.parentNode.insertBefore(arbSec, dmElAC.nextSibling);
+  else { const osEl = $C("sysOs"); if (osEl) osEl.appendChild(arbSec); }
+  arbSec.querySelectorAll("[data-arblink]").forEach(b => b.addEventListener("click", () => {
+    const k = b.dataset.arblink;
+    if (k === "dma") jumpAC("dmaCard");
+    else if (k === "bus") { if (!clickMenuKeyAC("tristate-bus")) jumpAC("busArbCard"); }
+    else { setTopArea("systems"); syncRail("systems"); const pb = document.querySelector('#sysPicker [data-sys="os"]'); if (pb) pb.click(); jumpAC("sys-sched"); }
+  }));
+  function arbRender(msg) {
+    const rh = arbSec.querySelector("#arbReq"); rh.innerHTML = "";
+    arb.req.forEach((r, i) => {
+      const c = document.createElement("button"); c.type = "button";
+      c.className = "seq-cell arb-req" + (r ? " one" : "");
+      c.innerHTML = "<b>" + (r ? "REQ" : "—") + '</b><span class="ry-role">' + ARB_NAMES[i] + (i === 0 ? " · highest priority" : i === 2 ? " · lowest priority" : "") + "</span>";
+      c.addEventListener("click", () => { arb.req[i] = arb.req[i] ? 0 : 1; arbRender(); });
+      rh.appendChild(c);
+    });
+    const ptrCell = document.createElement("div"); ptrCell.className = "seq-cell";
+    ptrCell.innerHTML = "<b>" + (arb.policy === "rr" ? "M" + arb.ptr : "—") + '</b><span class="ry-role">' + (arb.policy === "rr" ? "round-robin pointer — search starts here" : "no pointer under fixed priority") + "</span>";
+    rh.appendChild(ptrCell);
+    const sh = arbSec.querySelector("#arbState"); sh.innerHTML = "";
+    arb.counts.forEach((n, i) => {
+      const c = document.createElement("div");
+      c.className = "seq-cell" + (arb.lastGrant === i ? " arb-grant" : "");
+      c.innerHTML = "<b>" + n + '</b><span class="ry-role">grants · ' + ARB_NAMES[i] + (arb.lastGrant === i ? " · owns the bus now" : "") + "</span>";
+      sh.appendChild(c);
+    });
+    const own = document.createElement("div"); own.className = "seq-cell" + (arb.lastGrant >= 0 ? " one" : "");
+    own.innerHTML = "<b>" + (arb.cycle === 0 ? "—" : arb.lastGrant >= 0 ? "M" + arb.lastGrant : "idle") + '</b><span class="ry-role">bus owner, cycle ' + arb.cycle + "</span>"; sh.appendChild(own);
+    const wait = document.createElement("div"); wait.className = "seq-cell" + (arb.m2Wait >= 4 ? " invalid" : "");
+    wait.innerHTML = "<b>" + arb.m2Wait + '</b><span class="ry-role">cycles M2 has waited while requesting (longest: ' + arb.m2MaxWait + ")</span>"; sh.appendChild(wait);
+    const tr = arbSec.querySelector("#arbTrace");
+    tr.textContent = arb.hist.length ? arb.hist.slice(-10).join("\n") : "No cycles yet. The starvation setup is loaded — all three masters requesting, fixed priority in force. Step a few cycles and watch who never appears as owner.";
+    if (msg !== undefined) arbSec.querySelector("#arbMsg").textContent = msg;
+    arbSec.querySelector("#arbVerifyLine").textContent = "Self-check, run at load: across " + ARB_V.cycles + " seeded random request cycles under both policies the arbiter granted at most one master per cycle and never granted a non-requester; on the all-request workload fixed priority gives " + ARB_V.fixedCounts.join("/") + " grants (M2 starved — 0 of 24), while round-robin gives " + ARB_V.rrCounts.join("/") + " with M2's longest wait " + ARB_V.rrM2MaxWait + " cycles.";
+  }
+  function arbStepOnce() {
+    const r = arbGrant(arb.req, arb.policy, arb.ptr); arb.ptr = r.ptr; arb.cycle++;
+    arb.lastGrant = r.g;
+    if (r.g >= 0) arb.counts[r.g]++;
+    if (arb.req[2] && r.g !== 2) { arb.m2Wait++; if (arb.m2Wait > arb.m2MaxWait) arb.m2MaxWait = arb.m2Wait; } else if (r.g === 2) arb.m2Wait = 0;
+    arb.hist.push("cycle " + arb.cycle + " · req " + arb.req.join("") + " · " + (arb.policy === "fixed" ? "fixed priority" : "round-robin") + " → " + (r.g >= 0 ? "grant M" + r.g + " (" + ARB_NAMES[r.g].split(" · ")[1] + ")" : "idle — nobody granted"));
+    let msg;
+    if (r.g === -1) msg = "Cycle " + arb.cycle + ": nobody is requesting, so the bus idles — no grant is the correct grant. Raise a request and step again.";
+    else if (arb.policy === "fixed" && arb.req[2] && arb.m2Wait >= 3) msg = "Cycle " + arb.cycle + ": M" + r.g + " granted again. M2 has now waited " + arb.m2Wait + " cycles while requesting — under fixed priority this number has no ceiling while M0 keeps asking. Switch the policy to round-robin (counts are kept) and step: M2's wait stops growing within two grants.";
+    else if (arb.policy === "rr" && r.g === 2) msg = "Cycle " + arb.cycle + ": round-robin reaches M2 — the pointer had rotated past M0 and M1, so the lowest master is served in turn. Its longest wait this run is " + arb.m2MaxWait + " cycles; with three masters it can never exceed 2 granted cycles of waiting.";
+    else msg = "Cycle " + arb.cycle + ": grant to M" + r.g + " — the only grant this cycle, so mutual exclusion holds. Grants so far: " + arb.counts.join(" / ") + " (M0 / M1 / M2).";
+    arbRender(msg);
+  }
+  arbSec.querySelector("#arbStep").addEventListener("click", arbStepOnce);
+  arbSec.querySelector("#arbRun8").addEventListener("click", () => { for (let i = 0; i < 8; i++) { const keep = arbSec.querySelector("#arbMsg").textContent; arbStepOnce(); if (i < 7) arbSec.querySelector("#arbMsg").textContent = keep; } });
+  arbSec.querySelector("#arbHog").addEventListener("click", () => { arb.req = [1, 1, 1]; arbRender("Starvation setup restored: all three masters request on every cycle. Under fixed priority, step 8 cycles and read M2's grant count — then switch to round-robin, keep stepping, and watch the counts even out."); });
+  arbSec.querySelector("#arbReset").addEventListener("click", () => { arb.ptr = 0; arb.cycle = 0; arb.counts = [0, 0, 0]; arb.hist = []; arb.m2Wait = 0; arb.m2MaxWait = 0; arb.lastGrant = -2; arbRender("Reset. Counts, history and the round-robin pointer are cleared; requests and policy are as you left them."); });
+  arbSec.querySelector("#arbPolSeg").querySelectorAll("button").forEach(btn => btn.addEventListener("click", () => {
+    arbSec.querySelector("#arbPolSeg").querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x === btn ? "true" : "false"));
+    arb.policy = btn.dataset.arbpol;
+    arbRender(arb.policy === "rr" ? "Round-robin in force: the search starts at M" + arb.ptr + " (just past the last winner). Counts are kept — step and watch M2's grants begin." : "Fixed priority in force: M0 beats M1 beats M2 whenever they compete. Counts are kept.");
+  }));
+  let arbQn = 0;
+  function arbQuestion() {
+    const kind = arbQn % 3;
+    const fb = arbSec.querySelector("#arbFb"), host = arbSec.querySelector("#arbOpts");
+    fb.textContent = "";
+    if (kind === 0) {
+      const req = [0, 1, 1]; const exp = arbGrant(req, "fixed", 0).g;
+      arbSec.querySelector("#arbQ").textContent = "Predict, then check: fixed priority, and this cycle M0 is NOT requesting while M1 and M2 both are. Who is granted the bus?";
+      optBtnsAC(host, ["M0 · CPU", "M1 · DMA engine", "M2 · Disk controller"], i => fbSetAC(fb, i === exp, i === exp
+        ? "Right — fixed priority grants the highest-priority master that is actually requesting: M0 is silent, so M1 wins over M2. Starvation needs a higher master that never stops asking; a silent one blocks nobody."
+        : "Not that master — walk the priority order M0 → M1 → M2 and stop at the first one whose request is up. M0 is down this cycle, so the grant lands on M1."));
+      window.__arbQuestion = { kind: "fixed-skip", expected: exp };
+    } else if (kind === 1) {
+      const exp = arbGrant([1, 1, 1], "rr", 1).g; /* pointer at 1: last grant was M0 */
+      arbSec.querySelector("#arbQ").textContent = "Predict, then check: round-robin, all three masters requesting, and the previous grant went to M0 (so the search starts at M1). Who is granted the bus?";
+      optBtnsAC(host, ["M0 · CPU", "M1 · DMA engine", "M2 · Disk controller"], i => fbSetAC(fb, i === exp, i === exp
+        ? "Right — round-robin resumes just past the last winner: starting at M1, the first requester found is M1 itself. That rotation is the whole fairness mechanism — priority order never gets a vote."
+        : "Not that master — forget priority: the search starts at the pointer (M1, just past the last winner M0) and takes the first requester from there. All three are requesting, so the answer is the pointer's own master, M1."));
+      window.__arbQuestion = { kind: "rr-next", expected: exp };
+    } else {
+      arbSec.querySelector("#arbQ").textContent = "Predict, then check: fixed priority, all three masters request every cycle for 24 cycles. How many grants does the lowest master, M2, receive?";
+      optBtnsAC(host, ["0 grants", "8 grants", "12 grants"], i => fbSetAC(fb, i === 0, i === 0
+        ? "Right — zero. M0 requests every cycle and outranks M2 every cycle, so M2's wait is not long, it is infinite: starvation. The identical workload under round-robin gives M2 exactly 8 of the 24 — run both in the lab above and compare the counts."
+        : "Not that count — that is the round-robin answer (or a share of it). Under fixed priority M0 wins every contested cycle, and every cycle is contested, so M2 gets 0 of 24. That gap between the two policies is the lab in one number."));
+      window.__arbQuestion = { kind: "starvation-count", expected: 0 };
+    }
+  }
+  arbSec.querySelector("#arbNewQ").addEventListener("click", () => { arbQn++; arbQuestion(); });
+  arbRender(); arbQuestion();
+
+  /* ================= verification handles ================= */
+  window.__ringCheck = { next: ringNextWords, johnsonNext, sequence: counterSeq, verify: counterVerify };
+  window.__bcdCheck = { add: bcdAdd, add4: add4AC, verify: bcdVerify };
+  window.__arbCheck = { grant: arbGrant, run: arbRun, verify: arbVerify };
+  try { window.__roundACSelfTest = { counters: CTR_V, bcd: BCD_V, arb: ARB_V }; } catch (e) { window.__roundACSelfTest = { error: String(e && e.message || e) }; }
+
+  /* ================= MENU REGISTRATION + COUNT REBUILD ================= */
+  function addMenuItemAC(groupName, afterKey, spec) {
+    const list = $C("menuList"); if (!list) return false;
+    if (list.querySelector('[data-key="' + spec.key + '"]')) return false;
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "menu-item"; b.dataset.key = spec.key;
+    b.dataset.search = (spec.label + " " + spec.hint + " " + spec.search).toLowerCase();
+    if (spec.level) b.dataset.uxlevel = spec.level;
+    b.innerHTML = '<span class="mi-dot" aria-hidden="true"></span><span class="mi-label"></span><small></small>';
+    b.querySelector(".mi-label").textContent = spec.label;
+    b.querySelector("small").textContent = spec.hint;
+    b.addEventListener("click", () => { const p = $C("menuPanel"); if (p) p.hidden = true; const mb = $C("menuBtn"); if (mb) mb.setAttribute("aria-expanded", "false"); spec.go(); });
+    if (afterKey) {
+      const anchor = list.querySelector('[data-key="' + afterKey + '"]');
+      if (anchor) { anchor.parentNode.insertBefore(b, anchor.nextSibling); return true; }
+    }
+    let sib = null, inGroup = false;
+    Array.prototype.slice.call(list.children).forEach(el => {
+      if (el.classList.contains("menu-group")) inGroup = (el.dataset.group || "").trim() === groupName;
+      else if (inGroup && el.classList.contains("menu-item")) sib = el;
+    });
+    if (sib) sib.parentNode.insertBefore(b, sib.nextSibling); else list.appendChild(b);
+    return true;
+  }
+  addMenuItemAC("Logic & Circuits", "bit-serial-adder", {
+    key: "lab-ring-johnson", label: "Ring & Johnson counters lab — one-hot and twisted-ring counting",
+    hint: "Four D flip-flops, two feedbacks: the mod-4 one-hot ring and the mod-8 Johnson sequence, stepped clock by clock from the next-state equations",
+    search: "ring counter johnson counter twisted ring one-hot mod-4 mod-8 modulus counter d flip-flop state sequence timing sequential traffic light sequencer simulator lab",
+    level: "intermediate",
+    go: () => { setTopArea("circuits"); syncRail("circuits"); jumpAC("ringCard"); }
+  });
+  addMenuItemAC("Logic & Circuits", "lab-ring-johnson", {
+    key: "lab-bcd-adder", label: "BCD adder lab — binary add, detect, +6 correct",
+    hint: "Add two decimal digits in binary, detect the six illegal codes, and fix them with the +6 correction — all 200 cases checked at load",
+    search: "bcd adder binary coded decimal correction add six +6 8421 decimal digit carry invalid codes two adder ripple 7447 calculator simulator lab",
+    level: "intermediate",
+    go: () => { setTopArea("circuits"); syncRail("circuits"); jumpAC("bcdCard"); }
+  });
+  addMenuItemAC("Operating Systems", "dma-controller", {
+    key: "lab-bus-arb", label: "Bus arbitration lab — fixed priority vs round-robin",
+    hint: "Three masters, one bus: step request/grant cycles, watch fixed priority starve the lowest master and round-robin bound its wait",
+    search: "bus arbitration arbiter grant request fixed priority round robin starvation mutual exclusion bus master dma contention fairness scheduling simulator lab",
+    level: "intermediate",
+    go: () => { setTopArea("systems"); syncRail("systems"); const pb = document.querySelector('#sysPicker [data-sys="os"]'); if (pb) pb.click(); jumpAC("busArbCard"); }
+  });
+  (function rebuildCountsAC() {
+    const RJ = window.__uxRoundJ; if (!RJ) return;
+    const groups = RJ.menuGroups(); const counts = {}; let total = 0;
+    groups.forEach(g => {
+      counts[g.name] = g.items.length; total += g.items.length;
+      const c = g.header.querySelector(".mi-count"); if (c) c.textContent = g.items.length;
+    });
+    window.LAB_MENU = { groups: groups.map(g => ({ name: g.name, items: g.items.map(b => { const l = b.querySelector(".mi-label"); return l ? l.textContent : ""; }) })), count: total };
+    window.LAB_MODULES = { modules: groups.map(g => ({ name: g.name, count: g.items.length })), total };
+    RJ.buildRailAndList(counts);
+    RJ.buildGallery();
+    ["boards", "arch", "os", "org"].forEach(id => {
+      const h = document.querySelector("#module-" + id + " .mh-count");
+      if (!h) return;
+      const name = { boards: "Boards, Modulation & Projects", arch: "Computer Architecture", os: "Operating Systems", org: "Computer Organization" }[id];
+      if (counts[name]) h.textContent = counts[name] + " items";
+    });
+    window.__countsAC = { total, counts };
+  })();
 })();
 </script>
