@@ -10359,7 +10359,13 @@ const CHIPS74 = {
   "7404": { fn: "NOT", gates: [[1, 2], [3, 4], [5, 6], [8, 9], [10, 11], [12, 13]] },
   "7408": { fn: "AND", gates: [[1, 2, 3], [4, 5, 6], [9, 10, 8], [12, 13, 11]] },
   "7432": { fn: "OR", gates: [[1, 2, 3], [4, 5, 6], [9, 10, 8], [12, 13, 11]] },
-  "7486": { fn: "XOR", gates: [[1, 2, 3], [4, 5, 6], [9, 10, 8], [12, 13, 11]] }
+  "7486": { fn: "XOR", gates: [[1, 2, 3], [4, 5, 6], [9, 10, 8], [12, 13, 11]] },
+  "7474": { fn: "DUAL D FLIP-FLOP", special: true, pinsTotal: 14, vcc: 14, gnd: 7, gates: [],
+    pins: { 1: "1CLR̅ in", 2: "1D in", 3: "1CLK in", 4: "1PRE̅ in", 5: "1Q out", 6: "1Q̅ out", 7: "GND", 8: "2Q̅ out", 9: "2Q out", 10: "2PRE̅ in", 11: "2CLK in", 12: "2D in", 13: "2CLR̅ in", 14: "Vcc +5V" } },
+  "7490": { fn: "DECADE COUNTER", special: true, pinsTotal: 14, vcc: 5, gnd: 10, gates: [],
+    pins: { 1: "INB in (clock B)", 2: "R0(1) reset in", 3: "R0(2) reset in", 4: "NC — no connection", 5: "Vcc +5V", 6: "R9(1) set-9 in", 7: "R9(2) set-9 in", 8: "QC out", 9: "QB out", 10: "GND", 11: "QD out", 12: "QA out", 13: "NC — no connection", 14: "INA in (clock A)" } },
+  "7447": { fn: "BCD TO 7-SEGMENT DECODER", special: true, pinsTotal: 16, vcc: 16, gnd: 8, gates: [],
+    pins: { 1: "B in", 2: "C in", 3: "LT̅ lamp test in", 4: "BI̅/RBO̅ blanking", 5: "RBI̅ ripple blanking in", 6: "D in", 7: "A in", 8: "GND", 9: "e out", 10: "d out", 11: "c out", 12: "b out", 13: "a out", 14: "g out", 15: "f out", 16: "Vcc +5V" } }
 };
 const chipX = { part: "7400", gate: 0, vals: {} };
 function chipGateVals() {
@@ -10368,6 +10374,8 @@ function chipGateVals() {
   return chipX.vals[key];
 }
 function chipPinLabel(part, pin) {
+  const cc0 = CHIPS74[part];
+  if (cc0 && cc0.special) return (cc0.pins && cc0.pins[pin]) || "";
   if (pin === 14) return "Vcc +5V";
   if (pin === 7) return "GND";
   const c = CHIPS74[part];
@@ -10397,6 +10405,23 @@ function renderChip() {
     b.addEventListener("click", () => { chipX.gate = gi; renderChip(); });
     gs.appendChild(b);
   });
+  if (c.special) {
+    const halfS = c.pinsTotal / 2;
+    const pinYS = pin => pin <= halfS ? 58 + (pin - 1) * 40 : 58 + (c.pinsTotal - pin) * 40;
+    let ss = '<rect class="bb-chip" x="330" y="30" width="260" height="' + (halfS * 40 + 34) + '" rx="10"/>';
+    ss += '<path d="M 330 62 A 16 16 0 0 1 330 94" fill="none" stroke="#aeb9c4" stroke-width="1.8"/>';
+    ss += '<text class="bb-chip-name" x="460" y="' + (30 + halfS * 20 + 2) + '" style="font-size:19px">' + chipX.part + '</text>';
+    ss += '<text class="bb-chip-sub" x="460" y="' + (30 + halfS * 20 + 22) + '" style="font-size:11px">' + c.fn + ' · DIP-' + c.pinsTotal + '</text>';
+    for (let pin = 1; pin <= c.pinsTotal; pin++) {
+      const left = pin <= halfS, y = pinYS(pin);
+      ss += '<rect class="bb-pin" x="' + (left ? 316 : 590) + '" y="' + (y - 8) + '" width="14" height="16"/>';
+      ss += '<text class="dip-pin" x="' + (left ? 306 : 614) + '" y="' + (y + 4) + '" ' + (left ? 'text-anchor="end"' : "") + '><b>' + pin + "</b> " + chipPinLabel(chipX.part, pin) + "</text>";
+    }
+    $("chipBox").innerHTML = '<svg viewBox="0 0 920 ' + (halfS * 40 + 70) + '" role="img" aria-label="' + chipX.part + ' pinout diagram">' + ss + "</svg>";
+    $("chipToggles").innerHTML = "";
+    $("chipOut").textContent = chipX.part + " — " + c.fn.toLowerCase() + ", DIP-" + c.pinsTotal + ". Power is NOT on the usual pins for every chip: here Vcc is pin " + c.vcc + " and GND is pin " + c.gnd + ". This chip's behaviour is exercised live in its Breadboard project (see the project picker), not gate by gate here.";
+    return;
+  }
   const vals = chipGateVals(), gate = c.gates[chipX.gate];
   const out = GATE_FNS[c.fn](vals);
   const pinY = pin => pin <= 7 ? 58 + (pin - 1) * 44 : 58 + (14 - pin) * 44;
@@ -10434,6 +10459,7 @@ function syncChipExplorer() {
 }
 $("chipIndex").innerHTML = Object.keys(CHIPS74).map(p => {
   const c = CHIPS74[p];
+  if (c.special) return "<b class='mono'>" + p + " — " + c.fn.toLowerCase() + ":</b> " + Object.keys(c.pins).map(k => "pin " + k + " " + c.pins[k]).join(" · ") + " · pin " + c.vcc + " Vcc, pin " + c.gnd + " GND";
   return "<b class='mono'>" + p + " — quad " + c.fn + ":</b> " + c.gates.map(g => "pins " + g.slice(0, -1).join(",") + " → " + g[g.length - 1]).join(" · ") + " · pin 14 Vcc, pin 7 GND";
 }).join("<br/>");
 renderChip();
@@ -10445,8 +10471,8 @@ renderChip();
   d.innerHTML = "<h3>74xx logic family — pinout index</h3>" +
     '<div class="comp-art"><svg viewBox="0 0 120 76" width="150" height="95" aria-hidden="true"><rect x="34" y="10" width="52" height="56" rx="5" style="fill:#2b3138;stroke:#11151a"/><text x="60" y="42" text-anchor="middle" style="fill:#f1f5f9;font-size:11px;font-weight:700">74xx</text>' +
     [0, 1, 2, 3, 4, 5, 6].map(i => '<rect x="26" y="' + (14 + i * 8) + '" width="8" height="4" style="fill:#9aa3ad"/><rect x="86" y="' + (14 + i * 8) + '" width="8" height="4" style="fill:#9aa3ad"/>').join("") + "</svg></div>" +
-    '<p><b class="lbl">What it is</b>One family of DIP-14 logic chips: four gates (or six inverters) per package, all running from 5 V on pin 14 with ground on pin 7. This site wires with six of them.</p>' +
-    '<p><b class="lbl">Pinouts</b><span class="mono" style="font-size:12px">' + Object.keys(CHIPS74).map(p => p + " " + CHIPS74[p].fn + ": " + CHIPS74[p].gates.map(g => g.slice(0, -1).join(",") + "→" + g[g.length - 1]).join(" · ")).join("<br/>") + '</span></p>' +
+    '<p><b class="lbl">What it is</b>One family of 5 V logic chips: the gate packages are DIP-14 (four gates, or six inverters, per package, 5 V on pin 14 and ground on pin 7); the counter, flip-flop and decoder chips in the pin table below keep their own power pins — the 7490 takes Vcc on pin 5 and GND on pin 10, and the 16-pin 7447 takes Vcc on pin 16 and GND on pin 8.</p>' +
+    '<p><b class="lbl">Pinouts</b><span class="mono" style="font-size:12px">' + Object.keys(CHIPS74).map(p => { const c = CHIPS74[p]; return c.special ? p + " " + c.fn + ": pin " + c.vcc + " Vcc, pin " + c.gnd + " GND (DIP-" + c.pinsTotal + ")" : p + " " + c.fn + ": " + c.gates.map(g => g.slice(0, -1).join(",") + "→" + g[g.length - 1]).join(" · "); }).join("<br/>") + '</span></p>' +
     '<p><b class="lbl">Watch out</b>The 7402 (NOR) breaks the family pattern: its outputs are pins 1, 4, 10, 13 — first in each gate. Wire it like a 7400 and nothing works. Try every chip live in the Breadboard area\'s chip explorer.</p>';
   grid.appendChild(d);
 })();
@@ -14324,7 +14350,34 @@ const BBP_PROJECTS = [
              { type: "OR", ins: ["D3", "D2"], out: "Y1", chip: 2, gate: 1 },
              { type: "OR", ins: ["D3", "w"], out: "Y0", chip: 2, gate: 2 },
              { type: "OR", ins: ["Y1", "D1"], out: "v1", chip: 2, gate: 3 },
-             { type: "OR", ins: ["v1", "D0"], out: "V", chip: 2, gate: 4 } ] }
+             { type: "OR", ins: ["v1", "D0"], out: "V", chip: 2, gate: 4 } ] },
+  { id: "nandxor", level: "intermediate", name: "XOR from NAND gates only", chipsLabel: "7400 · four NANDs, one chip",
+    what: "NAND alone builds everything — and this build proves it on one chip: all four NAND gates of a single 7400 wire up as an XOR. Gate 1 makes X = NAND(A, B); gates 2 and 3 NAND each input with X; gate 4 NANDs those two results, and out comes A ⊕ B.",
+    expr: "X = ¬(A·B) · Y = ¬( ¬(A·X) · ¬(B·X) ) = A ⊕ B", words: "One chip, four gates, no XOR chip anywhere: NAND is functionally complete, so any circuit at all can be built from NANDs alone. This XOR is the standard demonstration — it uses every gate in the package.",
+    inputs: ["A", "B"], outputs: ["Y"], defaults: { A: 1, B: 0 }, build: ["7400"],
+    search: "nand universal xor from nand only 7400 functionally complete functional completeness one chip four gates build xor nand-only",
+    gates: [ { type: "NAND", ins: ["A", "B"], out: "X", chip: 0, gate: 1 },
+             { type: "NAND", ins: ["A", "X"], out: "w2", chip: 0, gate: 2 },
+             { type: "NAND", ins: ["B", "X"], out: "w3", chip: 0, gate: 3 },
+             { type: "NAND", ins: ["w2", "w3"], out: "Y", chip: 0, gate: 4 } ] },
+  { id: "seg7", level: "advanced", name: "BCD to 7-segment display", chipsLabel: "7447 · decoder driving a display",
+    what: "Four switches present a BCD digit (D C B A) to a 7447 decoder, and the common-anode 7-segment display lights the segments for digits 0–9. Inputs 10–15 are not digits: a real 7447 blanks the display for them, and so does this build. This is where a corrected digit ends up — the BCD adder lab is the circuit that produces such a digit, one per decimal place.",
+    expr: "7447: D C B A → segments a b c d e f g · 1010–1111 blank", words: "The decoder is a lookup table in silicon: each segment is its own Boolean function of D C B A. The outputs are active-low — a segment lights when its pin goes LOW and sinks current from the common anode through that segment's own 330 Ω resistor.",
+    inputs: ["D", "C", "B", "A"], outputs: ["a", "b", "c", "d", "e", "f", "g"], defaults: { D: 0, C: 1, B: 1, A: 1 }, build: ["7447"],
+    kind: "seg7447",
+    search: "seven segment display 7447 decoder bcd digit common anode blanking lamp test ripple blanking 7-seg seven-segment display driver digit display bcd adder output" },
+  { id: "dff", level: "advanced", name: "D flip-flop", chipsLabel: "7474 · one flip-flop, clocked by hand",
+    what: "One flip-flop of a 7474: the D switch presents a bit, the Clock pushbutton captures it into Q on its rising edge, and Q holds between presses — change D without pressing Clock and Q does not move. Preset and clear are tied inactive, so the clock is the only way Q ever changes.",
+    expr: "Q(next) = D at the rising clock edge · Q̅ = ¬Q · no edge, no change", words: "This is the bench's first memory: a combinational board forgets everything when the switches move, but a flip-flop remembers the bit it was clocked with. Every register, counter and state machine on this site is this cell, repeated.",
+    inputs: ["D"], outputs: ["Q", "Qn"], defaults: { D: 1 }, build: ["7474"],
+    kind: "dff",
+    search: "d flip-flop 7474 sequential clock edge triggered rising edge preset clear q qbar memory register latch difference store bit clocked" },
+  { id: "counter7490", level: "advanced", name: "Decade counter", chipsLabel: "7490 · counts 0–9 on four LEDs",
+    what: "A 7490 wired as the datasheet's BCD counter: each press of the Clock pushbutton advances the count on QD QC QB QA through 0, 1, …, 9 and back to 0, and Reset returns it to 0. The chip's own QA output feeds its second clock input — that one jumper is what makes it count in BCD instead of plain binary.",
+    expr: "count: 0 → 1 → … → 9 → 0 · QD QC QB QA is the count in binary", words: "Inside, the 7490 is a divide-by-2 stage followed by a divide-by-5 stage; wiring QA into the second stage's clock chains them into divide-by-10. The count lives in the chip's flip-flops — it changes only on clock edges, never while you watch the switches.",
+    inputs: [], outputs: ["QD", "QC", "QB", "QA"], defaults: {}, build: ["7490"],
+    kind: "decade",
+    search: "decade counter 7490 bcd counter mod-10 modulo ten counting clock qa qb qc qd ripple counter 74ls90 divide by ten sequential" }
 ];
 /*BBP-DATA-END*/
 const BBP_LEVELS = [
@@ -14334,7 +14387,8 @@ const BBP_LEVELS = [
 ];
 const BBH = { active: "full", fullInputs: state.inputs.full, projects: {}, inputs: {} };
 BBP_PROJECTS.forEach(p => {
-  p.def = computeLevels({ inputs: p.inputs.slice(), outputs: p.outputs.slice(),
+  if (p.kind) { p.def = { inputs: p.inputs.slice(), outputs: p.outputs.slice(), gates: [], maxLevel: 1, timing: null }; }
+  else p.def = computeLevels({ inputs: p.inputs.slice(), outputs: p.outputs.slice(),
     gates: p.gates.map((g, i) => ({ id: "g" + i, type: g.type, ins: g.ins.slice(), out: g.out })) });
   BBH.projects[p.id] = p;
   BBH.inputs[p.id] = Object.assign({}, p.defaults);
@@ -14342,7 +14396,7 @@ BBP_PROJECTS.forEach(p => {
 
 /* ---------- generic breadboard renderer (full adder's board is NOT
    routed through this — it keeps its own hand-drawn renderer) ---------- */
-const BBP_FN_LABEL = { "7408": "QUAD AND", "7432": "QUAD OR", "7486": "QUAD XOR", "7404": "HEX NOT" };
+const BBP_FN_LABEL = { "7408": "QUAD AND", "7432": "QUAD OR", "7486": "QUAD XOR", "7404": "HEX NOT", "7400": "QUAD NAND", "7474": "DUAL D FLIP-FLOP", "7490": "DECADE COUNTER", "7447": "BCD TO 7-SEG DECODER" };
 const BBP_PALETTE = ["#d9480f", "#1971c2", "#862e9c", "#e67700", "#1098ad", "#a61e4d", "#2f9e44", "#e03131", "#0c8599", "#5f3dc4", "#d6336c", "#66a80f", "#1c7ed6", "#f08c00"];
 function drawBBProject(P, st) {
   const rows = Math.ceil(P.build.length / 3);
@@ -14763,7 +14817,7 @@ renderStage = function () {
   const mk = p => {
     const b = document.createElement("button");
     b.type = "button"; b.className = "menu-item"; b.dataset.key = "bb-" + p.id;
-    b.dataset.search = (p.name + " breadboard " + levelName[p.level] + " " + p.chipsLabel + " project").toLowerCase();
+    b.dataset.search = (p.name + " breadboard " + levelName[p.level] + " " + p.chipsLabel + " project " + (p.search || "")).toLowerCase();
     b.innerHTML = '<span class="mi-dot" aria-hidden="true"></span><span class="mi-label"></span><small></small>';
     b.querySelector(".mi-label").textContent = p.name + " — on the breadboard";
     b.querySelector("small").textContent = "Breadboard · " + levelName[p.level];
@@ -14816,6 +14870,50 @@ renderStage = function () {
   });
   const boardsHead = document.querySelector("#module-boards .mh-count");
   if (boardsHead) { const g = groups.find(x => x.name === "Boards, Modulation & Projects"); if (g) boardsHead.textContent = g.items.length + " items"; }
+})();
+</script>
+<script>
+"use strict";
+/* ================================================================
+   BREADBOARD ROUND (kinds) — behaviour models for the picker
+   projects the flat netlist engine cannot express: the 7447
+   decoder (a 16-row lookup table in silicon), the 7474 D
+   flip-flop (state captured on a rising clock edge) and the
+   7490 decade counter (state advanced only by clock presses).
+   Pin truth for all three lives in CHIPS74 (the shared table);
+   these functions are the single source of their behaviour —
+   the boards, the prediction checks and the load-time
+   self-tests all call them, never a second copy.
+   ================================================================ */
+window.BBKind = (function () {
+  /* 7447 segment table, inputs 0–15, segment order a b c d e f g,
+     1 = segment lit. Digits 0–9 are the real 7447 patterns;
+     10–15 are blank, as the real chip blanks them (LT, RBI and
+     BI/RBO held inactive). */
+  const SEG7447 = [
+    [1,1,1,1,1,1,0], [0,1,1,0,0,0,0], [1,1,0,1,1,0,1], [1,1,1,1,0,0,1],
+    [0,1,1,0,0,1,1], [1,0,1,1,0,1,1], [1,0,1,1,1,1,1], [1,1,1,0,0,0,0],
+    [1,1,1,1,1,1,1], [1,1,1,1,0,1,1], [0,0,0,0,0,0,0], [0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0], [0,0,0,0,0,0,0], [0,0,0,0,0,0,0], [0,0,0,0,0,0,0]
+  ];
+  const SEG_NAMES = ["a", "b", "c", "d", "e", "f", "g"];
+  function evalSeg(ins) {
+    const v = ((ins.D ? 1 : 0) << 3) | ((ins.C ? 1 : 0) << 2) | ((ins.B ? 1 : 0) << 1) | (ins.A ? 1 : 0);
+    const row = SEG7447[v], out = {};
+    SEG_NAMES.forEach((s, i) => out[s] = row[i]);
+    return out;
+  }
+  /* 7474, one flip-flop: Q changes only when a clock pulse is
+     applied (the rising edge), capturing the D at that moment.
+     Preset and clear are tied inactive in the build. */
+  function dffNext(Q, D, clockPulse) { return clockPulse ? (D ? 1 : 0) : (Q ? 1 : 0); }
+  /* 7490 in its BCD connection: the count advances by one per
+     clock press, 0…9 then wraps to 0. */
+  function decNext(count) { return (count + 1) % 10; }
+  function decOuts(count) {
+    return { QD: (count >> 3) & 1, QC: (count >> 2) & 1, QB: (count >> 1) & 1, QA: count & 1 };
+  }
+  return { SEG7447, SEG_NAMES, evalSeg, dffNext, decNext, decOuts };
 })();
 </script>
 <style>
@@ -15844,7 +15942,7 @@ renderStage = function () {
   function expect(cond, name) { if (!cond) fails.push(name); }
   /* new BBP combinational builds, evaluated from their own specs */
   if (typeof BBP_PROJECTS !== "undefined") {
-    const GF = { AND: (a, b) => a & b, OR: (a, b) => a | b, XOR: (a, b) => a ^ b, NOT: a => a ^ 1 };
+    const GF = { AND: (a, b) => a & b, OR: (a, b) => a | b, XOR: (a, b) => a ^ b, NOT: a => a ^ 1, NAND: (a, b) => (a & b) ^ 1, NOR: (a, b) => (a | b) ^ 1, XNOR: (a, b) => (a ^ b) ^ 1 };
     const evalSpec = (p, ins) => {
       const v = Object.assign({}, ins);
       p.gates.forEach(g => { v[g.out] = GF[g.type].apply(null, g.ins.map(n => v[n])); });
@@ -15860,8 +15958,36 @@ renderStage = function () {
       const hi = c.D3 ? 3 : c.D2 ? 2 : c.D1 ? 1 : c.D0 ? 0 : -1;
       expect(r.V === (hi >= 0 ? 1 : 0) && (hi < 0 || (r.Y1 * 2 + r.Y0) === hi), "priority");
     });
-    /* every pre-existing BBP build: outputs defined for all rows */
-    BBP_PROJECTS.forEach(p => combos(p.inputs).forEach(c => { const r = evalSpec(p, c); p.outputs.forEach(o => expect(r[o] === 0 || r[o] === 1, "bbp-" + p.id)); }));
+    /* every netlist BBP build: outputs defined for all rows (kind
+       projects — 7447 / 7474 / 7490 — are asserted separately) */
+    BBP_PROJECTS.forEach(p => { if (!p.gates) return; combos(p.inputs).forEach(c => { const r = evalSpec(p, c); p.outputs.forEach(o => expect(r[o] === 0 || r[o] === 1, "bbp-" + p.id)); }); });
+    /* adder-family breadboard specs, exhaustively against arithmetic */
+    const ha = byId("halfadd"); combos(["A", "B"]).forEach(c => { const r = evalSpec(ha, c); expect(r.Sum === (c.A ^ c.B) && r.Carry === (c.A & c.B), "bbp-halfadd"); });
+    const hs = byId("halfsub"); combos(["A", "B"]).forEach(c => { const r = evalSpec(hs, c); const v = c.A - c.B; expect(r.D === (v & 1) && r.Bout === (v < 0 ? 1 : 0), "bbp-halfsub"); });
+    const fs = byId("fullsub"); combos(["A", "B", "Bin"]).forEach(c => { const r = evalSpec(fs, c); const v = c.A - c.B - c.Bin; expect(r.D === (v & 1) && r.Bout === (v < 0 ? 1 : 0), "bbp-fullsub"); });
+    const r2 = byId("ripple2"); combos(["A1", "A0", "B1", "B0", "Cin"]).forEach(c => { const r = evalSpec(r2, c); const t = (c.A1 * 2 + c.A0) + (c.B1 * 2 + c.B0) + c.Cin; expect(r.S0 === (t & 1) && r.S1 === ((t >> 1) & 1) && r.Cout === ((t >> 2) & 1), "bbp-ripple2"); });
+    /* NAND-only XOR (one 7400) against XOR on all 4 rows */
+    const nx = byId("nandxor"); combos(["A", "B"]).forEach(c => expect(evalSpec(nx, c).Y === (c.A ^ c.B), "bbp-nandxor"));
+    /* kind projects: 7447 table on all 16 inputs, 7474 capture/hold
+       over a scripted D/clock sequence, 7490 sequence 0–9 and wrap */
+    if (typeof BBKind !== "undefined") {
+      for (let v = 0; v < 16; v++) {
+        const ins = { D: (v >> 3) & 1, C: (v >> 2) & 1, B: (v >> 1) & 1, A: v & 1 };
+        const out = BBKind.evalSeg(ins);
+        BBKind.SEG_NAMES.forEach((s, i) => expect(out[s] === BBKind.SEG7447[v][i], "bbp-seg7447"));
+        if (v >= 10) BBKind.SEG_NAMES.forEach(s => expect(out[s] === 0, "bbp-seg7447-blank"));
+      }
+      let Q = 0;
+      Q = BBKind.dffNext(Q, 1, false); expect(Q === 0, "bbp-dff-hold1");
+      Q = BBKind.dffNext(Q, 1, true);  expect(Q === 1, "bbp-dff-capture1");
+      Q = BBKind.dffNext(Q, 0, false); expect(Q === 1, "bbp-dff-hold2");
+      Q = BBKind.dffNext(Q, 0, true);  expect(Q === 0, "bbp-dff-capture0");
+      Q = BBKind.dffNext(Q, 1, false); expect(Q === 0, "bbp-dff-hold3");
+      let cnt = 0; const seen = [0];
+      for (let i = 0; i < 10; i++) { cnt = BBKind.decNext(cnt); seen.push(cnt); }
+      expect(JSON.stringify(seen) === JSON.stringify([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0]), "bbp-7490-seq");
+      for (let v2 = 0; v2 < 10; v2++) { const o = BBKind.decOuts(v2); expect(o.QD * 8 + o.QC * 4 + o.QB * 2 + o.QA === v2, "bbp-7490-outs"); }
+    }
   }
   /* 7-segment map: lit-segment counts for digits 0-9 */
   expect(JSON.stringify([0,1,2,3,4,5,6,7,8,9].map(d => SEG7[d].reduce((a, b) => a + b, 0))) === JSON.stringify([6, 2, 5, 5, 4, 5, 6, 3, 7, 6]), "seg7");
@@ -24596,6 +24722,1344 @@ select.rx-sel{max-width:100%}
       if (counts[name]) h.textContent = counts[name] + " items";
     });
     window.__countsAC = { total, counts };
+  })();
+})();
+</script>
+<style>
+/* ===== Breadboard round — pin check + prediction panels, sequential boards ===== */
+.bb-check-list{list-style:none;margin:0;padding:0;font-size:13.5px}
+.bb-check-list li{padding:7px 0 7px 27px;border-bottom:1px solid var(--line);position:relative}
+.bb-check-list li:last-child{border-bottom:0}
+.bb-check-list li::before{content:"☐";position:absolute;left:3px;top:6px;color:var(--amber);font-weight:700}
+.bb-check-list.done li::before{content:"✓";color:var(--green)}
+.bb-panel-note{font-size:13px;color:var(--muted);margin:8px 0 0}
+.bb-panel-flash{outline:2px solid var(--amber);outline-offset:2px}
+.bb-pred-outs{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 4px}
+.bb-seq-btn{cursor:pointer}
+html.text-large .bb-check-list{font-size:16.5px}
+html.text-large .bb-panel-note{font-size:15.5px}
+</style>
+<script>
+"use strict";
+/* ================================================================
+   BREADBOARD ROUND (AD-1) — the two cross-cutting panels for
+   every picker project (the standalone full adder included),
+   plus the boards and behaviour for the three kind projects
+   (7447 display, 7474 flip-flop, 7490 counter) whose models
+   live in window.BBKind.
+   1) BEFORE YOU POWER IT — a per-project pin checklist built
+      from CHIPS74 (the shared pin table). Switches stay disabled
+      until it is acknowledged once per project; the
+      acknowledgment persists on this device.
+   2) PREDICT FIRST — one case per project: predict every output,
+      lock it in, the board is set to the case and shows the
+      actual states with a per-output verdict. Passing records
+      the activity Done the same way other activities record it
+      (engaged + visited on this device).
+   The standalone full-adder renderer and the fault trainer are
+   not touched; combinational projects keep their netlist
+   behaviour exactly — only the two panels are added.
+   ================================================================ */
+(function roundAD1() {
+  const $D = id => document.getElementById(id);
+  const store = {
+    get(k, fb) { try { const v = window.localStorage.getItem(k); return v ? JSON.parse(v) : fb; } catch (e) { return fb; } },
+    set(k, v) { try { window.localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* session-only */ } }
+  };
+  function clickMenuKeyD(key) { const it = document.querySelector('#menuList .menu-item[data-key="' + key + '"]'); if (it) { it.click(); return true; } return false; }
+  function jumpD(id) { const el = id && $D(id); if (el) setTimeout(() => el.scrollIntoView({ behavior: "smooth", block: "start" }), 60); }
+
+  /* ---------------- sequential state (exploration state) ---------------- */
+  const BBSEQ = { dff: { Q: 0 }, decade: { count: 0 } };
+  window.__bbSeq = BBSEQ;
+  function bbKindOutputs(P) {
+    if (!P || !P.kind) return {};
+    if (P.kind === "seg7447") return BBKind.evalSeg(curInputs());
+    if (P.kind === "dff") { const q = BBSEQ.dff.Q; return { Q: q, Qn: q ^ 1 }; }
+    if (P.kind === "decade") return BBKind.decOuts(BBSEQ.decade.count);
+    return {};
+  }
+
+  /* ---------------- custom boards for the kind projects ---------------- */
+  const BBP_PAL = ["#d9480f", "#1971c2", "#862e9c", "#e67700", "#1098ad", "#a61e4d", "#2f9e44", "#e03131"];
+  function bbChrome(H) {
+    let s = '<rect class="bb-board" x="10" y="10" width="900" height="' + (H - 20) + '" rx="14"/>';
+    s += '<line class="bb-rail-plus" x1="46" y1="58" x2="886" y2="58"/><line class="bb-rail-minus" x1="46" y1="88" x2="886" y2="88"/>';
+    s += '<line class="bb-rail-plus" x1="46" y1="' + (H - 88) + '" x2="886" y2="' + (H - 88) + '"/><line class="bb-rail-minus" x1="46" y1="' + (H - 58) + '" x2="886" y2="' + (H - 58) + '"/>';
+    s += '<text class="bb-txt" x="24" y="62" style="fill:#dc2626;font-weight:700">+</text><text class="bb-txt" x="24" y="92" style="fill:#2563eb;font-weight:700">−</text>';
+    s += '<text class="bb-txt" x="24" y="' + (H - 84) + '" style="fill:#dc2626;font-weight:700">+</text><text class="bb-txt" x="24" y="' + (H - 54) + '" style="fill:#2563eb;font-weight:700">−</text>';
+    s += '<text class="bb-txt" x="892" y="62" text-anchor="end">5V</text><text class="bb-txt" x="892" y="92" text-anchor="end">GND</text>';
+    s += '<text class="bb-txt" x="892" y="' + (H - 54) + '" text-anchor="end">GND</text>';
+    let holes = "";
+    const colX = i => 60 + i * 27;
+    for (let i = 0; i <= 30; i++) {
+      [58, 88, H - 88, H - 58].forEach(y => { holes += '<circle class="bb-hole" cx="' + colX(i) + '" cy="' + y + '" r="3"/>'; });
+      for (let y = 170; y <= H - 150; y += 25) holes += '<circle class="bb-hole" cx="' + colX(i) + '" cy="' + y + '" r="3.2"/>';
+      if (i % 5 === 0) { holes += '<text class="bb-txt col" x="' + colX(i) + '" y="152">' + (i + 1) + '</text>'; holes += '<text class="bb-txt col" x="' + colX(i) + '" y="' + (H - 130) + '">' + (i + 1) + "</text>"; }
+    }
+    return s + holes;
+  }
+  function bbChipDraw(part, xs0, y, pinsTotal) {
+    const half = pinsTotal / 2, c = CHIPS74[part];
+    const pinPos = pin => pin <= half ? { x: xs0 + (pin - 1) * 27, y: y + 66, side: 1 } : { x: xs0 + (pinsTotal - pin) * 27, y: y - 16, side: -1 };
+    let s = "";
+    for (let i = 0; i < half; i++) {
+      s += '<rect class="bb-pin" x="' + (xs0 + i * 27 - 3) + '" y="' + (y - 17) + '" width="6" height="18"/>';
+      s += '<rect class="bb-pin" x="' + (xs0 + i * 27 - 3) + '" y="' + (y + 48) + '" width="6" height="18"/>';
+    }
+    const bx = xs0 - 14, bw = (half - 1) * 27 + 28;
+    s += '<rect class="bb-chip" x="' + bx + '" y="' + y + '" width="' + bw + '" height="50" rx="5"/>';
+    s += '<path d="M ' + bx + " " + (y + 10) + " A 10 10 0 0 1 " + bx + " " + (y + 30) + '" fill="none" stroke="#aeb9c4" stroke-width="1.6"/>';
+    s += '<circle cx="' + xs0 + '" cy="' + (y + 41) + '" r="2.4" fill="#aeb9c4"/>';
+    s += '<text class="bb-chip-name" x="' + (bx + bw / 2) + '" y="' + (y + 22) + '">' + part + "</text>";
+    s += '<text class="bb-chip-sub" x="' + (bx + bw / 2) + '" y="' + (y + 36) + '">' + (BBP_FN_LABEL[part] || c.fn) + " · pin " + c.vcc + " = +5V · pin " + c.gnd + " = GND</text>";
+    for (let pin = 1; pin <= pinsTotal; pin++) {
+      const pp = pinPos(pin);
+      s += '<text class="bb-pin-num" x="' + pp.x + '" y="' + (pin <= half ? y + 46 : y + 10) + '">' + pin + "</text>";
+    }
+    return { svg: s, pinPos };
+  }
+  function bbBadge(net, x, y) {
+    return '<g><circle class="bb-badge" data-bbbadge="' + net + '" cx="' + x + '" cy="' + y + '" r="9.5"/><text class="bb-badge-txt" data-bbbadgetxt="' + net + '" x="' + x + '" y="' + (y + 4) + '">–</text></g>';
+  }
+  function bbSwitchDraw(name, x, swY, val) {
+    let s = '<g class="in-node' + (val ? " on" : "") + '" data-input="' + name + '">';
+    s += '<rect x="' + (x - 34) + '" y="' + swY + '" width="68" height="42" rx="7" style="fill:var(--panel);stroke:var(--line2)"/>';
+    s += '<rect x="' + (x - 22) + '" y="' + (swY + 10) + '" width="44" height="12" rx="6" style="fill:var(--panel2);stroke:var(--line2)"/>';
+    s += '<circle data-swknob="' + name + '" data-kx="' + x + '" cx="' + (val ? x + 13 : x - 13) + '" cy="' + (swY + 16) + '" r="6.5" style="fill:var(--amber)"/>';
+    s += '<text class="in-name" x="' + x + '" y="' + (swY + 36) + '">' + name + " = " + val + "</text></g>";
+    return s;
+  }
+  function bbLedDraw(net, x, swY, H, color, label) {
+    let s = '<rect x="' + (x - 32) + '" y="' + (swY + 8) + '" width="24" height="12" rx="3" style="fill:#d9b380;stroke:#8a6d3b"/>';
+    s += '<line x1="' + (x - 6) + '" y1="' + (swY + 21) + '" x2="' + (x - 6) + '" y2="' + (swY + 44) + '" stroke="#868e96" stroke-width="2.4"/>';
+    s += '<line x1="' + (x + 6) + '" y1="' + (swY + 21) + '" x2="' + (x + 6) + '" y2="' + (H - 61) + '" stroke="#868e96" stroke-width="2.4"/>';
+    s += '<text class="bb-txt" x="' + (x - 13) + '" y="' + (swY + 38) + '" text-anchor="middle" style="font-weight:700">+</text>';
+    s += '<text class="bb-txt" x="' + (x + 13) + '" y="' + (swY + 38) + '" text-anchor="middle" style="font-weight:700">−</text>';
+    s += '<circle class="bb-led-off" data-bbled="' + net + '" cx="' + x + '" cy="' + (swY + 8) + '" r="13" data-color="' + color + '"/>';
+    s += '<path d="M ' + (x - 8) + " " + (swY + 14) + " V " + (swY + 28) + " H " + (x - 6) + '" fill="none" stroke="#868e96" stroke-width="2.4"/>';
+    s += '<text class="bb-txt" x="' + (x - 23) + '" y="' + (swY + 52) + '" text-anchor="middle">330Ω</text>';
+    s += '<text class="bb-txt" x="' + x + '" y="' + (swY - 10) + '" text-anchor="middle" style="font-weight:700">' + label + "</text>";
+    return s;
+  }
+  const wireD2 = (a, b) => "M " + a.x + " " + a.y + " C " + a.x + " " + (a.y + a.side * 46) + ", " + b.x + " " + (b.y + b.side * 46) + ", " + b.x + " " + b.y;
+
+  function drawSeg7Project(P, st) {
+    const H = 600, y = 283, xs0 = 150, swY = H - 144;
+    const chip = bbChipDraw("7447", xs0, y, 16), pinPos = chip.pinPos;
+    let s = bbChrome(H);
+    s += '<text class="bb-txt" x="460" y="' + (y + 25) + '" text-anchor="middle" style="font-size:11px">centre gap — the DIP-16 straddles it, pin 1 at the dot</text>';
+    /* power: pin 16 (top-left) to +5 V, pin 8 (bottom-right) to GND */
+    s += bbJumper("ONE", "#e03131", -1, "M " + pinPos(16).x + " " + pinPos(16).y + " V 118 H " + (pinPos(16).x - 16) + " V 61");
+    s += bbJumper("ZERO", "#343a40", -1, "M " + pinPos(8).x + " " + pinPos(8).y + " V " + (y + 150) + " H " + (pinPos(8).x + 14) + " V " + (H - 61));
+    s += bbBadge("ONE", pinPos(16).x, y - 31);
+    /* input switches D C B A and their jumpers to pins 6, 2, 1, 7 */
+    const swX = { D: 110, C: 240, B: 370, A: 500 };
+    const inPin = { A: 7, B: 1, C: 2, D: 6 };
+    ["D", "C", "B", "A"].forEach((n, i) => {
+      const src = { x: swX[n], y: swY, side: -1 }, dst = pinPos(inPin[n]);
+      s += bbJumper(n, BBP_PAL[i], 0, wireD2(src, dst));
+      s += bbBadge(n, dst.x, y + 81);
+    });
+    /* tie-off badges: LT pin 3, BI/RBO pin 4, RBI pin 5 — all to +5 V (inactive) */
+    [3, 4, 5].forEach(pin => { s += bbBadge("ONE", pinPos(pin).x, y + 81); });
+    s += '<text class="bb-txt" x="' + pinPos(4).x + '" y="' + (y + 104) + '" text-anchor="middle">pins 3 · 4 · 5 tied to +5 V (inactive)</text>';
+    /* segment jumpers: output pins to the display, each via its own resistor */
+    const segPin = { a: 13, b: 12, c: 11, d: 10, e: 9, f: 15, g: 14 };
+    const segMidY = { a: 186, b: 222, c: 297, d: 330, e: 297, f: 222, g: 258 };
+    BBKind.SEG_NAMES.forEach((sg, i) => {
+      const src = pinPos(segPin[sg]);
+      s += bbJumper(sg, BBP_PAL[i % BBP_PAL.length], 1, "M " + src.x + " " + src.y + " C " + src.x + " " + (src.y - 60) + ", 636 " + segMidY[sg] + ", 664 " + segMidY[sg]);
+      s += '<rect x="640" y="' + (segMidY[sg] - 6) + '" width="24" height="12" rx="3" style="fill:#d9b380;stroke:#8a6d3b"/>';
+    });
+    s += chip.svg;
+    ["D", "C", "B", "A"].forEach(n => { s += bbSwitchDraw(n, swX[n], swY, st.inputs[n] ? 1 : 0); });
+    s += '<text class="bb-txt" x="76" y="' + (swY - 6) + '">switches — click to flip · D C B A is the digit</text>';
+    /* the display: common-anode 7-segment, segments are data-bbled rects */
+    s += '<rect x="664" y="150" width="176" height="228" rx="12" style="fill:var(--panel2);stroke:var(--line2);stroke-width:1.6"/>';
+    s += '<text class="bb-txt" x="752" y="140" text-anchor="middle" style="font-weight:700">7-SEGMENT DISPLAY · common anode → +5 V</text>';
+    const segRect = {
+      a: [706, 168, 92, 13], g: [706, 258, 92, 13], d: [706, 348, 92, 13],
+      f: [694, 181, 13, 77], b: [797, 181, 13, 77], e: [694, 271, 13, 77], c: [797, 271, 13, 77]
+    };
+    BBKind.SEG_NAMES.forEach(sg => {
+      const r = segRect[sg];
+      s += '<rect class="bb-led-off" data-bbled="' + sg + '" data-color="#ef4444" x="' + r[0] + '" y="' + r[1] + '" width="' + r[2] + '" height="' + r[3] + '" rx="6"/>';
+      s += '<text class="bb-txt" x="' + (r[0] + r[2] / 2) + '" y="' + (r[1] + r[3] / 2 + 3.5) + '" text-anchor="middle" style="font-weight:700">' + sg + "</text>";
+    });
+    s += '<text class="bb-txt" x="460" y="' + (H - 20) + '" text-anchor="middle">7447 outputs are active-low: a segment lights when its pin goes LOW, sinking current from the common anode (+5 V) through that segment\u2019s own 330 Ω resistor.</text>';
+    return { viewBox: "0 0 920 " + H, svg: s };
+  }
+
+  function drawDffProject(P, st) {
+    const H = 600, y = 283, xs0 = 420, swY = H - 144;
+    const chip = bbChipDraw("7474", xs0, y, 14), pinPos = chip.pinPos;
+    let s = bbChrome(H);
+    s += '<text class="bb-txt" x="460" y="' + (y + 25) + '" text-anchor="middle" style="font-size:11px">centre gap — the DIP chip straddles it, pin 1 at the dot</text>';
+    s += bbJumper("ONE", "#e03131", -1, "M " + pinPos(14).x + " " + pinPos(14).y + " V 118 H " + (pinPos(14).x - 16) + " V 61");
+    s += bbJumper("ZERO", "#343a40", -1, "M " + pinPos(7).x + " " + pinPos(7).y + " V " + (y + 150) + " H " + (pinPos(7).x + 14) + " V " + (H - 61));
+    s += bbBadge("ONE", pinPos(14).x, y - 31);
+    /* preset pin 4 and clear pin 1: tied to +5 V (inactive) */
+    s += bbBadge("ONE", pinPos(4).x, y + 81);
+    s += bbBadge("ONE", pinPos(1).x, y + 81);
+    s += '<text class="bb-txt" x="' + ((pinPos(1).x + pinPos(4).x) / 2) + '" y="' + (y + 104) + '" text-anchor="middle">CLR̅ pin 1 · PRE̅ pin 4 tied to +5 V</text>';
+    /* D switch to pin 2 */
+    s += bbJumper("D", BBP_PAL[0], 0, wireD2({ x: 110, y: swY, side: -1 }, pinPos(2)));
+    s += bbBadge("D", pinPos(2).x, y + 81);
+    /* clock pushbutton: pin 3 wire down to a press button (pull-down holds it LOW) */
+    s += '<path d="M ' + pinPos(3).x + " " + pinPos(3).y + " V 428 H 316\" fill=\"none\" stroke=\"#862e9c\" stroke-width=\"5\" stroke-linecap=\"round\"/>";
+    s += '<g data-seqclock="1" style="cursor:pointer"><rect x="240" y="406" width="76" height="44" rx="9" style="fill:var(--panel);stroke:var(--amber);stroke-width:2"/><text class="bb-txt" x="278" y="424" text-anchor="middle" style="font-weight:700;fill:var(--ink)">CLOCK</text><text class="bb-txt" x="278" y="439" text-anchor="middle">press ▸</text></g>';
+    s += '<text class="bb-txt" x="278" y="466" text-anchor="middle">10 kΩ pull-down holds CLK LOW</text>';
+    s += bbBadge("Q", pinPos(5).x, y + 81);
+    s += bbBadge("Qn", pinPos(6).x, y + 81);
+    /* Q and Q-bar to their LEDs */
+    s += bbJumper("Q", "#2f9e44", 1, wireD2(pinPos(5), { x: 708, y: swY + 14, side: -1 }));
+    s += bbJumper("Qn", "#e03131", 1, wireD2(pinPos(6), { x: 798, y: swY + 14, side: -1 }));
+    s += chip.svg;
+    s += bbSwitchDraw("D", 110, swY, st.inputs.D ? 1 : 0);
+    s += '<text class="bb-txt" x="76" y="' + (swY - 6) + '">switch — click to flip</text>';
+    s += bbLedDraw("Q", 740, swY, H, "#22c55e", "Q · green");
+    s += bbLedDraw("Qn", 830, swY, H, "#ef4444", "Q̅ · red");
+    s += '<text class="bb-txt" x="620" y="' + (y + 120) + '" text-anchor="middle">pins 8–13: the second flip-flop — unused in this build</text>';
+    s += '<text class="bb-txt" x="460" y="' + (H - 20) + '" text-anchor="middle">Q captures D only on the rising clock edge (press CLOCK) and holds it between presses. Preset and clear are tied inactive.</text>';
+    return { viewBox: "0 0 920 " + H, svg: s };
+  }
+
+  function drawDecadeProject(P, st) {
+    const H = 600, y = 283, xs0 = 420, swY = H - 144;
+    const chip = bbChipDraw("7490", xs0, y, 14), pinPos = chip.pinPos;
+    let s = bbChrome(H);
+    s += '<text class="bb-txt" x="460" y="' + (y + 25) + '" text-anchor="middle" style="font-size:11px">centre gap — the DIP chip straddles it, pin 1 at the dot</text>';
+    /* power on THIS chip's pins: Vcc pin 5 (bottom row) down to the + rail, GND pin 10 (top row) up to the − rail */
+    s += bbJumper("ONE", "#e03131", -1, "M " + pinPos(5).x + " " + pinPos(5).y + " V " + (y + 150) + " H " + (pinPos(5).x + 30) + " V " + (H - 91));
+    s += bbJumper("ZERO", "#343a40", -1, "M " + pinPos(10).x + " " + pinPos(10).y + " V 150 H " + (pinPos(10).x + 40) + " V 91");
+    /* QA (pin 12) jumpered to INB (pin 1) — the BCD connection */
+    s += bbJumper("QA", "#1098ad", 1, wireD2(pinPos(12), pinPos(1)));
+    s += '<text class="bb-txt" x="' + ((pinPos(12).x + pinPos(1).x) / 2 - 8) + '" y="' + (y - 44) + '" text-anchor="middle">QA → INB: the BCD jumper</text>';
+    /* resets R0 pins 2, 3 wired to GND; set-9 pins 6, 7 badged 0 */
+    s += bbJumper("ZERO", "#343a40", -1, "M " + pinPos(2).x + " " + pinPos(2).y + " V " + (H - 61));
+    s += bbJumper("ZERO", "#343a40", -1, "M " + pinPos(3).x + " " + pinPos(3).y + " V " + (y + 170) + " H " + (pinPos(3).x + 22) + " V " + (H - 61));
+    s += bbBadge("ZERO", pinPos(6).x, y + 81);
+    s += bbBadge("ZERO", pinPos(7).x, y + 81);
+    s += '<text class="bb-txt" x="' + ((pinPos(6).x + pinPos(7).x) / 2) + '" y="' + (y + 104) + '" text-anchor="middle">R9 pins 6 · 7 to GND</text>';
+    s += '<text class="bb-txt" x="' + ((pinPos(2).x + pinPos(3).x) / 2) + '" y="' + (y + 104) + '" text-anchor="middle">R0 pins 2 · 3 to GND</text>';
+    /* clock pushbutton into INA pin 14 */
+    s += '<path d="M ' + pinPos(14).x + " " + pinPos(14).y + " V 200 H 316\" fill=\"none\" stroke=\"#862e9c\" stroke-width=\"5\" stroke-linecap=\"round\"/>";
+    s += '<g data-seqclock="1" style="cursor:pointer"><rect x="240" y="178" width="76" height="44" rx="9" style="fill:var(--panel);stroke:var(--amber);stroke-width:2"/><text class="bb-txt" x="278" y="196" text-anchor="middle" style="font-weight:700;fill:var(--ink)">CLOCK</text><text class="bb-txt" x="278" y="211" text-anchor="middle">press ▸</text></g>';
+    s += '<text class="bb-txt" x="278" y="238" text-anchor="middle">into INA, pin 14</text>';
+    /* outputs to LEDs: QD pin 11, QC pin 8, QB pin 9, QA pin 12 */
+    const ledX = { QD: 668, QC: 738, QB: 808, QA: 872 };
+    const outPin = { QD: 11, QC: 8, QB: 9, QA: 12 };
+    const ledCol = { QD: "#ef4444", QC: "#22c55e", QB: "#3b82f6", QA: "#eab308" };
+    ["QD", "QC", "QB", "QA"].forEach(n => {
+      if (n !== "QA") s += bbJumper(n, ledCol[n], 1, wireD2(pinPos(outPin[n]), { x: ledX[n] - 32, y: swY + 14, side: -1 }));
+      s += bbBadge(n, pinPos(outPin[n]).x, pinPos(outPin[n]).side === 1 ? y + 81 : y - 31);
+    });
+    s += bbJumper("QA", ledCol.QA, 1, "M " + pinPos(12).x + " " + pinPos(12).y + " C " + pinPos(12).x + " 200, " + (ledX.QA - 32) + " 420, " + (ledX.QA - 32) + " " + (swY + 14));
+    s += chip.svg;
+    ["QD", "QC", "QB", "QA"].forEach(n => { s += bbLedDraw(n, ledX[n], swY, H, ledCol[n], n); });
+    s += '<text class="bb-txt" x="460" y="' + (H - 20) + '" text-anchor="middle">Clock into INA (pin 14); QA (pin 12) jumpered to INB (pin 1) — the BCD connection. Vcc is pin 5 and GND pin 10 on this chip — not 14 and 7.</text>';
+    return { viewBox: "0 0 920 " + H, svg: s };
+  }
+
+  const _drawBBAD = drawBBProject;
+  drawBBProject = function (P, st) {
+    if (P.kind === "seg7447") return drawSeg7Project(P, st);
+    if (P.kind === "dff") return drawDffProject(P, st);
+    if (P.kind === "decade") return drawDecadeProject(P, st);
+    return _drawBBAD(P, st);
+  };
+
+  /* ---------------- parts lists for the kind projects ---------------- */
+  function bbPartsSpecial(P) {
+    if (P.kind === "seg7447") return '<ul class="parts-list">' +
+      '<li><b>7447</b> — BCD to 7-segment decoder/driver<span class="contrib">Inputs: A pin 7 · B pin 1 · C pin 2 · D pin 6. Segment outputs: a pin 13 · b pin 12 · c pin 11 · d pin 10 · e pin 9 · f pin 15 · g pin 14. Lamp test pin 3, blanking pin 4 and ripple-blanking input pin 5 are tied to +5 V (inactive). Pin 16 = +5 V, pin 8 = GND — a 16-pin chip.</span></li>' +
+      '<li><b>7-segment display</b> — common anode<span class="contrib">The common anode goes to +5 V. Each segment cathode runs back through its own 330 Ω resistor to one 7447 output pin; a segment lights when its pin goes LOW and sinks the current.</span></li>' +
+      '<li><b>Switches ×4, 330 Ω ×7</b><span class="contrib">Switches present the digit as D C B A. One resistor per segment — never one shared resistor for the whole display, or the brightness would change with every digit.</span></li></ul>' +
+      '<p class="bench-note">Digits 0–9 light their segments; 10–15 blank the display, exactly as the real 7447 does. The digit on the switches is the kind the BCD adder lab produces — one corrected digit per decimal place.</p>' +
+      '<div class="share-row"><button type="button" class="btn" id="bbSegToBcd">The BCD adder lab — the circuit that produces this digit →</button></div>';
+    if (P.kind === "dff") return '<ul class="parts-list">' +
+      '<li><b>7474</b> — dual D flip-flop (one half used)<span class="contrib">Flip-flop 1: D pin 2 · CLK pin 3 · Q pin 5 · Q̅ pin 6. Preset pin 4 and clear pin 1 are tied to +5 V — both are active-low, so +5 V holds them inactive. The second flip-flop (pins 8–13) is unused in this build. Pin 14 = +5 V, pin 7 = GND.</span></li>' +
+      '<li><b>Switch ×1, pushbutton ×1, LEDs ×2, 330 Ω ×2</b><span class="contrib">The switch drives D. The pushbutton drives CLK (a 10 kΩ pull-down holds it LOW between presses, so each press is one clean rising edge). One LED per output: Q green, Q̅ red, each through its own 330 Ω resistor to the anode (+), cathodes (−) to ground.</span></li></ul>' +
+      '<div class="share-row"><button type="button" class="btn primary" id="bbSeqClock">Press Clock ▸</button><span class="mono" id="bbSeqState" style="font-size:12.5px"></span></div>' +
+      '<p class="bench-note">Set D, press Clock, and Q becomes D. Change D without pressing and Q holds — that refusal to follow its input is the whole point of a flip-flop.</p>';
+    return '<ul class="parts-list">' +
+      '<li><b>7490</b> — decade counter<span class="contrib">Clock A pin 14 · QA pin 12 jumpered to clock B pin 1 (the BCD connection). Outputs: QD pin 11 · QC pin 8 · QB pin 9 · QA pin 12. Reset pins R0(1) pin 2 and R0(2) pin 3 are grounded, and set-9 pins R9(1) pin 6 and R9(2) pin 7 are grounded — counting needs all four inactive. Pin 5 = +5 V, pin 10 = GND — this chip\u2019s power pins are not 14 and 7.</span></li>' +
+      '<li><b>Pushbutton ×1, LEDs ×4, 330 Ω ×4</b><span class="contrib">The pushbutton clocks INA. One LED per count bit (QD QC QB QA), each output pin through its own 330 Ω resistor to the LED anode (+), cathodes (−) to ground. Reset below pulses the R0 pins HIGH, the way a wire from +5 V touched to pins 2 and 3 would on a real bench.</span></li></ul>' +
+      '<div class="share-row"><button type="button" class="btn primary" id="bbSeqClock">Press Clock ▸</button><button type="button" class="btn" id="bbSeqReset">Reset to 0</button><span class="mono" id="bbSeqState" style="font-size:12.5px"></span></div>' +
+      '<p class="bench-note">Ten presses walk the LEDs through 0000 to 1001 and back to 0000. The six binary codes 1010–1111 never appear — the ÷2 and ÷5 stages inside are chained to divide by 10, not 16.</p>';
+  }
+  const _partsAD = bbPartsHTML;
+  bbPartsHTML = function (P) { if (P.kind) return bbPartsSpecial(P); return _partsAD(P); };
+
+  /* ---------------- truth / sequence tables for kind projects ---------------- */
+  const _rtAD = renderTruth;
+  renderTruth = function () {
+    if (bbInProject() && BBH.projects[BBH.active] && BBH.projects[BBH.active].kind) {
+      const P = BBH.projects[BBH.active], tbl = $D("truthTable");
+      if (P.kind === "seg7447") {
+        const cur = curInputs(), curV = ((cur.D ? 1 : 0) << 3) | ((cur.C ? 1 : 0) << 2) | ((cur.B ? 1 : 0) << 1) | (cur.A ? 1 : 0);
+        let html = "<thead><tr><th>D</th><th>C</th><th>B</th><th>A</th>" + BBKind.SEG_NAMES.map(sg => "<th>" + sg + "</th>").join("") + "</tr></thead><tbody>";
+        for (let v = 0; v < 16; v++) html += '<tr' + (v === curV ? ' class="active"' : "") + ">" + [3, 2, 1, 0].map(b => "<td>" + ((v >> b) & 1) + "</td>").join("") + BBKind.SEG7447[v].map(x => '<td class="out">' + x + "</td>").join("") + "</tr>";
+        tbl.innerHTML = html + "</tbody>";
+        $D("ttNote").textContent = "The real 7447 table, all 16 input values — 10–15 blank the display. The highlighted row is your current switch setting.";
+      } else if (P.kind === "dff") {
+        tbl.innerHTML = "<thead><tr><th>D at press</th><th>Q before</th><th>Clock press?</th><th>Q after</th><th>Q̅ after</th></tr></thead><tbody>" +
+          [[1, 0, "press", 1, 0], [0, 0, "press", 0, 1], [1, 1, "press", 1, 0], [0, 1, "press", 0, 1], [0, 1, "no press", 1, 0], [1, 0, "no press", 0, 1]].map(r => "<tr>" + r.map((c, i) => '<td' + (i >= 3 ? ' class="out"' : "") + ">" + c + "</td>").join("") + "</tr>").join("") + "</tbody>";
+        $D("ttNote").textContent = "A flip-flop has no combinational truth table — this is its capture table. Without a clock press, Q holds whatever it already was.";
+      } else {
+        let html = "<thead><tr><th>Count</th><th>QD</th><th>QC</th><th>QB</th><th>QA</th><th>Next</th></tr></thead><tbody>";
+        for (let v = 0; v < 10; v++) { const o = BBKind.decOuts(v); html += '<tr' + (v === BBSEQ.decade.count ? ' class="active"' : "") + "><td>" + v + "</td>" + [o.QD, o.QC, o.QB, o.QA].map(x => '<td class="out">' + x + "</td>").join("") + "<td>" + ((v + 1) % 10) + "</td></tr>"; }
+        tbl.innerHTML = html + "</tbody>";
+        $D("ttNote").textContent = "The 7490 sequence table — one row per clock press. The highlighted row is the current count.";
+      }
+      return;
+    }
+    _rtAD();
+  };
+
+  /* ---------------- settling for kind projects ---------------- */
+  const _spAD = startPropagation;
+  startPropagation = function () {
+    if (bbInProject() && BBH.projects[BBH.active] && BBH.projects[BBH.active].kind) {
+      const P = BBH.projects[BBH.active];
+      clearTimers();
+      state.displayed = Object.assign({ ZERO: 0, ONE: 1 }, curInputs(), bbKindOutputs(P));
+      state.settled = true; state.levels = []; state.levelIdx = 0;
+      paintState(null);
+      $D("flowStatus").textContent = P.kind === "seg7447" ? "Settled — the 7447 segment pattern for the digit on the switches." : "The outputs show stored state — they change only on a clock press, never while you watch the switches.";
+      const cl = $D("checkLine");
+      if (cl) cl.textContent = P.kind === "seg7447" ? "✓ Segment patterns are the real 7447 table — all 16 input values asserted at load (10–15 blank)."
+        : P.kind === "dff" ? "✓ Capture/hold behaviour asserted at load over a scripted D/clock sequence."
+        : "✓ Count sequence 0–9 and the wrap to 0 asserted at load.";
+      return;
+    }
+    _spAD();
+  };
+
+  function bbSeqRefresh() { renderStage(); renderTruth(); startPropagation(); }
+  function bbSeqPress() {
+    if (!bbPinAcked(BBH.active)) { bbFlashPinPanel(); return; }
+    const P = BBH.projects[BBH.active]; if (!P || !P.kind) return;
+    if (P.kind === "dff") BBSEQ.dff.Q = BBKind.dffNext(BBSEQ.dff.Q, curInputs().D ? 1 : 0, true);
+    else if (P.kind === "decade") BBSEQ.decade.count = BBKind.decNext(BBSEQ.decade.count);
+    else return;
+    bbSeqRefresh();
+  }
+  window.__bbSeqPress = bbSeqPress;
+
+  /* ---------------- the two panels ---------------- */
+  let bbAck = store.get("lbl-bb-ack", {});
+  let bbPredDone = store.get("lbl-bb-pred", {});
+  function bbPinAcked(id) { return !!bbAck[id]; }
+
+  const pinPanel = document.createElement("div");
+  pinPanel.className = "card"; pinPanel.id = "bbPinPanel"; pinPanel.hidden = true;
+  pinPanel.innerHTML = "<h3>Before you power it — pin check</h3><div id=\"bbPinBody\"></div>";
+  const predPanel = document.createElement("div");
+  predPanel.className = "card"; predPanel.id = "bbPredPanel"; predPanel.hidden = true;
+  predPanel.innerHTML = "<h3>Predict first — then test</h3><div id=\"bbPredBody\"></div>";
+  const extraPanelEl = $D("extraPanel");
+  if (extraPanelEl && extraPanelEl.parentNode) {
+    extraPanelEl.parentNode.insertBefore(pinPanel, extraPanelEl.nextSibling);
+    extraPanelEl.parentNode.insertBefore(predPanel, pinPanel.nextSibling);
+  }
+  const clearBtnEl = $D("clearDataBtn");
+  if (clearBtnEl) clearBtnEl.addEventListener("click", () => { try { window.localStorage.removeItem("lbl-bb-ack"); window.localStorage.removeItem("lbl-bb-pred"); } catch (e) {} bbAck = {}; bbPredDone = {}; });
+
+  function bbPowerLine(part) {
+    const c = CHIPS74[part]; if (!c) return part;
+    if (c.special) return part + ": pin " + c.vcc + " → +5 V (Vcc), pin " + c.gnd + " → GND";
+    return part + ": pin 14 → +5 V (Vcc), pin 7 → GND";
+  }
+  function bbPinChecks() {
+    const id = BBH.active;
+    if (id === "full") return [
+      "7486: pin 14 → +5 V (Vcc), pin 7 → GND",
+      "7408: pin 14 → +5 V (Vcc), pin 7 → GND",
+      "7432: pin 14 → +5 V (Vcc), pin 7 → GND",
+      "Every output pin feeds only gate inputs or an LED through its 330 Ω resistor — no output tied to +5 V, GND, or another output.",
+      "Each LED: anode (+) through its 330 Ω resistor to the output pin, cathode (−) to the GND rail."
+    ];
+    const P = BBH.projects[id], out = [];
+    P.build.forEach(part => out.push(bbPowerLine(part)));
+    if (P.kind === "seg7447") {
+      out.push("Each segment output (a pin 13 · b pin 12 · c pin 11 · d pin 10 · e pin 9 · f pin 15 · g pin 14) runs through its own 330 Ω resistor to one segment of the display; the display\u2019s common anode goes to +5 V.");
+      out.push("Lamp test (pin 3), blanking (pin 4) and ripple-blanking input (pin 5) are tied to +5 V — inactive, so the digit shows.");
+    } else if (P.kind === "dff") {
+      out.push("Q (pin 5) and Q̅ (pin 6) each feed only their own LED through its 330 Ω resistor.");
+      out.push("Preset (pin 4) and clear (pin 1) are tied to +5 V — inactive. Never leave them floating.");
+      out.push("Each LED: anode (+) through its 330 Ω resistor to the output pin, cathode (−) to the GND rail.");
+    } else if (P.kind === "decade") {
+      out.push("QA (pin 12) feeds the second clock input (pin 1) and its LED through 330 Ω — the one output allowed to drive an input. QD (pin 11), QC (pin 8) and QB (pin 9) feed only their LEDs, each through 330 Ω.");
+      out.push("Reset pins R0(1) pin 2 and R0(2) pin 3 are grounded, and set-9 pins R9(1) pin 6 and R9(2) pin 7 are grounded — counting needs all four inactive.");
+      out.push("Each LED: anode (+) through its 330 Ω resistor to the output pin, cathode (−) to the GND rail.");
+    } else {
+      out.push("Every output pin feeds only gate inputs or an LED through its 330 Ω resistor — no output tied to +5 V, GND, or another output.");
+      out.push("Each LED: anode (+) through its 330 Ω resistor to the output pin, cathode (−) to the GND rail.");
+    }
+    return out;
+  }
+  function bbRenderPin() {
+    const body = $D("bbPinBody"); if (!body) return;
+    const id = BBH.active, checks = bbPinChecks();
+    if (bbPinAcked(id)) {
+      body.innerHTML = '<p class="check-line" style="margin:0">✓ Pin check done for this build — the switches are live.</p>' +
+        '<details class="details-disclosure"><summary>Show the checks again</summary><ul class="bb-check-list done">' + checks.map(c => "<li>" + c + "</li>").join("") + "</ul></details>";
+      return;
+    }
+    body.innerHTML = '<ul class="bb-check-list">' + checks.map(c => "<li>" + c + "</li>").join("") + "</ul>" +
+      '<p class="bb-panel-note">Work down the list against the board and the chip diagrams before the switches go live — the habit that catches a mirrored chip or a missing ground while it is still free to fix.</p>' +
+      '<div class="share-row"><button type="button" class="btn primary" id="bbAckBtn">I\u2019ve checked these — power on</button></div>';
+    const b = $D("bbAckBtn");
+    if (b) b.addEventListener("click", () => {
+      bbAck[BBH.active] = true; store.set("lbl-bb-ack", bbAck);
+      bbRenderPin(); bbADSyncPanels();
+    });
+  }
+  function bbFlashPinPanel() {
+    pinPanel.hidden = false;
+    try { pinPanel.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+    pinPanel.classList.add("bb-panel-flash");
+    setTimeout(() => pinPanel.classList.remove("bb-panel-flash"), 1600);
+    const fs = $D("flowStatus");
+    if (fs) fs.innerHTML = "Before you power it: work the <b>pin check</b> in the side panel, then press <b>power on</b> — the switches stay off until then.";
+  }
+
+  /* prediction cases: one per project; expected outputs are always
+     computed by the project's own evaluator, never typed in */
+  const BB_CASES = {
+    not: { ins: { A: 0 } }, and: { ins: { A: 1, B: 1 } }, or: { ins: { A: 0, B: 1 } },
+    xor: { ins: { A: 1, B: 1 } }, nand: { ins: { A: 1, B: 1 } }, nor: { ins: { A: 0, B: 0 } },
+    halfadd: { ins: { A: 1, B: 1 } }, halfsub: { ins: { A: 0, B: 1 } },
+    mux: { ins: { D0: 0, D1: 1, S: 1 } }, parity: { ins: { A: 1, B: 1, C: 1 } },
+    comp: { ins: { A: 0, B: 1 } }, fullsub: { ins: { A: 0, B: 1, Bin: 1 } },
+    ripple2: { ins: { A1: 0, A0: 1, B1: 0, B0: 1, Cin: 1 } },
+    alu: { ins: { A: 1, B: 1, Cin: 0, Sub: 0, OP1: 1, OP0: 0 } },
+    majority: { ins: { A: 1, B: 0, C: 0 } }, combolock: { ins: { S3: 1, S2: 0, S1: 1, S0: 0 } },
+    mux4: { ins: { D0: 0, D1: 0, D2: 1, D3: 0, S1: 1, S0: 0 } },
+    priority: { ins: { D3: 0, D2: 0, D1: 1, D0: 1 } },
+    full: { ins: { A: 1, B: 1, Cin: 1 } },
+    nandxor: { ins: { A: 1, B: 1 } },
+    seg7: { ins: { D: 0, C: 1, B: 1, A: 1 } }
+  };
+  function bbOutputs(id) {
+    if (id === "full") return ["Sum", "Cout"];
+    const P = BBH.projects[id]; return P ? P.outputs.slice() : [];
+  }
+  function bbCaseText(id) {
+    if (id === "dff") return "Q is 0. D is set to 1, then Clock is pressed once. Predict Q and Q̅ after the press.";
+    if (id === "decade") return "The count is 7 (QD QC QB QA = 0111). Clock is pressed once. Predict the four LEDs after the press.";
+    const c = BB_CASES[id]; if (!c) return "";
+    const parts = Object.keys(c.ins).map(n => n + " = " + c.ins[n]).join(", ");
+    return "The switches are set to " + parts + ". Predict every output LED for this case.";
+  }
+  function bbCaseActual(id) {
+    if (id === "dff") { const q = BBKind.dffNext(0, 1, true); return { Q: q, Qn: q ^ 1 }; }
+    if (id === "decade") return BBKind.decOuts(8);
+    const c = BB_CASES[id]; if (!c) return {};
+    if (id === "seg7") return BBKind.evalSeg(c.ins);
+    const def = id === "full" ? computeLevels(defFullAdder()) : BBH.projects[id].def;
+    const vals = evaluateAll(def, c.ins), out = {};
+    def.outputs.forEach(o => { out[o] = vals[o]; });
+    return out;
+  }
+  const BBPRED_RT = {};
+  function bbRT(id) {
+    if (!BBPRED_RT[id]) BBPRED_RT[id] = { guesses: {}, locked: false, wrong: null, actual: null };
+    return BBPRED_RT[id];
+  }
+  function bbMarkDone() {
+    const key = BBH.active === "full" ? "breadboard" : "bb-" + BBH.active;
+    try {
+      const eng = new Set(JSON.parse(window.localStorage.getItem("lbl-engaged") || "[]")); eng.add(key);
+      window.localStorage.setItem("lbl-engaged", JSON.stringify(Array.from(eng)));
+      const vis = new Set(JSON.parse(window.localStorage.getItem("lbl-visited") || "[]")); vis.add(key);
+      window.localStorage.setItem("lbl-visited", JSON.stringify(Array.from(vis)));
+    } catch (e) {}
+    document.querySelectorAll('.ux-act[data-key="' + key + '"]').forEach(card => {
+      const meta = card.querySelector(".ux-meta");
+      if (meta && !meta.querySelector(".ux-badge.done")) { const s = document.createElement("span"); s.className = "ux-badge done"; s.textContent = "Done ✓"; meta.appendChild(s); }
+    });
+  }
+  function bbRenderPred() {
+    const body = $D("bbPredBody"); if (!body) return;
+    const id = BBH.active, rt = bbRT(id), outs = bbOutputs(id);
+    if (bbPredDone[id] && !rt.locked && !rt.practise) {
+      body.innerHTML = '<p class="check-line" style="margin:0">✓ Prediction passed for this build.</p>' +
+        '<p class="bb-panel-note">' + bbCaseText(id) + '</p>' +
+        '<div class="share-row"><button type="button" class="btn" id="bbPredAgain">Practise again</button></div>';
+      const ag = $D("bbPredAgain");
+      if (ag) ag.addEventListener("click", () => { rt.practise = true; rt.guesses = {}; rt.locked = false; rt.wrong = null; bbRenderPred(); });
+      return;
+    }
+    if (!rt.locked) {
+      const acked = bbPinAcked(id);
+      body.innerHTML = '<p style="margin:0;font-size:13.5px">' + bbCaseText(id) + "</p>" +
+        '<div class="bb-pred-outs">' + outs.map(o => {
+          const v = rt.guesses[o] ? 1 : 0;
+          return '<button type="button" class="toggle' + (v ? " on" : "") + '" data-predguess="' + o + '" aria-pressed="' + (v ? "true" : "false") + '"><span class="track"></span><span class="tname">' + o + '</span><span class="tval">' + v + "</span></button>";
+        }).join("") + "</div>" +
+        '<div class="share-row"><button type="button" class="btn primary" id="bbPredLock"' + (acked ? "" : " disabled") + ">Lock prediction &amp; test ▸</button></div>" +
+        (acked ? "" : '<p class="bb-panel-note">The board is not powered yet — do the pin check above first.</p>');
+      body.querySelectorAll("[data-predguess]").forEach(b => b.addEventListener("click", () => {
+        rt.guesses[b.dataset.predguess] = rt.guesses[b.dataset.predguess] ? 0 : 1;
+        bbRenderPred();
+      }));
+      const lk = $D("bbPredLock");
+      if (lk) lk.addEventListener("click", bbLockPred);
+      return;
+    }
+    const wrong = rt.wrong || [];
+    if (!wrong.length) {
+      body.innerHTML = '<p class="feedback-line good" style="margin:0">✓ Correct — every output matched. The board is showing the case now; the switches are yours to explore.</p>' +
+        '<div class="share-row"><button type="button" class="btn" id="bbPredAgain2">Practise again</button></div>';
+      const ag2 = $D("bbPredAgain2");
+      if (ag2) ag2.addEventListener("click", () => { rt.practise = true; rt.guesses = {}; rt.locked = false; rt.wrong = null; bbRenderPred(); });
+      return;
+    }
+    body.innerHTML = '<p class="feedback-line bad" style="margin:0">✗ Not quite — ' + wrong.map(o => o + " is actually " + rt.actual[o] + " (you predicted " + (rt.guesses[o] ? 1 : 0) + ")").join("; ") + '. The board is showing the case — trace why, then try again.</p>' +
+      '<div class="share-row"><button type="button" class="btn primary" id="bbPredRetry">Try again</button></div>';
+    const rb = $D("bbPredRetry");
+    if (rb) rb.addEventListener("click", () => { rt.locked = false; rt.wrong = null; rt.guesses = {}; bbRenderPred(); });
+  }
+  function bbLockPred() {
+    const id = BBH.active;
+    if (!bbPinAcked(id)) { bbFlashPinPanel(); return; }
+    const rt = bbRT(id), actual = bbCaseActual(id);
+    if (id === "dff") {
+      setInputs({ D: 1 });
+      BBSEQ.dff.Q = BBKind.dffNext(0, 1, true);
+      bbSeqRefresh();
+    } else if (id === "decade") {
+      BBSEQ.decade.count = 8;
+      bbSeqRefresh();
+    } else {
+      setInputs(Object.assign({}, BB_CASES[id].ins));
+    }
+    const outs = bbOutputs(id);
+    rt.actual = actual;
+    rt.wrong = outs.filter(o => (rt.guesses[o] ? 1 : 0) !== actual[o]);
+    rt.locked = true;
+    if (!rt.wrong.length) {
+      rt.practise = false;
+      bbPredDone[id] = true; store.set("lbl-bb-pred", bbPredDone);
+      bbMarkDone();
+    }
+    bbRenderPred();
+  }
+
+  /* ---------------- panel sync + switch gating ---------------- */
+  function bbInBreadboard() { return state.circuitId === "full" && state.view === "breadboard" && !$D("circuitsView").hidden; }
+  function bbADSyncPanels() {
+    const inBB = bbInBreadboard();
+    pinPanel.hidden = !inBB; predPanel.hidden = !inBB;
+    if (!inBB) { bbADSyncPanels._id = null; return; }
+    const id = BBH.active;
+    const ackedNow = bbPinAcked(id);
+    if (bbADSyncPanels._id !== id || bbADSyncPanels._acked !== ackedNow) { bbADSyncPanels._id = id; bbADSyncPanels._acked = ackedNow; bbRenderPin(); bbRenderPred(); }
+    const acked = ackedNow;
+    document.querySelectorAll("#inputToggles [data-toggle]").forEach(b => { b.disabled = !acked; b.style.opacity = acked ? "" : ".45"; });
+    const ck = $D("bbSeqClock"); if (ck) ck.disabled = !acked;
+    const rs = $D("bbSeqReset"); if (rs) rs.disabled = !acked;
+    const lk = $D("bbPredLock"); if (lk) lk.disabled = !acked;
+    const ss = $D("bbSeqState");
+    if (ss) {
+      const P = BBH.projects[id];
+      if (P && P.kind === "dff") ss.textContent = "Q = " + BBSEQ.dff.Q + " · D = " + (curInputs().D ? 1 : 0) + " — Q holds until the next press.";
+      if (P && P.kind === "decade") { const o = BBKind.decOuts(BBSEQ.decade.count); ss.textContent = "Count = " + BBSEQ.decade.count + " · QD QC QB QA = " + o.QD + o.QC + o.QB + o.QA; }
+    }
+  }
+  const _rsAD = renderStage;
+  renderStage = function () {
+    _rsAD();
+    const ck = $D("bbSeqClock");
+    if (ck) ck.addEventListener("click", bbSeqPress);
+    const rs = $D("bbSeqReset");
+    if (rs) rs.addEventListener("click", () => { if (!bbPinAcked(BBH.active)) { bbFlashPinPanel(); return; } BBSEQ.decade.count = 0; bbSeqRefresh(); });
+    const sb = $D("bbSegToBcd");
+    if (sb) sb.addEventListener("click", () => { if (!clickMenuKeyD("lab-bcd-adder")) jumpD("bcdCard"); });
+    document.querySelectorAll("#stageBox [data-seqclock]").forEach(el => el.addEventListener("click", bbSeqPress));
+    bbADSyncPanels();
+  };
+  const stageBoxEl2 = $D("stageBox");
+  if (stageBoxEl2) stageBoxEl2.addEventListener("click", e => {
+    if (!bbInBreadboard()) return;
+    if (typeof BBF !== "undefined" && BBF.active) return; /* the fault trainer runs its own board — never gated */
+    if (e.target.closest && e.target.closest("[data-seqclock]")) return;
+    const sw = e.target.closest && e.target.closest("[data-input]");
+    if (sw && !bbPinAcked(BBH.active)) { e.stopPropagation(); e.preventDefault(); bbFlashPinPanel(); }
+  }, true);
+  const togglesEl = $D("inputToggles");
+  if (togglesEl) togglesEl.addEventListener("click", e => {
+    if (typeof BBF !== "undefined" && BBF.active) return;
+    if (bbInBreadboard() && !bbPinAcked(BBH.active)) { e.stopPropagation(); e.preventDefault(); bbFlashPinPanel(); }
+  }, true);
+
+  /* ---------------- cross-links with the BCD adder lab ---------------- */
+  const bcdCardEl = $D("bcdCard");
+  if (bcdCardEl && !bcdCardEl.querySelector("#bcdToSeg7")) {
+    const row = document.createElement("div");
+    row.className = "share-row";
+    const span = document.createElement("span");
+    span.style.fontSize = "13.5px";
+    span.innerHTML = "On the bench, that corrected digit drives a real decoder chip:";
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "btn"; b.id = "bcdToSeg7";
+    b.textContent = "The 7447 breadboard project — a corrected digit, displayed →";
+    b.addEventListener("click", () => { if (!clickMenuKeyD("bb-seg7")) { try { bbSetProject("seg7"); } catch (e) {} jumpD("stageTitle"); } });
+    row.appendChild(span); row.appendChild(b);
+    bcdCardEl.appendChild(row);
+  }
+  window.__bbRound = { seq: BBSEQ, cases: BB_CASES, caseActual: bbCaseActual, pinChecks: bbPinChecks, acked: bbPinAcked };
+})();
+</script>
+<script>
+"use strict";
+/* ================================================================
+   ROUND AD-2 — six new labs, each graded from its own model:
+   ORGANIZATION: (1) exceptions & interrupts in the datapath
+   (EPC / Cause / handler / eret, stepped); (2) multi-cycle
+   control (per-instruction cycle counts from the stage table);
+   (3) memory timing & wait states (ceil(access / clock)).
+   ARCHITECTURE: (4) Tomasulo out-of-order execution (renaming
+   removes WAR/WAW; the RAW still serialises; one CDB);
+   (5) dual-issue superscalar vs single-issue on one stream
+   (dependency + structural + branch-slot rules); (6) stride
+   prefetching over three recorded traces (hits / issued /
+   useful / useless counted by the simulator).
+   Small fixed examples, fully stepped, nothing simulated that
+   the card does not explain. All start paused.
+   ================================================================ */
+(function roundAD2() {
+  const $D = id => document.getElementById(id);
+  function jumpD(id) { const el = id && $D(id); if (el) setTimeout(() => el.scrollIntoView({ behavior: "smooth", block: "start" }), 60); }
+  function clickMenuKeyD(key) { const it = document.querySelector('#menuList .menu-item[data-key="' + key + '"]'); if (it) { it.click(); return true; } return false; }
+  function fbSetD(el, ok, msg) { if (!el) return; el.textContent = (ok ? "✓ " : "✗ ") + msg; el.style.color = ok ? "var(--green)" : "var(--red)"; }
+  function optBtnsD(host, labels, onPick) {
+    host.innerHTML = "";
+    labels.forEach((lab, i) => { const b = document.createElement("button"); b.type = "button"; b.className = "btn"; b.textContent = lab; b.addEventListener("click", () => onPick(i, b)); host.appendChild(b); });
+  }
+  function mkSection(id, title, what) {
+    const sec = document.createElement("section");
+    sec.className = "card stage-card"; sec.id = id; sec.style.marginTop = "16px"; sec.style.marginBottom = "16px";
+    sec.innerHTML = "<h2>" + title + "</h2><p class=\"what\">" + what + "</p>";
+    return sec;
+  }
+  function checkBlock(sec, prefix) {
+    const d = document.createElement("div");
+    d.innerHTML = '<div class="lab-check"><span class="lab-check-q" id="' + prefix + 'Q"></span><span id="' + prefix + 'Opts" style="display:flex;gap:6px;flex-wrap:wrap"></span><span class="lab-check-fb" id="' + prefix + 'Fb" aria-live="polite"></span></div>' +
+      '<div class="share-row"><button type="button" class="btn" id="' + prefix + 'NewQ">New question</button></div>';
+    sec.appendChild(d);
+    return d;
+  }
+  const orgHost = $D("sysAssembly") || $D("systemsView");
+  const archHost = $D("sysArch") || $D("systemsView");
+
+  /* ================================================================
+     ORG 1 — EXCEPTIONS & INTERRUPTS IN THE DATAPATH
+     ================================================================ */
+  const EXC_PROG = [
+    { addr: 0x00400000, text: "add $t0, $t1, $t2", note: "$t1 = 3, $t2 = 2, so $t0 = 5. Nothing unusual." },
+    { addr: 0x00400004, text: "add $t3, $t4, $t5", note: "$t4 = 0x7FFFFFFF (the largest signed value) and $t5 = 1: the signed sum does not exist. Overflow — the datapath raises an exception instead of writing $t3.", exc: true },
+    { addr: 0x00400008, text: "add $t6, $t0, $t0", note: "$t6 = 10. This is where execution resumes after the handler has dealt with the overflow." },
+    { addr: 0x0040000C, text: "sw $t6, 0($sp)", note: "Stores 10 to memory. The program is done." }
+  ];
+  const EXC_HANDLER_ADDR = 0x80000180, EXC_CAUSE_OV = 12;
+  const EXC_HANDLER = [
+    { addr: 0x80000180, text: "mfc0 $k0, $EPC", note: "The handler first reads EPC: it holds 0x00400004, the address of the faulting add. Cause (code 12, Ov) says why it is here." },
+    { addr: 0x80000184, text: "addiu $k0, $k0, 4", note: "The handler's fix: saturate $t3 to 0x7FFFFFFF (done off-stage) and step EPC past the faulting instruction — returning to the add itself would just overflow again." },
+    { addr: 0x80000188, text: "mtc0 $k0, $EPC", note: "EPC now holds 0x00400008." },
+    { addr: 0x8000018C, text: "eret", note: "Return from exception: the PC is loaded from EPC. Execution resumes at 0x00400008 as if the overflow had been an ordinary, if slow, instruction." }
+  ];
+  const hex8 = v => "0x" + ("0000000" + v.toString(16)).slice(-8).toUpperCase();
+  function excTrace() {
+    const fault = EXC_PROG[1].addr, out = [];
+    out.push({ pc: EXC_PROG[0].addr, epc: null, cause: null, msg: "Reset. PC points at the first instruction; EPC and Cause hold nothing yet." });
+    out.push({ pc: EXC_PROG[1].addr, epc: null, cause: null, msg: "Executed: " + EXC_PROG[0].text + " — $t0 = 5. PC advances by 4, as always." });
+    out.push({ pc: EXC_HANDLER_ADDR, epc: fault, cause: EXC_CAUSE_OV, diverted: true, msg: "OVERFLOW on " + EXC_PROG[1].text + ". The datapath does not write $t3. It saves the faulting address in EPC (" + hex8(fault) + "), records Cause = 12 (Ov), and diverts the PC to the handler at " + hex8(EXC_HANDLER_ADDR) + " — the next instruction executed is the handler's, not the program's." });
+    EXC_HANDLER.forEach((h, i) => {
+      const epcNow = i >= 2 ? fault + 4 : fault;
+      out.push({ pc: i === EXC_HANDLER.length - 1 ? fault + 4 : EXC_HANDLER[i + 1] ? EXC_HANDLER[i + 1].addr : fault + 4, epc: epcNow, cause: EXC_CAUSE_OV, handlerIdx: i, msg: h.note });
+    });
+    out.push({ pc: EXC_PROG[3].addr, epc: fault + 4, cause: EXC_CAUSE_OV, msg: "Executed: " + EXC_PROG[2].text + " — $t6 = 10. The program never learns its second instruction was replaced by a four-instruction detour, except in the cycle count." });
+    out.push({ pc: EXC_PROG[3].addr + 4, epc: fault + 4, cause: EXC_CAUSE_OV, done: true, msg: "Executed: " + EXC_PROG[3].text + ". Done — 4 program instructions, 1 exception, 4 handler instructions: 9 instructions retired for a 4-instruction program." });
+    return out;
+  }
+  const EXC_T = excTrace();
+  function excVerify() {
+    const div = EXC_T.find(s => s.diverted);
+    return { steps: EXC_T.length, epcAtDiv: div ? div.epc : null, pcAtDiv: div ? div.pc : null, resume: EXC_T[EXC_T.length - 2].pc, pass: !!div && div.epc === EXC_PROG[1].addr && div.pc === EXC_HANDLER_ADDR && EXC_T[EXC_T.length - 2].pc === EXC_PROG[2].addr };
+  }
+  const EXC_V = excVerify();
+  const excSec = mkSection("excCard", "Exceptions &amp; interrupts — EPC, Cause, and the handler detour",
+    "A single-cycle datapath runs a four-instruction program — until the second instruction overflows. Watch what the hardware does instead of the next instruction: it saves the faulting address in <b>EPC</b>, records the reason in <b>Cause</b>, and diverts the PC to a fixed <b>handler address</b>. The handler repairs the situation, steps EPC past the faulting instruction, and <b>eret</b> returns to EPC. A <b>syscall</b> takes exactly the same detour (Cause code 8 instead of 12): an exception is the machine's one mechanism for 'something happened that the instruction stream did not plan for' — arithmetic overflow, a system call, or an external interrupt all arrive the same way.");
+  excSec.innerHTML += '<div class="ctrl-label">Program — in memory at 0x00400000</div><div class="asm-listing" id="excProg"></div>' +
+    '<div class="ctrl-label" style="margin-top:10px">Handler — at the fixed exception address 0x80000180</div><div class="asm-listing" id="excHandler"></div>' +
+    '<div class="seq-state" id="excRegs" style="margin-top:12px"></div>' +
+    '<div class="share-row"><button type="button" class="btn primary" id="excStep">Step ▸</button><button type="button" class="btn" id="excReset">Reset</button></div>' +
+    '<div class="decimal-line" id="excMsg" aria-live="polite"></div>' +
+    '<p class="proj-teaches"><b>Teaches:</b> EPC and Cause, the fixed handler address, why eret returns to EPC (and why the handler first adds 4), exceptions vs interrupts as one mechanism.</p>';
+  if (orgHost) orgHost.appendChild(excSec);
+  const exc = { i: 0 };
+  function excRender() {
+    const st = EXC_T[exc.i];
+    const row = (ins, cur) => '<div class="' + (cur ? "cur" : "") + '"><span class="ln">' + hex8(ins.addr) + "</span>" + ins.text + "</div>";
+    excSec.querySelector("#excProg").innerHTML = EXC_PROG.map((ins, k) => {
+      const cur = !st.handlerIdx && st.pc === ins.addr && !st.done && !(st.diverted && k === 1);
+      return row(ins, cur || (st.diverted && k === 1));
+    }).join("");
+    excSec.querySelector("#excHandler").innerHTML = EXC_HANDLER.map((h, k) => row(h, st.handlerIdx === k)).join("");
+    excSec.querySelector("#excRegs").innerHTML =
+      '<div class="seq-cell' + (st.diverted ? " one" : "") + '"><b>' + hex8(st.pc) + "</b>PC — next fetch</div>" +
+      '<div class="seq-cell"><b>' + (st.epc === null ? "—" : hex8(st.epc)) + "</b>EPC</div>" +
+      '<div class="seq-cell"><b>' + (st.cause === null ? "—" : st.cause + " (Ov)") + "</b>Cause code</div>";
+    excSec.querySelector("#excMsg").textContent = st.msg;
+    excSec.querySelector("#excStep").disabled = exc.i >= EXC_T.length - 1;
+  }
+  excSec.querySelector("#excStep").addEventListener("click", () => { if (exc.i < EXC_T.length - 1) exc.i++; excRender(); });
+  excSec.querySelector("#excReset").addEventListener("click", () => { exc.i = 0; excRender(); });
+  checkBlock(excSec, "exc");
+  let excQn = 0;
+  function excQuestion() {
+    const fb = excSec.querySelector("#excFb"), host = excSec.querySelector("#excOpts");
+    fb.textContent = "";
+    const kind = excQn % 3;
+    if (kind === 0) {
+      excSec.querySelector("#excQ").textContent = "Predict, then check: the add at 0x00400004 overflows. At the moment of the diversion, what does EPC hold?";
+      optBtnsD(host, ["0x00400004 — the faulting instruction", "0x00400008 — the next instruction", "0x80000180 — the handler"], i => fbSetD(fb, i === 0, i === 0
+        ? "Right — EPC saves the address of the instruction that faulted, so the handler can see exactly what failed (and decide whether to retry it, skip it, or saturate it)."
+        : "Not that address — EPC is written with the faulting instruction's own address, 0x00400004. The handler address goes in the PC, not in EPC; the return address must name the victim, not the rescuer."));
+      window.__excQuestion = { kind: "epc", expected: EXC_PROG[1].addr };
+    } else if (kind === 1) {
+      excSec.querySelector("#excQ").textContent = "Predict, then check: in the cycle right after the overflow is detected, what is the PC?";
+      optBtnsD(host, ["0x00400008 — execution just moves on", "0x80000180 — the handler address", "0x00400004 — it retries the add"], i => fbSetD(fb, i === 1, i === 1
+        ? "Right — the PC is diverted to the fixed handler address 0x80000180. The program's next instruction waits; the handler runs first."
+        : "Not that address — an exception is a forced detour: the PC is loaded with the handler address 0x80000180, and the program resumes only when the handler returns."));
+      window.__excQuestion = { kind: "pc", expected: EXC_HANDLER_ADDR };
+    } else {
+      excSec.querySelector("#excQ").textContent = "Predict, then check: the handler adds 4 to EPC and executes eret. Where does execution resume?";
+      optBtnsD(host, ["0x00400004 — the faulting add runs again", "0x00400008 — the instruction after it", "0x80000180 — the handler restarts"], i => fbSetD(fb, i === 1, i === 1
+        ? "Right — eret loads the PC from EPC, and the handler had already stepped EPC to 0x00400008. Skipping is the handler's choice: for a syscall that is exactly right (the call has been serviced), and for this overflow it pairs with saturating $t3."
+        : "Not there — eret returns to whatever EPC holds at that moment, and the handler deliberately added 4 first: execution resumes at 0x00400008, past the faulting add. Without the +4 the machine would re-execute the add and overflow forever."));
+      window.__excQuestion = { kind: "resume", expected: EXC_PROG[2].addr };
+    }
+  }
+  excSec.querySelector("#excNewQ").addEventListener("click", () => { excQn++; excQuestion(); });
+  excRender(); excQuestion();
+
+  /* ================================================================
+     ORG 2 — MULTI-CYCLE CONTROL
+     ================================================================ */
+  const MC_STAGES = { lw: ["IF", "ID", "EX", "MEM", "WB"], sw: ["IF", "ID", "EX", "MEM"], R: ["IF", "ID", "EX", "WB"], beq: ["IF", "ID", "EX"], j: ["IF", "ID", "EX"] };
+  const MC_STAGE_WHAT = {
+    IF: "Instruction fetch: memory is read at the PC; the PC steps to PC + 4.",
+    ID: "Instruction decode & register read: the control unit learns the opcode; both register operands are read.",
+    EX: "Execute / address: the ALU computes — a result (R-type), a memory address (lw/sw), or the branch comparison (beq). A jump finishes here: the PC is redirected.",
+    MEM: "Memory access: lw reads its word, sw writes its word. R-type, beq and j have nothing to do in this stage — in the multi-cycle design they simply never enter it.",
+    WB: "Write back: the result (ALU or memory) is written to the register file. Only lw and R-type reach this stage."
+  };
+  const MC_PROG = [
+    { t: "lw", text: "lw $t0, 0($sp)" }, { t: "R", text: "add $t1, $t0, $t2" }, { t: "sw", text: "sw $t1, 4($sp)" },
+    { t: "beq", text: "beq $t1, $t3, done" }, { t: "j", text: "j loop" }, { t: "R", text: "sub $t4, $t1, $t0" }
+  ];
+  const mcTotal = MC_PROG.reduce((s, x) => s + MC_STAGES[x.t].length, 0);
+  function mcVerify() {
+    const lens = { lw: 5, sw: 4, R: 4, beq: 3, j: 3 };
+    let pass = mcTotal === 23;
+    Object.keys(lens).forEach(k => { if (MC_STAGES[k].length !== lens[k]) pass = false; });
+    return { total: mcTotal, lens, pass };
+  }
+  const MC_V = mcVerify();
+  const mcSec = mkSection("mcCard", "Multi-cycle control — one datapath, different cycle counts",
+    "The single-cycle datapath gives every instruction one long cycle — long enough for the slowest instruction (lw) to finish. The <b>multi-cycle</b> design breaks the work into short stages — <b>IF, ID, EX, MEM, WB</b> — and lets each instruction take only the stages it needs: <b>lw 5, sw 4, R-type 4, beq 3, jump 3</b>. The cycle count per instruction goes <i>up</i>; the clock period comes <i>down</i>, because no single cycle must now contain a whole lw. Step one instruction through its stages, then predict the short program's total before you run it.");
+  mcSec.innerHTML += '<div class="share-row" id="mcPick" role="group" aria-label="Choose an instruction"></div>' +
+    '<div class="seq-state" id="mcStages" style="margin-top:10px"></div>' +
+    '<div class="share-row"><button type="button" class="btn primary" id="mcStep">Step cycle ▸</button><button type="button" class="btn" id="mcReset">Reset</button></div>' +
+    '<div class="decimal-line" id="mcMsg" aria-live="polite"></div>' +
+    '<div class="ctrl-label" style="margin-top:14px">The short program — predict its total, then run it</div>' +
+    '<div class="asm-listing" id="mcProgList"></div>' +
+    '<div class="share-row"><button type="button" class="btn" id="mcRun">Run the program</button></div>' +
+    '<div class="decimal-line" id="mcProgOut" aria-live="polite">Not run yet. Add the stage counts yourself first: the check below asks for exactly this total.</div>' +
+    '<p class="proj-teaches"><b>Teaches:</b> the five multi-cycle stages, why beq and j finish at EX, CPI as a mix-dependent average — and the honest comparison: single-cycle runs this program in 6 cycles, but each of those cycles is as long as a whole lw; multi-cycle runs it in ' + mcTotal + ' cycles, each only as long as one stage.</p>';
+  if (orgHost) orgHost.appendChild(mcSec);
+  const mc = { type: "lw", cycle: 0 };
+  const mcPick = mcSec.querySelector("#mcPick");
+  Object.keys(MC_STAGES).forEach(t => {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "btn"; b.textContent = t + " (" + MC_STAGES[t].length + ")";
+    b.setAttribute("aria-pressed", t === "lw" ? "true" : "false");
+    b.addEventListener("click", () => { mc.type = t; mc.cycle = 0; mcPick.querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x === b ? "true" : "false")); mcRender(); });
+    mcPick.appendChild(b);
+  });
+  function mcRender() {
+    const stages = MC_STAGES[mc.type];
+    mcSec.querySelector("#mcStages").innerHTML = ["IF", "ID", "EX", "MEM", "WB"].map(sg => {
+      const inPath = stages.indexOf(sg) >= 0, idx = stages.indexOf(sg);
+      const on = mc.cycle > 0 && idx === mc.cycle - 1;
+      return '<div class="seq-cell' + (on ? " one" : "") + '"><b>' + sg + "</b>" + (inPath ? "stage " + (idx + 1) + " of " + stages.length : "not used by " + mc.type) + "</div>";
+    }).join("");
+    const msg = mcSec.querySelector("#mcMsg");
+    if (mc.cycle === 0) msg.textContent = mc.type + " needs " + stages.length + " cycles: " + stages.join(" → ") + ". Step to walk them.";
+    else if (mc.cycle <= stages.length) msg.textContent = "Cycle " + mc.cycle + " — " + stages[mc.cycle - 1] + ": " + MC_STAGE_WHAT[stages[mc.cycle - 1]] + (mc.cycle === stages.length ? " Instruction complete in " + stages.length + " cycles." : "");
+    mcSec.querySelector("#mcStep").disabled = mc.cycle >= stages.length;
+    mcSec.querySelector("#mcProgList").innerHTML = MC_PROG.map(x => '<div><span class="ln">' + x.t + " · " + MC_STAGES[x.t].length + ' cyc</span>' + x.text + "</div>").join("");
+  }
+  mcSec.querySelector("#mcStep").addEventListener("click", () => { if (mc.cycle < MC_STAGES[mc.type].length) mc.cycle++; mcRender(); });
+  mcSec.querySelector("#mcReset").addEventListener("click", () => { mc.cycle = 0; mcRender(); });
+  mcSec.querySelector("#mcRun").addEventListener("click", () => {
+    mcSec.querySelector("#mcProgOut").textContent = "Program total: " + MC_PROG.map(x => MC_STAGES[x.t].length).join(" + ") + " = " + mcTotal + " cycles for 6 instructions — CPI " + (mcTotal / 6).toFixed(2) + " on this mix. The single-cycle machine retires the same program in 6 cycles, but its one cycle must stretch to fit lw's entire fetch-to-write-back path; the multi-cycle clock only has to fit the longest single stage.";
+  });
+  checkBlock(mcSec, "mc");
+  let mcQn = 0;
+  function mcQuestion() {
+    const fb = mcSec.querySelector("#mcFb"), host = mcSec.querySelector("#mcOpts");
+    fb.textContent = "";
+    const kind = mcQn % 3;
+    if (kind === 0) {
+      mcSec.querySelector("#mcQ").textContent = "Predict, then check: the program above (lw, add, sw, beq, j, sub) runs on the multi-cycle machine. How many cycles in total?";
+      optBtnsD(host, ["18 cycles", "23 cycles", "6 cycles", "29 cycles"], i => fbSetD(fb, i === 1, i === 1
+        ? "Right — 5 + 4 + 4 + 3 + 3 + 4 = 23. Each instruction pays only for the stages it uses."
+        : "Not that total — add the stage counts from the table: lw 5, R-type 4, sw 4, beq 3, j 3, R-type 4. The sum is 23; 6 would be the single-cycle count, and it buys its small number with a much longer clock period."));
+      window.__mcQuestion = { kind: "total", expected: mcTotal };
+    } else if (kind === 1) {
+      mcSec.querySelector("#mcQ").textContent = "Predict, then check: in which stage does a beq finish — which is its last cycle?";
+      optBtnsD(host, ["MEM — cycle 4", "EX — cycle 3", "WB — cycle 5"], i => fbSetD(fb, i === 1, i === 1
+        ? "Right — the branch decision is an ALU comparison, made in EX. There is nothing for beq to do in MEM and nothing to write back, so it retires after cycle 3."
+        : "Not that stage — a branch is decided by the ALU comparison in EX, and it has no memory access and no register to write. It finishes at EX, cycle 3."));
+      window.__mcQuestion = { kind: "beq-stage", expected: "EX" };
+    } else {
+      mcSec.querySelector("#mcQ").textContent = "Predict, then check: which instruction is the only one that uses all five stages?";
+      optBtnsD(host, ["sw", "R-type", "lw"], i => fbSetD(fb, i === 2, i === 2
+        ? "Right — only lw fetches, decodes, computes an address, reads memory, and writes the value back. It is also the instruction that sets the single-cycle machine's clock period."
+        : "Not that one — sw never writes back (it writes memory in MEM and stops), and R-type never touches memory. Only lw needs all five stages."));
+      window.__mcQuestion = { kind: "five", expected: "lw" };
+    }
+  }
+  mcSec.querySelector("#mcNewQ").addEventListener("click", () => { mcQn++; mcQuestion(); });
+  mcRender(); mcQuestion();
+
+  /* ================================================================
+     ORG 3 — MEMORY TIMING & WAIT STATES
+     ================================================================ */
+  const MEM_CLK_NS = 10, MEM_SEQ_N = 6;
+  function memModel(tAcc) {
+    const cycles = Math.ceil(tAcc / MEM_CLK_NS);
+    return { tAcc, cycles, waits: cycles - 1, total: cycles * MEM_SEQ_N, eff: cycles * MEM_CLK_NS };
+  }
+  function memVerify() {
+    let pass = true;
+    [10, 25, 40, 55, 70, 100].forEach(t => {
+      const m = memModel(t);
+      if (m.cycles !== Math.ceil(t / 10) || m.waits !== m.cycles - 1 || m.total !== m.cycles * MEM_SEQ_N || m.eff !== m.cycles * 10) pass = false;
+    });
+    if (memModel(55).waits !== 5 || memModel(40).total !== 24 || memModel(25).eff !== 30) pass = false;
+    return { pass };
+  }
+  const MEM_V = memVerify();
+  const memSec = mkSection("memCard", "Memory timing &amp; wait states — when memory is slower than the clock",
+    "The CPU's clock ticks every <b>10 ns</b>. A memory whose access takes longer than that cannot answer inside one cycle, so the controller stretches the access: it inserts <b>wait states</b> — whole extra cycles in which the CPU simply waits — until the data is valid. Accesses needed = ⌈access time ÷ clock period⌉ cycles; wait states = that minus the first (unavoidable) cycle. Vary the memory speed and watch the six-access sequence below get slower without a single instruction changing. This lab is about <b>timing</b>; its companion, the address-decoding lab, is about <b>addresses</b> — which device answers, not how long it takes.");
+  memSec.innerHTML += '<div class="tool-controls"><label>Memory access time <select id="memSel" class="tool-num" style="width:auto">' +
+    [10, 25, 40, 55, 70, 100].map(t => '<option value="' + t + '"' + (t === 55 ? " selected" : "") + ">" + t + " ns" + (t === 10 ? " (matches the clock)" : t === 100 ? " (slow flash / off-chip)" : "") + "</option>").join("") + "</select></label></div>" +
+    '<p style="font-size:13.5px;margin:6px 0">The fixed sequence: six accesses to this memory — lw, lw, sw, lw, sw, lw — issued back to back. Nothing else changes between runs.</p>' +
+    '<div class="seq-state" id="memOut" style="margin-top:8px"></div>' +
+    '<div class="decimal-line" id="memMsg" aria-live="polite"></div>' +
+    '<div class="share-row"><button type="button" class="btn" id="memToAddr">The address-decoding lab — which device answers →</button></div>' +
+    '<p class="proj-teaches"><b>Teaches:</b> wait states, ⌈t<sub>acc</sub> / t<sub>clk</sub>⌉ rounding (a 25 ns memory still costs 3 cycles — the half-used cycle is gone), and effective access time as the number software actually feels.</p>';
+  if (orgHost) orgHost.appendChild(memSec);
+  function memRender() {
+    const m = memModel(+memSec.querySelector("#memSel").value);
+    memSec.querySelector("#memOut").innerHTML =
+      '<div class="seq-cell"><b>' + m.cycles + "</b>cycles per access</div>" +
+      '<div class="seq-cell' + (m.waits ? " one" : "") + '"><b>' + m.waits + "</b>wait states inserted</div>" +
+      '<div class="seq-cell"><b>' + m.total + "</b>cycles for the 6 accesses</div>" +
+      '<div class="seq-cell"><b>' + m.eff + " ns</b>effective access time</div>";
+    memSec.querySelector("#memMsg").textContent = m.waits === 0
+      ? "Access time " + m.tAcc + " ns fits inside one 10 ns cycle: no wait states. The memory keeps up with the clock."
+      : "Access time " + m.tAcc + " ns needs ⌈" + m.tAcc + " / 10⌉ = " + m.cycles + " cycles: the first cycle starts the access, then " + m.waits + " wait state" + (m.waits === 1 ? "" : "s") + " hold the CPU until the data is valid at " + m.eff + " ns. Six accesses cost " + m.total + " cycles instead of 6 — the program is identical, only the memory got slower.";
+  }
+  memSec.querySelector("#memSel").addEventListener("change", memRender);
+  memSec.querySelector("#memToAddr").addEventListener("click", () => {
+    try { setTopArea("systems"); syncRail("systems"); const pb = document.querySelector('#sysPicker [data-sys="assembly"]'); if (pb) pb.click(); } catch (e) {}
+    jumpD("addrCard");
+  });
+  checkBlock(memSec, "mem");
+  let memQn = 0;
+  function memQuestion() {
+    const fb = memSec.querySelector("#memFb"), host = memSec.querySelector("#memOpts");
+    fb.textContent = "";
+    const kind = memQn % 3;
+    if (kind === 0) {
+      const m = memModel(55);
+      memSec.querySelector("#memQ").textContent = "Predict, then check: the clock is 10 ns and the memory's access time is 55 ns. How many wait states does each access insert?";
+      optBtnsD(host, ["4 wait states", "5 wait states", "6 wait states"], i => fbSetD(fb, i === 1, i === 1
+        ? "Right — ⌈55 / 10⌉ = 6 cycles per access; the first cycle is the access itself, so 6 − 1 = 5 are inserted wait states."
+        : "Not that count — divide and round UP: ⌈55 / 10⌉ = 6 cycles per access. One of those is the normal access cycle, leaving 5 wait states."));
+      window.__memQuestion = { kind: "waits", expected: m.waits };
+    } else if (kind === 1) {
+      const m = memModel(40);
+      memSec.querySelector("#memQ").textContent = "Predict, then check: with a 40 ns memory, how many cycles does the six-access sequence take in total?";
+      optBtnsD(host, ["18 cycles", "24 cycles", "40 cycles"], i => fbSetD(fb, i === 1, i === 1
+        ? "Right — ⌈40 / 10⌉ = 4 cycles per access, and 6 accesses × 4 = 24 cycles (18 of them waiting)."
+        : "Not that total — each access costs ⌈40 / 10⌉ = 4 cycles, so six accesses cost 24 cycles."));
+      window.__memQuestion = { kind: "total", expected: m.total };
+    } else {
+      const m = memModel(25);
+      memSec.querySelector("#memQ").textContent = "Predict, then check: a 25 ns memory sounds only slightly slower than the 10 ns clock. What is the effective access time the CPU actually experiences?";
+      optBtnsD(host, ["20 ns", "25 ns", "30 ns"], i => fbSetD(fb, i === 2, i === 2
+        ? "Right — accesses can only end on cycle boundaries: ⌈25 / 10⌉ = 3 cycles, so the CPU sees 30 ns. The leftover half-cycle is unusable — that rounding is why wait-state arithmetic always rounds up."
+        : "Not that time — the CPU can only collect data on a clock edge. ⌈25 / 10⌉ = 3 cycles × 10 ns = 30 ns effective, whatever the datasheet's 25 ns says."));
+      window.__memQuestion = { kind: "eff", expected: m.eff };
+    }
+  }
+  memSec.querySelector("#memNewQ").addEventListener("click", () => { memQn++; memQuestion(); });
+  memRender(); memQuestion();
+  /* the address-decoding lab gains the return link */
+  const addrCardEl = $D("addrCard");
+  if (addrCardEl && !addrCardEl.querySelector("#addrToMem")) {
+    const row = document.createElement("div");
+    row.className = "share-row";
+    const span = document.createElement("span");
+    span.style.fontSize = "13.5px";
+    span.innerHTML = "This lab is about <b>addresses</b>. Its companion is about <b>timing</b> — how long the answer takes:";
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "btn"; b.id = "addrToMem";
+    b.textContent = "Memory timing & wait states lab →";
+    b.addEventListener("click", () => { if (!clickMenuKeyD("lab-memtiming")) jumpD("memCard"); });
+    row.appendChild(span); row.appendChild(b);
+    addrCardEl.appendChild(row);
+  }
+
+  /* ================================================================
+     ARCH 1 — TOMASULO OUT-OF-ORDER EXECUTION
+     Rules (stated on the card): issue in order, 1 per cycle;
+     execution starts the cycle after issue once every operand
+     tag has broadcast (initial register values are ready);
+     one CDB broadcast per cycle, in completion order.
+     ================================================================ */
+  const TOM = [
+    { id: "I1", text: "ADD F1, F2, F3", dest: "F1", srcs: ["F2", "F3"], lat: 2 },
+    { id: "I2", text: "MUL F4, F1, F5", dest: "F4", srcs: ["F1", "F5"], lat: 3 },
+    { id: "I3", text: "ADD F2, F6, F7", dest: "F2", srcs: ["F6", "F7"], lat: 2 },
+    { id: "I4", text: "ADD F1, F8, F9", dest: "F1", srcs: ["F8", "F9"], lat: 2 }
+  ];
+  function tomSimulate() {
+    const tagOf = {}, sched = {}, rename = {};
+    TOM.forEach((ins, i) => { tagOf[ins.id] = "T" + (i + 1); });
+    const bcast = {};
+    TOM.forEach((ins, i) => {
+      const issue = i + 1;
+      let start = issue + 1;
+      ins.srcs.forEach(r => {
+        const producer = TOM.slice(0, i).reverse().find(x => x.dest === r);
+        if (producer) start = Math.max(start, 0); /* tag resolved below once producer scheduled */
+      });
+      sched[ins.id] = { issue, start: null, end: null, write: null, tag: tagOf[ins.id] };
+      rename[ins.id] = ins.srcs.map(r => {
+        const producer = TOM.slice(0, i).reverse().find(x => x.dest === r);
+        return producer ? tagOf[producer.id] : "value";
+      });
+    });
+    TOM.forEach((ins, i) => {
+      let start = sched[ins.id].issue + 1;
+      ins.srcs.forEach(r => {
+        const producer = TOM.slice(0, i).reverse().find(x => x.dest === r);
+        if (producer) start = Math.max(start, bcast[tagOf[producer.id]] + 1);
+      });
+      sched[ins.id].start = start;
+      sched[ins.id].end = start + ins.lat - 1;
+    });
+    const order = TOM.slice().sort((a, b) => (sched[a.id].end - sched[b.id].end) || (TOM.indexOf(a) - TOM.indexOf(b)));
+    let prevWrite = 0;
+    order.forEach(ins => {
+      const w = Math.max(sched[ins.id].end + 1, prevWrite + 1);
+      sched[ins.id].write = w; bcast[tagOf[ins.id]] = w; prevWrite = w;
+    });
+    return { sched, rename, total: Math.max.apply(null, TOM.map(x => sched[x.id].write)) };
+  }
+  const TOM_S = tomSimulate();
+  function tomVerify() {
+    const exp = { I1: [1, 2, 3, 4], I2: [2, 5, 7, 8], I3: [3, 4, 5, 6], I4: [4, 5, 6, 7] };
+    let pass = TOM_S.total === 8;
+    TOM.forEach(ins => { const s = TOM_S.sched[ins.id], e = exp[ins.id]; if (s.issue !== e[0] || s.start !== e[1] || s.end !== e[2] || s.write !== e[3]) pass = false; });
+    return { pass, total: TOM_S.total };
+  }
+  const TOM_V = tomVerify();
+  const tomSec = mkSection("tomCard", "Out-of-order execution — Tomasulo's algorithm &amp; register renaming",
+    "Four instructions with three kinds of dependence. <b>I2 needs F1 from I1</b> — a true (RAW) dependence. <b>I3 writes F2, which I1 reads</b> — a WAR dependence. <b>I4 writes F1, which I1 also writes</b> — a WAW dependence. Tomasulo's machine issues in order into <b>reservation stations</b>, but <b>renames</b> every destination to a fresh tag (I1→T1, I2→T2, I3→T3, I4→T4) through the <b>rename table</b>: after renaming, I3 and I4 write <i>different physical places</i> than the ones I1 uses, so the WAR and WAW simply vanish — while I2, waiting on tag T1 over the <b>common data bus (CDB)</b>, still serialises on the true dependence. Rules: issue 1 per cycle in order; execution starts the cycle after issue once all operand tags have broadcast; one CDB broadcast per cycle, in completion order.");
+  tomSec.innerHTML += '<div class="asm-listing" id="tomList"></div>' +
+    '<div class="seq-state" id="tomRename" style="margin-top:10px"></div>' +
+    '<div class="share-row"><button type="button" class="btn primary" id="tomStep">Step cycle ▸</button><button type="button" class="btn" id="tomReset">Reset</button></div>' +
+    '<div class="decimal-line" id="tomMsg" aria-live="polite"></div>' +
+    '<p class="proj-teaches"><b>Teaches:</b> reservation stations, renaming as the removal of false dependences, the CDB as the machine\u2019s single broadcast bottleneck — note cycle 6 and 7: two results finish together, but only one can broadcast per cycle.</p>';
+  if (archHost) archHost.appendChild(tomSec);
+  const tom = { cycle: 0 };
+  function tomEvents(cycle) {
+    const ev = [];
+    TOM.forEach(ins => {
+      const s = TOM_S.sched[ins.id];
+      if (s.issue === cycle) ev.push(ins.id + " issues → reservation station, destination renamed to " + s.tag + (TOM_S.rename[ins.id].some(t => t !== "value") ? "; it waits for " + TOM_S.rename[ins.id].filter(t => t !== "value").join(", ") : "; operands are values, ready"));
+      if (s.start === cycle) ev.push(ins.id + " starts executing (" + ins.lat + " cycles)");
+      if (s.write === cycle) ev.push(ins.id + " writes its result: " + s.tag + " broadcasts on the CDB");
+    });
+    return ev;
+  }
+  function tomRender() {
+    tomSec.querySelector("#tomList").innerHTML = TOM.map(ins => {
+      const s = TOM_S.sched[ins.id];
+      const stage = tom.cycle === 0 ? "waiting" : tom.cycle < s.issue ? "waiting" : tom.cycle === s.issue ? "ISSUED c" + s.issue : tom.cycle < s.start ? "in RS — waiting for operands" : tom.cycle <= s.end ? "EXECUTING (c" + s.start + "–" + s.end + ")" : tom.cycle < s.write ? "done — queued for the CDB" : "WRITTEN c" + s.write;
+      return '<div class="' + (tom.cycle >= s.issue && tom.cycle < s.write ? "cur" : "") + '"><span class="ln">' + ins.id + " → " + s.tag + "</span>" + ins.text + "  ·  " + stage + "</div>";
+    }).join("");
+    const ren = {};
+    TOM.forEach(ins => { if (TOM_S.sched[ins.id].issue <= tom.cycle) ren[ins.dest] = TOM_S.sched[ins.id].tag + (TOM_S.sched[ins.id].write <= tom.cycle ? " (broadcast c" + TOM_S.sched[ins.id].write + ")" : " (pending)"); });
+    tomSec.querySelector("#tomRename").innerHTML = ["F1", "F2", "F4"].map(r => '<div class="seq-cell"><b>' + (ren[r] || "value") + "</b>rename table: " + r + "</div>").join("") +
+      '<div class="seq-cell"><b>cycle ' + tom.cycle + " / " + TOM_S.total + "</b>machine cycle</div>";
+    const ev = tomEvents(tom.cycle);
+    tomSec.querySelector("#tomMsg").textContent = tom.cycle === 0 ? "Reset. Renaming happens at issue: watch the rename table as each instruction arrives — and notice I3 and I4 never wait for I1, while I2 does." : (ev.length ? "Cycle " + tom.cycle + ": " + ev.join(" · ") + "." : "Cycle " + tom.cycle + ": no issue, start, or broadcast — a machine bubble while I2's multiply finishes.");
+    tomSec.querySelector("#tomStep").disabled = tom.cycle >= TOM_S.total;
+  }
+  tomSec.querySelector("#tomStep").addEventListener("click", () => { if (tom.cycle < TOM_S.total) tom.cycle++; tomRender(); });
+  tomSec.querySelector("#tomReset").addEventListener("click", () => { tom.cycle = 0; tomRender(); });
+  checkBlock(tomSec, "tom");
+  let tomQn = 0;
+  function tomQuestion() {
+    const fb = tomSec.querySelector("#tomFb"), host = tomSec.querySelector("#tomOpts");
+    fb.textContent = "";
+    const kind = tomQn % 3;
+    if (kind === 0) {
+      tomSec.querySelector("#tomQ").textContent = "Predict, then check: I4 is 'ADD F1, F8, F9'. Under renaming, what is its renamed destination?";
+      optBtnsD(host, ["F1 — it must wait for I1's F1", "T4 — a fresh tag", "T1 — the same tag as I1"], i => fbSetD(fb, i === 1, i === 1
+        ? "Right — destinations are renamed in issue order, so I4's F1 becomes the fresh tag T4. The WAW against I1 disappears: two different tags, two different physical results, and any later reader of F1 is pointed at T4."
+        : "Not that tag — renaming gives every issued destination the next fresh tag: I1 took T1, I2 took T2, I3 took T3, so I4's F1 is T4. Sharing I1's tag (or the architectural name) is exactly what renaming exists to avoid."));
+      window.__tomQuestion = { kind: "rename", expected: "T4" };
+    } else if (kind === 1) {
+      tomSec.querySelector("#tomQ").textContent = "Predict, then check: which instruction broadcasts on the CDB in cycle 6?";
+      optBtnsD(host, ["I2 — the multiply", "I3 — the second ADD", "I4 — the last ADD"], i => fbSetD(fb, i === 1, i === 1
+        ? "Right — I3 issued at cycle 3 with ready operands, executed cycles 4–5, and broadcasts at cycle 6. I4 finishes executing in the same cycle 6 but must wait for the bus until cycle 7: one broadcast per cycle."
+        : "Not that one — count it through: I3 issues c3, executes c4–c5 (operands were values), so it broadcasts at c6. I4 also finishes at c6 but the single CDB makes it wait until c7, and I2's multiply runs until c7 and broadcasts at c8."));
+      window.__tomQuestion = { kind: "cdb6", expected: "I3" };
+    } else {
+      tomSec.querySelector("#tomQ").textContent = "Predict, then check: I2's operands include F1, renamed to T1, which broadcasts in cycle 4. In which cycle can I2 start executing?";
+      optBtnsD(host, ["Cycle 3 — right after it issues", "Cycle 5 — the cycle after the broadcast", "Cycle 8 — when it writes"], i => fbSetD(fb, i === 1, i === 1
+        ? "Right — the RAW dependence survives renaming (it is a true dependence on a value, not a name). T1 broadcasts in cycle 4, so I2's reservation station can only fire in cycle 5; its 3-cycle multiply then writes at cycle 8."
+        : "Not that cycle — renaming removed the false dependences, not this one: I2 genuinely needs I1's value. The broadcast lands in cycle 4 and execution can start the cycle after, cycle 5."));
+      window.__tomQuestion = { kind: "i2start", expected: TOM_S.sched.I2.start };
+    }
+  }
+  tomSec.querySelector("#tomNewQ").addEventListener("click", () => { tomQn++; tomQuestion(); });
+  tomRender(); tomQuestion();
+
+  /* ================================================================
+     ARCH 2 — DUAL-ISSUE SUPERSCALAR
+     ================================================================ */
+  const DUAL = [
+    { text: "ADD R1, R2, R3", dest: "R1", srcs: ["R2", "R3"], mem: false, br: false },
+    { text: "ADD R4, R1, R5", dest: "R4", srcs: ["R1", "R5"], mem: false, br: false },
+    { text: "LW R6, 0(R7)", dest: "R6", srcs: ["R7"], mem: true, br: false },
+    { text: "ADD R8, R9, R10", dest: "R8", srcs: ["R9", "R10"], mem: false, br: false },
+    { text: "ADD R12, R8, R13", dest: "R12", srcs: ["R8", "R13"], mem: false, br: false },
+    { text: "SW R8, 0(R11)", dest: null, srcs: ["R8", "R11"], mem: true, br: false },
+    { text: "BEQ R15, R16, L", dest: null, srcs: ["R15", "R16"], mem: false, br: true },
+    { text: "ADD R17, R18, R19", dest: "R17", srcs: ["R18", "R19"], mem: false, br: false }
+  ];
+  function dualProducer(idx, reg) {
+    for (let i = idx - 1; i >= 0; i--) if (DUAL[i].dest === reg) return i;
+    return -1;
+  }
+  function dualSingle() {
+    const cyc = {}; let c = 0;
+    DUAL.forEach((ins, i) => {
+      c++;
+      ins.srcs.forEach(r => { const p = dualProducer(i, r); if (p >= 0) c = Math.max(c, cyc[p] + 1); });
+      cyc[i] = c;
+    });
+    return { cyc, total: c };
+  }
+  function dualDual() {
+    const cyc = {}, pairs = []; let c = 0, i = 0;
+    while (i < DUAL.length) {
+      c++;
+      const ins = DUAL[i];
+      ins.srcs.forEach(r => { const p = dualProducer(i, r); if (p >= 0 && cyc[p] >= c) c = cyc[p] + 1; });
+      let paired = -1, why = "";
+      const j = i + 1;
+      if (j < DUAL.length) {
+        const nx = DUAL[j];
+        if (ins.br || nx.br) why = "a branch resolves in one slot — it issues alone";
+        else if (ins.mem && nx.mem) why = "two memory ops — one memory port";
+        else if (ins.dest && nx.srcs.indexOf(ins.dest) >= 0) why = "I" + (j + 1) + " needs " + ins.dest + " from I" + (i + 1) + " (RAW) — same-cycle results are not available";
+        else if (ins.dest && nx.dest === ins.dest) why = "both write " + ins.dest + " (WAW)";
+        else {
+          let ok = true;
+          nx.srcs.forEach(r => { const p = dualProducer(j, r); if (p >= 0 && p !== i && cyc[p] >= c) ok = false; });
+          if (ok) paired = j; else why = "I" + (j + 1) + "'s operand is not ready yet";
+        }
+      }
+      cyc[i] = c; if (paired >= 0) cyc[paired] = c;
+      pairs.push({ cycle: c, first: i, second: paired, why: paired >= 0 ? "" : why });
+      i += paired >= 0 ? 2 : 1;
+    }
+    return { cyc, pairs, total: c };
+  }
+  const DUAL_1 = dualSingle(), DUAL_2 = dualDual();
+  function dualVerify() {
+    return { single: DUAL_1.total, dual: DUAL_2.total, pass: DUAL_1.total === 8 && DUAL_2.total === 6 && DUAL_2.pairs.length === 6 };
+  }
+  const DUAL_V = dualVerify();
+  const dualSec = mkSection("dualCard", "Dual-issue superscalar — two slots, three kinds of stall",
+    "The same eight-instruction stream runs on two in-order machines. The <b>single-issue</b> machine retires at most one instruction per cycle. The <b>dual-issue</b> machine tries to fill two slots per cycle — but slot 2 stays empty whenever the pair breaks a rule: the second instruction <b>depends on the first's result</b> (RAW — a same-cycle result does not exist yet), the pair needs <b>two memory ops</b> (one memory port — a structural limit), or a <b>branch</b> is involved (a branch resolves in one slot and issues alone). A result is usable from the cycle after its instruction issues. Run both and compare cycles and IPC.");
+  dualSec.innerHTML += '<div class="asm-listing" id="dualList"></div>' +
+    '<div class="share-row"><button type="button" class="btn primary" id="dualRun">Run both machines</button><button type="button" class="btn" id="dualReset">Reset</button></div>' +
+    '<div class="decimal-line" id="dualOut" aria-live="polite">Not run yet — predict the dual-issue total first (the check below asks for it).</div>' +
+    '<div id="dualTables"></div>' +
+    '<p class="proj-teaches"><b>Teaches:</b> issue width vs achieved IPC, RAW stalls inside a pair, structural hazards (one memory port), and why branches tax superscalar machines even when they are not taken.</p>';
+  if (archHost) archHost.appendChild(dualSec);
+  dualSec.querySelector("#dualList").innerHTML = DUAL.map((ins, i) => '<div><span class="ln">I' + (i + 1) + "</span>" + ins.text + (ins.mem ? "  · memory" : "") + (ins.br ? "  · branch" : "") + "</div>").join("");
+  dualSec.querySelector("#dualRun").addEventListener("click", () => {
+    const rows = DUAL_2.pairs.map(pr => "<tr><td>" + pr.cycle + "</td><td>I" + (pr.first + 1) + "</td><td>" + (pr.second >= 0 ? "I" + (pr.second + 1) : "— empty" + (pr.why ? ": " + pr.why : "")) + "</td></tr>").join("");
+    dualSec.querySelector("#dualTables").innerHTML = '<div class="tt-wrap" style="margin-top:10px"><table class="tt"><thead><tr><th>Cycle</th><th>Slot 1</th><th>Slot 2</th></tr></thead><tbody>' + rows + "</tbody></table></div>";
+    dualSec.querySelector("#dualOut").textContent = "Single-issue: " + DUAL_1.total + " cycles, IPC " + (8 / DUAL_1.total).toFixed(2) + ". Dual-issue: " + DUAL_2.total + " cycles, IPC " + (8 / DUAL_2.total).toFixed(2) + " — two slots bought " + (DUAL_1.total - DUAL_2.total) + " cycles, not four: three slot-2 stalls (two RAW pairs, one lone branch) are the difference between issue width and achieved width.";
+  });
+  dualSec.querySelector("#dualReset").addEventListener("click", () => {
+    dualSec.querySelector("#dualTables").innerHTML = "";
+    dualSec.querySelector("#dualOut").textContent = "Not run yet — predict the dual-issue total first (the check below asks for it).";
+  });
+  checkBlock(dualSec, "dual");
+  let dualQn = 0;
+  function dualQuestion() {
+    const fb = dualSec.querySelector("#dualFb"), host = dualSec.querySelector("#dualOpts");
+    fb.textContent = "";
+    const kind = dualQn % 3;
+    if (kind === 0) {
+      dualSec.querySelector("#dualQ").textContent = "Predict, then check: how many cycles does the dual-issue machine need for this stream?";
+      optBtnsD(host, ["4 cycles — two per cycle throughout", "6 cycles", "8 cycles — no better than single-issue"], i => fbSetD(fb, i === 1, i === 1
+        ? "Right — 6 cycles: three cycles fill both slots (c2, c4, and one more pairing), and three slot-2 stalls — I2's RAW on I1, I5's RAW on I4, and the lone branch — cost the rest."
+        : "Not that count — walk the pairs: I2 cannot pair with I1 (RAW), I5 cannot pair with I4 (RAW), and the branch issues alone. That is 3 paired cycles and 3 single cycles: 6 in total."));
+      window.__dualQuestion = { kind: "total", expected: DUAL_2.total };
+    } else if (kind === 1) {
+      dualSec.querySelector("#dualQ").textContent = "Predict, then check: in cycle 1, why does slot 2 stay empty?";
+      optBtnsD(host, ["I2 needs R1, which I1 is only just producing (RAW)", "Two memory ops collide", "A branch is resolving"], i => fbSetD(fb, i === 0, i === 0
+        ? "Right — I2 reads R1 and I1 writes R1. A result produced this cycle cannot be consumed this cycle, so I2 waits for cycle 2 — where it pairs happily with the independent LW."
+        : "Not that limit — cycle 1's pair is I1 + I2, two ALU ops and no branch. The blocker is the RAW dependence: I2's source R1 is I1's destination."));
+      window.__dualQuestion = { kind: "stall1", expected: "RAW" };
+    } else {
+      dualSec.querySelector("#dualQ").textContent = "Predict, then check: what IPC does the dual-issue machine achieve on this stream?";
+      optBtnsD(host, ["2.00 — perfect dual issue", "1.33", "1.00 — no gain at all"], i => fbSetD(fb, i === 1, i === 1
+        ? "Right — 8 instructions in 6 cycles is IPC 1.33. The gap to 2.00 is exactly the three stalled slots; issue width is a ceiling, not a promise."
+        : "Not that IPC — 8 instructions ÷ 6 cycles = 1.33. Perfect 2.00 would need every slot filled, and three slots stall on dependences and the branch."));
+      window.__dualQuestion = { kind: "ipc", expected: 1.33 };
+    }
+  }
+  dualSec.querySelector("#dualNewQ").addEventListener("click", () => { dualQn++; dualQuestion(); });
+  dualQuestion();
+
+  /* ================================================================
+     ARCH 3 — STRIDE PREFETCHING
+     ================================================================ */
+  const PREF_TRACES = {
+    unit: { label: "Unit stride — blocks 0,1,2,…,7", blocks: [0, 1, 2, 3, 4, 5, 6, 7] },
+    stride2: { label: "Stride 2 — blocks 0,2,4,6,8,10", blocks: [0, 2, 4, 6, 8, 10] },
+    irregular: { label: "Irregular — 0, 5, 1, 9, 3, 12, 7, 2", blocks: [0, 5, 1, 9, 3, 12, 7, 2] }
+  };
+  function prefSim(trace, stride) {
+    const cache = new Set(), unused = new Set();
+    let hits = 0, misses = 0, issued = 0, useful = 0;
+    const steps = [];
+    trace.forEach(b => {
+      let res;
+      if (cache.has(b)) { hits++; res = "hit"; if (unused.has(b)) { useful++; unused.delete(b); res = "hit — prefetched"; } }
+      else { misses++; cache.add(b); res = "miss"; }
+      let pf = null;
+      if (stride > 0) { const t = b + stride; if (!cache.has(t)) { cache.add(t); unused.add(t); issued++; pf = t; } }
+      steps.push({ b, res, pf });
+    });
+    return { hits, misses, issued, useful, useless: unused.size, steps };
+  }
+  function prefVerify() {
+    const a = prefSim(PREF_TRACES.unit.blocks, 1);
+    const b = prefSim(PREF_TRACES.stride2.blocks, 1);
+    const c = prefSim(PREF_TRACES.irregular.blocks, 1);
+    const off = prefSim(PREF_TRACES.unit.blocks, 0);
+    const s2 = prefSim(PREF_TRACES.stride2.blocks, 2);
+    const pass = a.misses === 1 && a.useful === 7 && b.misses === 6 && b.useful === 0 && c.hits === 2 && c.useful === 2 && off.misses === 8 && off.issued === 0 && s2.misses === 1;
+    return { pass, a, b, c };
+  }
+  const PREF_V = prefVerify();
+  const prefSec = mkSection("prefCard", "Stride prefetching — guessing the next block before it is asked for",
+    "A stride prefetcher watches demand accesses and, after each one, fetches <b>block + stride</b> into the cache on speculation. Three recorded traces run through it: a <b>unit-stride</b> sweep, a <b>stride-2</b> sweep, and an <b>irregular</b> trace with no pattern. Counters keep score honestly: demand <b>hits and misses</b>, <b>prefetches issued</b>, <b>useful</b> prefetches (a prefetched block later demanded) and <b>useless</b> ones (fetched, never demanded — pure wasted bandwidth). The cache here is large enough that nothing is evicted during these short traces: the lab isolates prefetch <i>accuracy</i>, not eviction. Step through a trace, or run it whole, with the prefetcher off, at stride 1, and at stride 2.");
+  prefSec.innerHTML += '<div class="share-row" id="prefTracePick" role="group" aria-label="Choose a trace"></div>' +
+    '<div class="share-row" id="prefStridePick" role="group" aria-label="Prefetcher stride" style="margin-top:6px"></div>' +
+    '<div class="seq-state" id="prefStrip" style="margin-top:10px"></div>' +
+    '<div class="seq-state" id="prefCounts" style="margin-top:8px"></div>' +
+    '<div class="share-row"><button type="button" class="btn primary" id="prefStep">Step access ▸</button><button type="button" class="btn" id="prefRun">Run whole trace</button><button type="button" class="btn" id="prefReset">Reset</button></div>' +
+    '<div class="decimal-line" id="prefMsg" aria-live="polite"></div>' +
+    '<p class="proj-teaches"><b>Teaches:</b> prefetch accuracy vs coverage, why a stride-1 prefetcher is worthless on a stride-2 stream (it prefetches exactly the blocks the program skips), and why irregular code makes prefetching a bandwidth tax.</p>';
+  if (archHost) archHost.appendChild(prefSec);
+  const pref = { trace: "unit", stride: 1, idx: 0, sim: null };
+  function prefResetSim() { pref.sim = prefSim(PREF_TRACES[pref.trace].blocks, pref.stride); pref.idx = 0; }
+  const ptPick = prefSec.querySelector("#prefTracePick");
+  Object.keys(PREF_TRACES).forEach(k => {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "btn"; b.textContent = PREF_TRACES[k].label;
+    b.setAttribute("aria-pressed", k === "unit" ? "true" : "false");
+    b.addEventListener("click", () => { pref.trace = k; ptPick.querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x === b ? "true" : "false")); prefResetSim(); prefRender(); });
+    ptPick.appendChild(b);
+  });
+  const psPick = prefSec.querySelector("#prefStridePick");
+  [["Off", 0], ["Stride 1", 1], ["Stride 2", 2]].forEach(([lab, v]) => {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "btn"; b.textContent = "Prefetcher: " + lab;
+    b.setAttribute("aria-pressed", v === 1 ? "true" : "false");
+    b.addEventListener("click", () => { pref.stride = v; psPick.querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x === b ? "true" : "false")); prefResetSim(); prefRender(); });
+    psPick.appendChild(b);
+  });
+  function prefRender() {
+    const blocks = PREF_TRACES[pref.trace].blocks, sim = pref.sim;
+    prefSec.querySelector("#prefStrip").innerHTML = blocks.map((b, i) => {
+      const done = i < pref.idx, st = done ? sim.steps[i] : null;
+      return '<div class="seq-cell' + (done && st.res.indexOf("hit") === 0 ? " one" : "") + '"><b>' + b + "</b>" + (done ? st.res + (st.pf !== null ? " · pf→" + st.pf : "") : "block") + "</div>";
+    }).join("");
+    let hits = 0, misses = 0, issued = 0, useful = 0;
+    for (let i = 0; i < pref.idx; i++) { const st = sim.steps[i]; if (st.res.indexOf("hit") === 0) hits++; else misses++; if (st.pf !== null) issued++; if (st.res === "hit — prefetched") useful++; }
+    const finished = pref.idx >= blocks.length;
+    prefSec.querySelector("#prefCounts").innerHTML =
+      '<div class="seq-cell"><b>' + hits + "</b>demand hits</div>" +
+      '<div class="seq-cell"><b>' + misses + "</b>demand misses</div>" +
+      '<div class="seq-cell"><b>' + issued + "</b>prefetches issued</div>" +
+      '<div class="seq-cell"><b>' + useful + "</b>useful so far</div>" +
+      (finished ? '<div class="seq-cell"><b>' + sim.useless + "</b>useless (never demanded)</div>" : "");
+    prefSec.querySelector("#prefMsg").textContent = finished
+      ? "Trace complete: " + sim.hits + " hits, " + sim.misses + " misses, " + sim.issued + " prefetches issued, " + sim.useful + " useful, " + sim.useless + " useless. " + (pref.stride === 0 ? "With the prefetcher off, every first touch misses — the baseline the other runs must beat." : sim.useful === 0 && sim.issued > 0 ? "Every prefetch was wasted: the prefetcher's guess never matched the program's next block." : sim.misses === 1 ? "One compulsory miss (the first block) and the prefetcher stayed ahead of the program from then on." : "Some prefetches landed, some were wasted — accuracy, not enthusiasm, is the metric.")
+      : "Access " + (pref.idx + 1) + " of " + blocks.length + " next: block " + blocks[pref.idx] + ". Step to issue it.";
+    prefSec.querySelector("#prefStep").disabled = finished;
+  }
+  prefSec.querySelector("#prefStep").addEventListener("click", () => { if (pref.idx < PREF_TRACES[pref.trace].blocks.length) pref.idx++; prefRender(); });
+  prefSec.querySelector("#prefRun").addEventListener("click", () => { pref.idx = PREF_TRACES[pref.trace].blocks.length; prefRender(); });
+  prefSec.querySelector("#prefReset").addEventListener("click", () => { prefResetSim(); prefRender(); });
+  checkBlock(prefSec, "pref");
+  let prefQn = 0;
+  function prefQuestion() {
+    const fb = prefSec.querySelector("#prefFb"), host = prefSec.querySelector("#prefOpts");
+    fb.textContent = "";
+    const kind = prefQn % 3;
+    if (kind === 0) {
+      const a = prefSim(PREF_TRACES.unit.blocks, 1);
+      prefSec.querySelector("#prefQ").textContent = "Predict, then check: the unit-stride trace (0–7) runs with the stride-1 prefetcher on. How many demand misses occur?";
+      optBtnsD(host, ["0 — the prefetcher prevents them all", "1 — only the first access", "8 — prefetching does not help"], i => fbSetD(fb, i === 1, i === 1
+        ? "Right — the first access (block 0) is a compulsory miss; it triggers the prefetch of block 1, and from then on the prefetcher is always one step ahead: 7 hits, 1 miss."
+        : "Not that count — block 0 must miss (nothing could have fetched it earlier), but that very miss starts the chain: each access prefetches the next block, so the other seven all hit. Exactly 1 miss."));
+      window.__prefQuestion = { kind: "unit-misses", expected: a.misses };
+    } else if (kind === 1) {
+      const b = prefSim(PREF_TRACES.stride2.blocks, 1);
+      prefSec.querySelector("#prefQ").textContent = "Predict, then check: the stride-2 trace (0, 2, 4, 6, 8, 10) runs with a stride-1 prefetcher. How many of its prefetches turn out useful?";
+      optBtnsD(host, ["All of them", "Half of them", "None of them"], i => fbSetD(fb, i === 2, i === 2
+        ? "Right — zero. The stride-1 prefetcher fetches blocks 1, 3, 5, 7, 9, 11 — precisely the blocks this program never touches. Every demand still misses, and the bandwidth is spent for nothing. Match the stride to the stream (stride 2 here) or stay silent."
+        : "Not that share — the prefetcher fetches block + 1 after every access: 1, 3, 5, 7, 9, 11. The program only ever demands even blocks, so not one prefetch is ever used: 0 useful, 6 wasted."));
+      window.__prefQuestion = { kind: "s2-useless", expected: b.useful };
+    } else {
+      prefSec.querySelector("#prefQ").textContent = "Predict, then check: with the stride-1 prefetcher on, which of the three traces benefits least?";
+      optBtnsD(host, ["The unit-stride trace", "The stride-2 trace", "The irregular trace"], i => fbSetD(fb, i === 2, i === 2
+        ? "Right — the irregular trace has no stride to learn: of 8 prefetches only 2 are ever demanded (blocks 1 and 2 arrive as prefetches by luck of adjacency), 6 misses remain, and 6 prefetches are pure waste. Even the stride-2 trace at least has a pattern — just not the one a stride-1 prefetcher guesses."
+        : "Not that trace — run them: unit-stride is the prefetcher's best case (1 miss), and stride-2 at least has a learnable pattern (a stride-2 prefetcher aces it). The irregular trace offers nothing to predict: 2 useful prefetches out of 8, and 6 of 8 demands still miss."));
+      window.__prefQuestion = { kind: "least", expected: "irregular" };
+    }
+  }
+  prefSec.querySelector("#prefNewQ").addEventListener("click", () => { prefQn++; prefQuestion(); });
+  prefResetSim(); prefRender(); prefQuestion();
+
+  /* ---------------- verification handles + self-tests ---------------- */
+  window.__excCheck = { trace: excTrace, verify: excVerify };
+  window.__mcCheck = { stages: MC_STAGES, total: mcTotal, verify: mcVerify };
+  window.__memCheck = { model: memModel, verify: memVerify };
+  window.__tomCheck = { simulate: tomSimulate, verify: tomVerify };
+  window.__dualCheck = { single: dualSingle, dual: dualDual, verify: dualVerify };
+  window.__prefCheck = { sim: prefSim, verify: prefVerify };
+  try {
+    window.__roundADSelfTest = { exc: EXC_V, mc: MC_V, mem: MEM_V, tom: TOM_V, dual: DUAL_V, pref: { pass: PREF_V.pass } };
+    const bad = Object.keys(window.__roundADSelfTest).filter(k => !window.__roundADSelfTest[k].pass);
+    if (bad.length && window.console) console.warn("[Round AD self-test] failures:", bad);
+  } catch (e) { window.__roundADSelfTest = { error: String(e && e.message || e) }; }
+
+  /* ---------------- MENU REGISTRATION + COUNT REBUILD ---------------- */
+  function addMenuItemD(groupName, afterKey, spec) {
+    const list = $D("menuList"); if (!list) return false;
+    if (list.querySelector('[data-key="' + spec.key + '"]')) return false;
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "menu-item"; b.dataset.key = spec.key;
+    b.dataset.search = (spec.label + " " + spec.hint + " " + spec.search).toLowerCase();
+    if (spec.level) b.dataset.uxlevel = spec.level;
+    b.innerHTML = '<span class="mi-dot" aria-hidden="true"></span><span class="mi-label"></span><small></small>';
+    b.querySelector(".mi-label").textContent = spec.label;
+    b.querySelector("small").textContent = spec.hint;
+    b.addEventListener("click", () => { const p = $D("menuPanel"); if (p) p.hidden = true; const mb = $D("menuBtn"); if (mb) mb.setAttribute("aria-expanded", "false"); spec.go(); });
+    if (afterKey) {
+      const anchor = list.querySelector('[data-key="' + afterKey + '"]');
+      if (anchor) { anchor.parentNode.insertBefore(b, anchor.nextSibling); return true; }
+    }
+    let sib = null, inGroup = false;
+    Array.prototype.slice.call(list.children).forEach(el => {
+      if (el.classList.contains("menu-group")) inGroup = (el.dataset.group || "").trim() === groupName;
+      else if (inGroup && el.classList.contains("menu-item")) sib = el;
+    });
+    if (sib) sib.parentNode.insertBefore(b, sib.nextSibling); else list.appendChild(b);
+    return true;
+  }
+  const goOrg = id => () => { setTopArea("systems"); syncRail("systems"); const pb = document.querySelector('#sysPicker [data-sys="assembly"]'); if (pb) pb.click(); jumpD(id); };
+  const goArch = id => () => { setTopArea("systems"); syncRail("systems"); const pb = document.querySelector('#sysPicker [data-sys="arch"]'); if (pb) pb.click(); jumpD(id); };
+  addMenuItemD("Computer Organization", "lab-org-7", {
+    key: "lab-exceptions", label: "Exceptions & interrupts lab — EPC, Cause, handler, eret",
+    hint: "An overflowing add diverts a single-cycle datapath to its handler: step the detour, read EPC and Cause, return with eret",
+    search: "exception interrupt epc cause register handler eret syscall overflow trap mfc0 mtc0 coprocessor exception handler address diversion datapath simulator lab",
+    level: "intermediate", go: goOrg("excCard")
+  });
+  addMenuItemD("Computer Organization", "lab-exceptions", {
+    key: "lab-multicycle", label: "Multi-cycle control lab — IF ID EX MEM WB, different counts per instruction",
+    hint: "lw takes 5 cycles, sw and R-type 4, beq and jump 3: step the stages, then predict a short program's total cycle count",
+    search: "multicycle multi-cycle control datapath stages fetch decode execute memory writeback lw sw r-type beq jump cycle count cpi single-cycle comparison simulator lab",
+    level: "intermediate", go: goOrg("mcCard")
+  });
+  addMenuItemD("Computer Organization", "lab-multicycle", {
+    key: "lab-memtiming", label: "Memory timing & wait states lab — when memory is slower than the clock",
+    hint: "Selectable memory access time against a 10 ns clock: wait states are inserted per access; predict the count and the sequence total",
+    search: "memory timing wait states access time clock period slow memory effective access time stall cycles ceil rounding bus timing simulator lab address decoding companion",
+    level: "intermediate", go: goOrg("memCard")
+  });
+  addMenuItemD("Computer Architecture", "lab-arch-10", {
+    key: "lab-tomasulo", label: "Tomasulo lab — out-of-order execution & register renaming",
+    hint: "Reservation stations, a rename table and one CDB: renaming removes the WAR and WAW dependences while the true RAW still serialises",
+    search: "tomasulo out of order execution ooo reservation station register renaming rename table common data bus cdb war waw raw dependence false dependence issue execute write result simulator lab",
+    level: "advanced", go: goArch("tomCard")
+  });
+  addMenuItemD("Computer Architecture", "lab-tomasulo", {
+    key: "lab-dualissue", label: "Dual-issue superscalar lab — two slots, three kinds of stall",
+    hint: "One stream on a single-issue and a dual-issue machine: RAW pairs, the one-memory-port limit and lone branches stall slot 2; cycles and IPC computed for both",
+    search: "dual issue superscalar two wide issue width ipc instructions per cycle slot stall raw dependence structural hazard memory port branch in-order pipeline simulator lab",
+    level: "advanced", go: goArch("dualCard")
+  });
+  addMenuItemD("Computer Architecture", "lab-dualissue", {
+    key: "lab-prefetch", label: "Stride prefetching lab — useful vs useless prefetches",
+    hint: "A selectable stride prefetcher over unit-stride, stride-2 and irregular traces: hits, prefetches issued, useful and useless prefetches counted",
+    search: "stride prefetching prefetcher cache prefetch useful useless accuracy coverage bandwidth stride one two irregular trace demand hit miss hardware prefetch simulator lab",
+    level: "advanced", go: goArch("prefCard")
+  });
+  (function rebuildCountsD() {
+    const RJ = window.__uxRoundJ; if (!RJ) return;
+    const groups = RJ.menuGroups(); const counts = {}; let total = 0;
+    groups.forEach(g => {
+      counts[g.name] = g.items.length; total += g.items.length;
+      const c = g.header.querySelector(".mi-count"); if (c) c.textContent = g.items.length;
+    });
+    window.LAB_MENU = { groups: groups.map(g => ({ name: g.name, items: g.items.map(b => { const l = b.querySelector(".mi-label"); return l ? l.textContent : ""; }) })), count: total };
+    window.LAB_MODULES = { modules: groups.map(g => ({ name: g.name, count: g.items.length })), total };
+    RJ.buildRailAndList(counts);
+    RJ.buildGallery();
+    ["boards", "arch", "os", "org"].forEach(id => {
+      const h = document.querySelector("#module-" + id + " .mh-count");
+      if (!h) return;
+      const name = { boards: "Boards, Modulation & Projects", arch: "Computer Architecture", os: "Operating Systems", org: "Computer Organization" }[id];
+      if (counts[name]) h.textContent = counts[name] + " items";
+    });
+    window.__countsAD = { total, counts };
   })();
 })();
 </script>
