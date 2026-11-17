@@ -26063,3 +26063,461 @@ html.text-large .bb-panel-note{font-size:15.5px}
   })();
 })();
 </script>
+<script>
+"use strict";
+/* ================================================================
+   ROUND AE — BUILD AN ASSEMBLER (Computer Organization).
+   The site already has assemblers students USE (the SAP-1
+   two-pass assembler in Architecture, the MIPS assembly lab).
+   This lab is the missing one: the student BUILDS a two-pass
+   assembler for the SAP-1 instruction set, in five stages, and
+   every stage is checked against the site's own assembler —
+   window.__asmCheck.assemble is the oracle, never a second,
+   possibly divergent, implementation. The worked example is
+   the countdown program the existing assembler hand-matches:
+   image 06 30 27 65 51 40 03 01, output [3, 2, 1].
+   Stages: (1) why two passes — a forward reference makes the
+   need concrete; (2) pass 1 — predict the location counter and
+   each label's address, locked in line by line; (3) pass 2 —
+   encode each byte against the finished symbol table;
+   (4) error hunt — which pass catches a duplicate label, which
+   catches an undefined one, and why; (5) final build — a fresh
+   program assembled completely (symbol table + image), verified
+   against the oracle, then run here or sent to the SAP-1
+   capstone stepper via window.__sap1LoadCustom.
+   ================================================================ */
+(function roundAE() {
+  const $E = id => document.getElementById(id);
+  function jumpE(id) { const el = id && $E(id); if (el) setTimeout(() => el.scrollIntoView({ behavior: "smooth", block: "start" }), 60); }
+  function clickMenuKeyE(key) { const it = document.querySelector('#menuList .menu-item[data-key="' + key + '"]'); if (it) { it.click(); return true; } return false; }
+  function fbSetE(el, ok, msg) { if (!el) return; el.textContent = (ok ? "✓ " : "✗ ") + msg; el.style.color = ok ? "var(--green)" : "var(--red)"; }
+  const hex2E = v => "0x" + v.toString(16).toUpperCase().padStart(2, "0");
+
+  /* ---------------- the student's assembler (the model) ----------------
+     Written the way a student would write it: a location counter,
+     a symbol table, then a second walk that emits bytes. Its
+     results are cross-checked against the site's assembler in
+     baVerify() below — if the two ever disagreed, the self-test
+     would fail at load. */
+  const BA_OPS = ["LDA", "ADD", "SUB", "OUT", "HLT", "JMP", "JZ", "STA"];
+  const BA_OPCODE = {}; BA_OPS.forEach((op, i) => { BA_OPCODE[op] = i; });
+  const BA_NO_OPERAND = { OUT: true, HLT: true };
+  function baSplit(raw) {
+    let text = String(raw).split(";")[0].trim();
+    let label = null;
+    const m = text.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(.*)$/);
+    if (m) { label = m[1]; text = m[2].trim(); }
+    if (!text) return { label, mnemonic: null, operand: null, empty: true };
+    const p = text.split(/\s+/);
+    return { label, mnemonic: p[0].toUpperCase(), operand: p.length > 1 ? p[1] : null, empty: false };
+  }
+  function baPass1(src) {
+    const symbols = [], byName = {}, rows = [];
+    let lc = 0;
+    String(src).split(/\r?\n/).forEach((raw, i) => {
+      const L = baSplit(raw);
+      if (L.empty && !L.label) return; /* blank or comment-only line: consumes nothing */
+      rows.push({ line: i + 1, lc, label: L.label, mnemonic: L.mnemonic });
+      if (L.label) { const s = { name: L.label, addr: lc, line: i + 1 }; symbols.push(s); byName[L.label.toLowerCase()] = s; }
+      if (!L.empty) lc++; /* every SAP-1 instruction and every DB is exactly one byte */
+    });
+    return { symbols, byName, rows, size: lc };
+  }
+  function baPass2(src) {
+    const p1 = baPass1(src);
+    const bytes = [], listing = [];
+    let addr = 0;
+    String(src).split(/\r?\n/).forEach(raw => {
+      const L = baSplit(raw);
+      if (L.empty) return;
+      const here = addr; addr++;
+      if (L.mnemonic === "DB") { const v = parseInt(L.operand, 10); bytes.push(v); listing.push({ addr: here, byte: v, text: "DB " + L.operand, src: raw.trim() }); return; }
+      const op = BA_OPCODE[L.mnemonic];
+      if (BA_NO_OPERAND[L.mnemonic]) { bytes.push(op << 4); listing.push({ addr: here, byte: op << 4, text: L.mnemonic, src: raw.trim() }); return; }
+      let val = /^-?\d+$/.test(L.operand) ? parseInt(L.operand, 10) : (p1.byName[String(L.operand).toLowerCase()] || {}).addr;
+      const b = (op << 4) | val;
+      bytes.push(b); listing.push({ addr: here, byte: b, text: L.mnemonic + " " + L.operand, src: raw.trim() });
+    });
+    const bytes16 = bytes.slice();
+    while (bytes16.length < 16) bytes16.push(0);
+    return { p1, bytes, bytes16, listing };
+  }
+  function baErrors(src) {
+    const errs = [], seen = {};
+    String(src).split(/\r?\n/).forEach((raw, i) => { /* pass 1: duplicates surface while the table is built */
+      const L = baSplit(raw);
+      if (L.label) { const k = L.label.toLowerCase(); if (seen[k]) errs.push({ pass: 1, kind: "duplicate", label: L.label, line: i + 1 }); else seen[k] = true; }
+    });
+    const p1 = baPass1(src);
+    String(src).split(/\r?\n/).forEach((raw, i) => { /* pass 2: undefined labels surface when operands are resolved */
+      const L = baSplit(raw);
+      if (L.empty || L.mnemonic === "DB" || BA_NO_OPERAND[L.mnemonic] || L.operand === null) return;
+      if (/^-?\d+$/.test(L.operand) || /^0x[0-9a-fA-F]+$/.test(L.operand)) return;
+      if (!p1.byName[L.operand.toLowerCase()]) errs.push({ pass: 2, kind: "undefined", label: L.operand, line: i + 1 });
+    });
+    return errs;
+  }
+
+  /* ---------------- the three sources ---------------- */
+  /* The countdown, in the clean 8-line form the stages narrate
+     line by line. It is the same program as the finished
+     assembler's Example 1 (which adds comment lines): the oracle
+     assembles this form to the identical symbol table and the
+     identical image, which baVerify() asserts at load. */
+  const BA_COUNT_SRC =
+    "        LDA count\nloop:   OUT\n        SUB one\n        JZ done\n        JMP loop\ndone:   HLT\ncount:  DB 3\none:    DB 1";
+  const BA_FINAL_SRC =
+    "        LDA a\n" +
+    "        ADD b\n" +
+    "        OUT\n" +
+    "        HLT\n" +
+    "a:      DB 9\n" +
+    "b:      DB 6";
+  const BA_ERR_SRC =
+    "        LDA total\n" +
+    "loop:   OUT\n" +
+    "        JMP loop\n" +
+    "loop:   HLT\n" +
+    "value:  DB 5";
+
+  const COUNT_P1 = baPass1(BA_COUNT_SRC), COUNT_P2 = baPass2(BA_COUNT_SRC);
+  const FINAL_P1 = baPass1(BA_FINAL_SRC), FINAL_P2 = baPass2(BA_FINAL_SRC);
+  const ERR_LIST = baErrors(BA_ERR_SRC);
+  const symE = (p1, name) => (p1.byName[name] || {}).addr;
+
+  function baVerify() {
+    const out = {};
+    const oracle = (window.__asmCheck && window.__asmCheck.assemble) ? window.__asmCheck.assemble : null;
+    out.countSymbols = COUNT_P1.symbols.length === 4 && symE(COUNT_P1, "loop") === 1 && symE(COUNT_P1, "done") === 5 && symE(COUNT_P1, "count") === 6 && symE(COUNT_P1, "one") === 7 && COUNT_P1.size === 8;
+    out.countImage = COUNT_P2.bytes.join(",") === [0x06, 0x30, 0x27, 0x65, 0x51, 0x40, 3, 1].join(",");
+    if (window.RE && window.RE.reSAP1) { const r = window.RE.reSAP1(COUNT_P2.bytes16.slice()); out.countRun = r.halted && r.A === 0 && r.out.join(",") === "3,2,1"; }
+    out.finalSymbols = FINAL_P1.symbols.length === 2 && symE(FINAL_P1, "a") === 4 && symE(FINAL_P1, "b") === 5 && FINAL_P1.size === 6;
+    out.finalImage = FINAL_P2.bytes.join(",") === [0x04, 0x15, 0x30, 0x40, 9, 6].join(",");
+    if (window.RE && window.RE.reSAP1) { const r2 = window.RE.reSAP1(FINAL_P2.bytes16.slice()); out.finalRun = r2.halted && r2.A === 15 && r2.out.join(",") === "15"; }
+    out.errPasses = ERR_LIST.some(e => e.kind === "duplicate" && e.pass === 1 && e.label === "loop") && ERR_LIST.some(e => e.kind === "undefined" && e.pass === 2 && e.label === "total");
+    if (oracle) {
+      const oc = oracle(BA_COUNT_SRC);
+      out.oracleCount = !!oc.bytes && oc.bytes.slice(0, 8).join(",") === COUNT_P2.bytes.join(",") &&
+        oc.symbols.length === COUNT_P1.symbols.length && oc.symbols.every(s => symE(COUNT_P1, s.name.toLowerCase()) === s.addr);
+      const ofin = oracle(BA_FINAL_SRC);
+      out.oracleFinal = !!ofin.bytes && ofin.bytes.slice(0, 6).join(",") === FINAL_P2.bytes.join(",") &&
+        ofin.symbols.every(s => symE(FINAL_P1, s.name.toLowerCase()) === s.addr);
+      const oe = oracle(BA_ERR_SRC);
+      out.oracleErrors = oe.errors.some(e => e.msg.indexOf("duplicate label") >= 0) && oe.errors.some(e => e.msg.indexOf("undefined label") >= 0);
+    }
+    out.pass = !!(out.countSymbols && out.countImage && out.countRun && out.finalSymbols && out.finalImage && out.finalRun && out.errPasses && out.oracleCount && out.oracleFinal && out.oracleErrors);
+    return out;
+  }
+  const BA_V = baVerify();
+
+  /* ---------------- the card ---------------- */
+  const orgHost = $E("sysAssembly") || $E("systemsView");
+  const sec = document.createElement("section");
+  sec.className = "card stage-card"; sec.id = "buildAsmCard"; sec.style.marginTop = "16px"; sec.style.marginBottom = "16px";
+  const srcListing = src => '<div class="asm-listing">' + src.split("\n").map((l, i) => '<div><span class="ln">' + (i + 1) + "</span>" + l.replace(/&/g, "&amp;").replace(/</g, "&lt;") + "</div>").join("") + "</div>";
+  sec.innerHTML =
+    "<h2>Build an assembler — two passes, a symbol table, and bytes you encode yourself</h2>" +
+    '<p class="what">Elsewhere on this site you <i>use</i> assemblers: the SAP-1 two-pass assembler turns mnemonics into bytes for you, and the MIPS lab assembles your programs behind the scenes. This lab removes the tool and hands you the job. You will build a two-pass assembler for the SAP-1 instruction set — <b>LDA, ADD, SUB, OUT, HLT, JMP, JZ, STA</b>, byte = opcode&lt;&lt;4 | operand, plus the <b>DB</b> data directive — in five stages: why one pass cannot work, the symbol table, the encoding, the errors, and one whole program of your own. Nothing here is taken on trust: <b>every stage is checked against the site\'s finished assembler</b>, which assembles the same sources and compares symbol tables and images. The worked example is the countdown program that assembler already hand-matches — image <span class="mono">06 30 27 65 51 40 03 01</span>, output <span class="mono">[3, 2, 1]</span> — so by Stage 3 you will have produced, byte by byte, an image you can also watch the finished tool produce.</p>' +
+    '<div class="share-row"><span style="font-size:13.5px">The finished tool, for comparison at any point:</span><button type="button" class="btn" id="baToAsm">The two-pass assembler, in daily use →</button></div>' +
+    '<div class="decimal-line" id="baProgress" aria-live="polite">Stages locked in: 0 of 5. Each stage below is a short sequence of predictions — a wrong pick is marked and you try again; a right pick locks that step in and cannot be undone, exactly like writing the table in ink.</div>' +
+
+    '<div class="ctrl-label" style="margin-top:16px">Stage 1 — Why two passes?</div>' +
+    '<p style="font-size:13.5px;margin:6px 0">The countdown source. Read the first line, then the jumps: <span class="mono">count</span>, <span class="mono">done</span> and <span class="mono">one</span> are all used <i>before</i> the lines that define them. That is a <b>forward reference</b>, and it is the whole reason this assembler needs two passes.</p>' +
+    srcListing(BA_COUNT_SRC) +
+    '<div id="baS1"></div>' +
+
+    '<div class="ctrl-label" style="margin-top:16px">Stage 2 — Pass 1: build the symbol table</div>' +
+    '<p style="font-size:13.5px;margin:6px 0">Pass 1 emits <b>no bytes</b>. It walks the source once with a <b>location counter</b> (LC) that starts at 0 and advances by 1 for every instruction or DB — on the SAP-1 everything is one byte — and each time it meets a label it records <b>label → current LC</b> in the symbol table. Work the walk: predict the LC and each binding, and the table fills in as you lock steps.</p>' +
+    '<div class="seq-state" id="baSymChips" style="margin-top:4px"><div class="seq-cell"><b>—</b>symbol table: empty so far</div></div>' +
+    '<div id="baS2"></div>' +
+
+    '<div class="ctrl-label" style="margin-top:16px">Stage 3 — Pass 2: encode the bytes</div>' +
+    '<p style="font-size:13.5px;margin:6px 0">Pass 1\'s finished table: ' + COUNT_P1.symbols.map(s => '<span class="mono">' + s.name + " = " + s.addr + "</span>").join(" · ") + '. Pass 2 walks the source again; now every operand label can be replaced by its address, and each byte is <b>opcode in the high nibble, operand in the low nibble</b> (LDA 0, ADD 1, SUB 2, OUT 3, HLT 4, JMP 5, JZ 6, STA 7; DB just lays its value down). Encode all eight bytes.</p>' +
+    '<div class="seq-state" id="baByteChips" style="margin-top:4px"><div class="seq-cell"><b>—</b>memory image: nothing encoded yet</div></div>' +
+    '<div id="baS3"></div>' +
+    '<div class="decimal-line" id="baS3Out" aria-live="polite" hidden></div>' +
+
+    '<div class="ctrl-label" style="margin-top:16px">Stage 4 — Error hunt: which pass catches it?</div>' +
+    '<p style="font-size:13.5px;margin:6px 0">This source has two faults planted in it: the label <span class="mono">loop</span> is defined twice, and <span class="mono">total</span> is used but never defined (the data label is <span class="mono">value</span>). The two faults are caught by <i>different</i> passes — predict which, and why.</p>' +
+    srcListing(BA_ERR_SRC) +
+    '<div id="baS4"></div>' +
+
+    '<div class="ctrl-label" style="margin-top:16px">Stage 5 — Final build: a whole program, yours</div>' +
+    '<p style="font-size:13.5px;margin:6px 0">A fresh program — it adds 9 and 6 and prints the sum. Assemble it completely: first its symbol table (pass 1), then every byte (pass 2). When the image is complete it is verified against the site\'s assembler, and you can run it here or send it to the SAP-1 capstone stepper as your own Custom program.</p>' +
+    srcListing(BA_FINAL_SRC) +
+    '<div class="seq-state" id="baFinSymChips" style="margin-top:4px"><div class="seq-cell"><b>—</b>final build, symbol table: empty so far</div></div>' +
+    '<div id="baS5a"></div>' +
+    '<div class="seq-state" id="baFinByteChips" style="margin-top:8px"><div class="seq-cell"><b>—</b>final build, memory image: nothing encoded yet</div></div>' +
+    '<div id="baS5b"></div>' +
+    '<div class="decimal-line" id="baFinalOut" aria-live="polite" hidden></div>' +
+    '<div class="share-row"><button type="button" class="btn primary" id="baRunFinal" disabled>Run my image here ▸</button>' +
+    '<button type="button" class="btn" id="baSendFinal" disabled>Send my image to the SAP-1 capstone stepper ▸</button></div>' +
+    '<p class="proj-teaches"><b>Teaches:</b> forward references, the location counter, symbol tables, opcode/operand packing, and the division of labour between the passes — pass 1 owns <i>where things are</i>, pass 2 owns <i>what the bytes are</i>, and each error belongs to the pass that first has the information to see it.</p>' +
+    '<div class="share-row"><span style="font-size:13.5px">Now watch the finished tool do in one click what you just did by hand:</span><button type="button" class="btn" id="baToAsm2">The two-pass assembler, in daily use →</button></div>';
+  if (orgHost) orgHost.appendChild(sec);
+  sec.querySelectorAll("#baToAsm, #baToAsm2").forEach(b => b.addEventListener("click", () => { if (!clickMenuKeyE("sap1-assembler")) jumpE("buildAsmCard"); }));
+
+  /* ---------------- stage bookkeeping ---------------- */
+  const baDoneStages = new Set();
+  function baStageDone(n) {
+    baDoneStages.add(n);
+    const el = sec.querySelector("#baProgress");
+    el.textContent = baDoneStages.size >= 5
+      ? "Stages locked in: 5 of 5 — the build is complete. You have written a two-pass assembler by hand: symbol table, encoding, error ownership, and a verified image of your own."
+      : "Stages locked in: " + baDoneStages.size + " of 5. Each stage below is a short sequence of predictions — a wrong pick is marked and you try again; a right pick locks that step in and cannot be undone, exactly like writing the table in ink.";
+  }
+
+  /* ---------------- sequential lock-in quiz engine ---------------- */
+  function seqQuiz(hostId, steps, opts) {
+    opts = opts || {};
+    const host = sec.querySelector("#" + hostId); if (!host) return;
+    host.innerHTML = '<div class="lab-check"><span class="lab-check-q"></span><span class="ba-opts" style="display:flex;gap:6px;flex-wrap:wrap"></span><span class="lab-check-fb" aria-live="polite"></span></div>' +
+      '<div class="share-row"><button type="button" class="btn ba-next" hidden>Next step ▸</button><span class="ba-prog" style="font-size:12.5px;color:var(--muted)"></span></div>';
+    const qEl = host.querySelector(".lab-check-q"), optsEl = host.querySelector(".ba-opts"), fbEl = host.querySelector(".lab-check-fb"),
+      nextBtn = host.querySelector(".ba-next"), progEl = host.querySelector(".ba-prog");
+    const chipsHost = opts.chipsId ? sec.querySelector("#" + opts.chipsId) : null;
+    let idx = 0; const chips = [];
+    function renderChips() {
+      if (!chipsHost) return;
+      chipsHost.innerHTML = chips.length ? chips.join("") : chipsHost.innerHTML;
+    }
+    function render() {
+      const st = steps[idx];
+      qEl.textContent = "Step " + (idx + 1) + " of " + steps.length + " — " + st.q;
+      progEl.textContent = idx + " of " + steps.length + " steps locked in";
+      fbEl.textContent = "";
+      nextBtn.hidden = true;
+      optsEl.innerHTML = "";
+      st.options.forEach((lab, i) => {
+        const b = document.createElement("button");
+        b.type = "button"; b.className = "btn"; b.textContent = lab;
+        b.addEventListener("click", () => {
+          if (i === st.correct) {
+            fbSetE(fbEl, true, st.fbOk);
+            optsEl.querySelectorAll("button").forEach(x => { x.disabled = true; });
+            if (st.chip) { chips.push(st.chip); renderChips(); }
+            if (idx >= steps.length - 1) {
+              progEl.textContent = steps.length + " of " + steps.length + " steps locked in — stage complete ✓";
+              if (opts.onDone) opts.onDone();
+            } else nextBtn.hidden = false;
+          } else fbSetE(fbEl, false, st.fbBad);
+        });
+        optsEl.appendChild(b);
+      });
+    }
+    nextBtn.addEventListener("click", () => { if (idx < steps.length - 1) { idx++; render(); } });
+    render();
+  }
+  const symChip = s => '<div class="seq-cell one"><b>' + s.name + " = " + s.addr + '</b>defined on line ' + s.line + "</div>";
+  const byteChip = l => '<div class="seq-cell one"><b>' + hex2E(l.byte) + '</b>mem[' + l.addr + "] · " + l.text + "</div>";
+  function byteOptions(byte, seed) {
+    const cand = [];
+    [byte, ((byte & 15) << 4) | (byte >> 4), (byte + 16) & 255, (byte - 1) & 255, (byte + 1) & 255].forEach(v => { if (cand.indexOf(v) < 0) cand.push(v); });
+    const trio = cand.slice(0, 3);
+    const pos = seed % 3;
+    const out = trio.slice(); out.splice(0, 1); out.splice(pos, 0, byte);
+    return { labels: out.map(hex2E), correct: pos };
+  }
+
+  /* ---------------- Stage 1 ---------------- */
+  seqQuiz("baS1", [
+    { q: "the first line is LDA count, and count is not defined until line 7. A one-pass assembler, reading line 1 for the first and only time, can emit which byte for it?",
+      options: ["0x06 — an assembler can always look ahead", "No byte yet — count's address does not exist until the whole source has been scanned", "0x00 — an undefined label defaults to address 0"], correct: 1,
+      fbOk: "Right — that is the forward-reference problem in one line. On its only read of line 1, a one-pass assembler has seen no definition of count, so the operand nibble cannot be filled. Guessing 0 would silently assemble a program that loads mem[0] — itself.",
+      fbBad: "Not that — on line 1 the assembler has not yet read line 7, where count is defined. It cannot look ahead (that second look is precisely what a second pass is), and defaulting to 0 would emit a wrong byte silently." },
+    { q: "so a first pass that emits nothing can still be doing essential work. What does pass 1 produce?",
+      options: ["The symbol table — every label paired with the address the location counter had reached when the label was seen", "A list of the program's errors, and nothing else", "The high nibble of every byte; pass 2 adds the low nibbles"], correct: 0,
+      fbOk: "Right — pass 1's only product is knowledge: where every label lives. With that table complete, pass 2 can resolve any reference, forward or backward, the moment it is met.",
+      fbBad: "Not that — pass 1's product is the symbol table: label → address, gathered by counting bytes from the top. Errors are a by-product (Stage 4); the nibbles are pass 2's job entirely." }
+  ], { onDone: () => baStageDone(1) });
+
+  /* ---------------- Stage 2 ---------------- */
+  seqQuiz("baS2", [
+    { q: "before any line is read, the location counter starts at…?",
+      options: ["0", "1", "16 — counting down the free memory"], correct: 0,
+      fbOk: "Right — the LC starts at 0, the first byte of the SAP-1's memory, and every instruction or DB moves it on by exactly one.",
+      fbBad: "Not that — the LC starts at 0. Addresses on this machine run 0–15, and the first line of the program lands at address 0." },
+    { q: "line 2 is loop: OUT — one byte has been consumed, so the LC stands at 1 when the label is met. loop binds to…?",
+      options: ["0 — the start of the program", "1", "2 — the next free address"], correct: 1,
+      fbOk: "Right — a label binds to the LC at its own line, not the next one: loop = 1, the address of the OUT itself. That is the address JMP loop must jump back to.",
+      fbBad: "Not that address — a label takes the LC of the line it stands on. One byte (LDA) precedes it, so the LC is 1 and loop = 1.", chip: symChip(COUNT_P1.byName.loop) },
+    { q: "lines 3–5 (SUB, JZ, JMP) consume three more bytes and define no labels. When line 6, done: HLT, is reached, the LC is…?",
+      options: ["4", "5", "6"], correct: 1,
+      fbOk: "Right — 1 (LDA) + 1 (OUT) + 3 (SUB, JZ, JMP) = 5 bytes consumed, so done binds to 5.",
+      fbBad: "Not that count — add the bytes: LDA, OUT, SUB, JZ, JMP is five one-byte lines before done, so the LC stands at 5 when done is met.", chip: symChip(COUNT_P1.byName.done) },
+    { q: "line 7 is count: DB 3. A DB is not an instruction — does it still consume an address?",
+      options: ["No — data lives outside the address space", "Yes — DB lays one byte into memory, so count binds to 6", "Yes, but it consumes two bytes, so count binds to 7"], correct: 1,
+      fbOk: "Right — DB is an assembler directive, not an instruction, but the byte it lays down occupies a real address that LDA count must name: count = 6.",
+      fbBad: "Not that — DB emits exactly one byte into the memory image, at the current LC. HLT took address 5, so count binds to 6.", chip: symChip(COUNT_P1.byName.count) },
+    { q: "line 8 is one: DB 1, the last line. one binds to…?",
+      options: ["6 — sharing count's byte", "7", "8 — one past the end"], correct: 1,
+      fbOk: "Right — one = 7. The table is complete: loop 1, done 5, count 6, one 7 — and it matches the finished assembler's own table for this source exactly.",
+      fbBad: "Not that address — count's DB took 6, so the next byte is 7: one = 7. Address 8 is where a ninth line would go; there is none.", chip: symChip(COUNT_P1.byName.one) },
+    { q: "pass 1 is finished. How many bytes does the whole program occupy?",
+      options: ["7 — the last label's address", "8", "16 — the whole memory, always"], correct: 1,
+      fbOk: "Right — eight one-byte lines, LC ending at 8. Pass 1 now hands pass 2 a complete table, and no forward reference can surprise it.",
+      fbBad: "Not that size — count the lines: 6 instructions + 2 DBs = 8 bytes, addresses 0–7. The other 8 bytes of the 16-byte memory stay zero-filled." }
+  ], { chipsId: "baSymChips", onDone: () => baStageDone(2) });
+
+  /* ---------------- Stage 3 ---------------- */
+  const s3Steps = COUNT_P2.listing.map((l, i) => {
+    const bo = byteOptions(l.byte, i + 1);
+    return { q: "address " + l.addr + " — " + l.text + ". Which byte does pass 2 emit?",
+      options: bo.labels, correct: bo.correct,
+      fbOk: "Right — " + (l.text.indexOf("DB") === 0 ? "DB lays its value down unchanged: " + hex2E(l.byte) + "." : l.text + " packs to " + hex2E(l.byte) + ": opcode in the high nibble, resolved operand in the low."),
+      fbBad: "Not that byte — rebuild it: the opcode number goes in the HIGH nibble and the operand (from the symbol table, if it was a label) in the low nibble. " + l.text + " gives " + hex2E(l.byte) + ".",
+      chip: byteChip(l) };
+  });
+  seqQuiz("baS3", s3Steps, { chipsId: "baByteChips", onDone: () => {
+    baStageDone(3);
+    const out = sec.querySelector("#baS3Out");
+    const oracle = window.__asmCheck && window.__asmCheck.assemble ? window.__asmCheck.assemble(BA_COUNT_SRC) : null;
+    const match = oracle && oracle.bytes && oracle.bytes.slice(0, 8).join(",") === COUNT_P2.bytes.join(",");
+    let runTxt = "";
+    if (window.RE && window.RE.reSAP1) { const r = window.RE.reSAP1(COUNT_P2.bytes16.slice()); runTxt = " Run on the SAP-1 engine it halts with output [" + r.out.join(", ") + "] and A = " + r.A + " — the countdown, exactly as the hand-assembled capstone program runs it."; }
+    out.hidden = false;
+    out.innerHTML = "<b>Image complete:</b> " + COUNT_P2.bytes.map(hex2E).join(" ") + " — the countdown image, produced by your two passes." + (match ? " The site's finished assembler, given the same source, emits the identical eight bytes and the identical symbol table." : "") + runTxt;
+  } });
+
+  /* ---------------- Stage 4 ---------------- */
+  seqQuiz("baS4", [
+    { q: "loop is defined on line 2 and again on line 4. Which pass catches the duplicate, and why?",
+      options: ["Pass 1 — building the symbol table, the second loop collides with the entry already recorded there", "Pass 2 — only when JMP loop is encoded does the clash appear", "Neither — the second definition silently replaces the first"], correct: 0,
+      fbOk: "Right — a duplicate is visible the moment the table is written: pass 1 tries to record loop a second time and finds the name taken. No byte has been emitted yet, and none will be.",
+      fbBad: "Not that pass — the collision happens while the symbol table is being built, in pass 1: loop is already recorded when line 4 tries to record it again. Pass 2 never runs on a source whose table failed to build." },
+    { q: "total is loaded on line 1 but defined nowhere. Which pass catches the undefined label, and why?",
+      options: ["Pass 1 — it notices the missing definition while scanning", "Pass 2 — resolving LDA's operand, it looks total up in the finished symbol table and finds nothing", "It is never caught — the byte goes out with operand 0"], correct: 1,
+      fbOk: "Right — pass 1 cannot know total is missing: a definition might always appear on a later line (that is the forward-reference lesson of Stage 1). Only when pass 2 looks the name up and the completed table has no entry is the fault certain.",
+      fbBad: "Not that pass — during pass 1 an unseen label is not yet an error: it might be defined further down, like count was. The fault is provable only in pass 2, when the lookup against the finished table comes back empty." }
+  ], { onDone: () => baStageDone(4) });
+
+  /* ---------------- Stage 5 ---------------- */
+  seqQuiz("baS5a", [
+    { q: "pass 1 on the final build: four instruction bytes precede the data. a binds to…?",
+      options: ["0", "4", "5"], correct: 1,
+      fbOk: "Right — LDA, ADD, OUT, HLT occupy 0–3, so a = 4.",
+      fbBad: "Not that address — four one-byte instructions come first (addresses 0–3), so the first DB lands at 4: a = 4.", chip: symChip(FINAL_P1.byName.a) },
+    { q: "and b, the second DB, binds to…?",
+      options: ["4 — the same byte as a", "5", "6 — one past the program"], correct: 1,
+      fbOk: "Right — b = 5, and the program occupies 6 bytes. Table complete — now encode it.",
+      fbBad: "Not that address — a's DB took 4, so b = 5. Address 6 is the first free byte after the program.", chip: symChip(FINAL_P1.byName.b) }
+  ], { chipsId: "baFinSymChips", onDone: () => {} });
+  const s5Steps = FINAL_P2.listing.map((l, i) => {
+    const bo = byteOptions(l.byte, i + 2);
+    return { q: "address " + l.addr + " — " + l.text + ". Which byte?",
+      options: bo.labels, correct: bo.correct,
+      fbOk: "Right — " + l.text + " → " + hex2E(l.byte) + ".",
+      fbBad: "Not that byte — opcode high, operand low, labels resolved from your Stage 5 table (a = 4, b = 5): " + l.text + " gives " + hex2E(l.byte) + ".",
+      chip: byteChip(l) };
+  });
+  seqQuiz("baS5b", s5Steps, { chipsId: "baFinByteChips", onDone: () => {
+    baStageDone(5);
+    const out = sec.querySelector("#baFinalOut");
+    const oracle = window.__asmCheck && window.__asmCheck.assemble ? window.__asmCheck.assemble(BA_FINAL_SRC) : null;
+    const match = oracle && oracle.bytes && oracle.bytes.slice(0, 6).join(",") === FINAL_P2.bytes.join(",") &&
+      oracle.symbols.every(s => symE(FINAL_P1, s.name.toLowerCase()) === s.addr);
+    out.hidden = false;
+    out.innerHTML = "<b>Your image:</b> " + FINAL_P2.bytes.map(hex2E).join(" ") + "." + (match
+      ? " <b>Verified against the site's assembler:</b> given the same source it produces the identical symbol table (a = 4, b = 5) and the identical image — your hand build and the finished tool agree byte for byte."
+      : "") + " Run it here, or send it to the capstone stepper and step it there.";
+    sec.querySelector("#baRunFinal").disabled = false;
+    sec.querySelector("#baSendFinal").disabled = false;
+  } });
+  sec.querySelector("#baRunFinal").addEventListener("click", () => {
+    const out = sec.querySelector("#baFinalOut");
+    if (!(window.RE && window.RE.reSAP1)) { out.textContent = "The SAP-1 engine did not initialise on this page load, so the run is unavailable — the image above is still verified against the assembler."; return; }
+    const r = window.RE.reSAP1(FINAL_P2.bytes16.slice());
+    out.hidden = false;
+    out.innerHTML = r.halted
+      ? "<b>Ran to HLT</b> in " + r.steps + " steps on the SAP-1 engine. Output: <b>[" + r.out.join(", ") + "]</b> · final A = <b>" + r.A + "</b> — 9 + 6 = 15, computed by bytes you assembled yourself."
+      : "<b>Did not halt</b> within " + r.steps + " steps. Output so far: [" + r.out.join(", ") + "], A = " + r.A + ".";
+  });
+  sec.querySelector("#baSendFinal").addEventListener("click", () => {
+    const out = sec.querySelector("#baFinalOut");
+    if (typeof window.__sap1LoadCustom !== "function") { out.hidden = false; out.textContent = "The capstone stepper did not initialise on this page load, so the send is unavailable — the run above still executes your exact bytes on the same engine."; return; }
+    const srcText = FINAL_P2.listing.map(l => l.text).join(" · ") + " — assembled by hand in the Build an assembler lab and sent here; step it with this stepper's own controls";
+    window.__sap1LoadCustom(FINAL_P2.bytes16.slice(), srcText);
+    out.hidden = false;
+    out.innerHTML = "<b>Sent.</b> The SAP-1 capstone stepper now holds your exact 16-byte image as its Custom program, loaded and reset — opening it. (One caveat, from that widget's own design: its interrupt handler is installed at addresses 13–14 in its live memory; this program's data sits at 4–5, well clear of it.)";
+    if (!clickMenuKeyE("lab-arch-10")) jumpE("buildAsmCard");
+  });
+
+  /* ---------------- cross-link on the finished assembler's card ----------------
+     The one permitted change to an existing activity: a line on
+     the SAP-1 assembler card pointing here. */
+  const asmCardEl = $E("asmCard");
+  if (asmCardEl && !asmCardEl.querySelector("#asmToBuild")) {
+    const row = document.createElement("div");
+    row.className = "share-row";
+    const span = document.createElement("span");
+    span.style.fontSize = "13.5px";
+    span.innerHTML = "This tool runs the two passes for you. To build the assembler yourself — symbol table, encoding, and all:";
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "btn"; b.id = "asmToBuild";
+    b.textContent = "Build an assembler lab →";
+    b.addEventListener("click", () => { if (!clickMenuKeyE("lab-build-assembler")) jumpE("asmCard"); });
+    row.appendChild(span); row.appendChild(b);
+    asmCardEl.appendChild(row);
+  }
+
+  /* ---------------- verification handles + self-tests ---------------- */
+  window.__buildAsmCheck = { pass1: baPass1, pass2: baPass2, errors: baErrors, verify: baVerify,
+    countdown: { symbols: COUNT_P1.symbols, bytes: COUNT_P2.bytes },
+    final: { symbols: FINAL_P1.symbols, bytes: FINAL_P2.bytes }, errorList: ERR_LIST };
+  try {
+    window.__roundAESelfTest = { buildAsm: BA_V };
+    if (!BA_V.pass && window.console) console.warn("[Round AE self-test] failures:", BA_V);
+  } catch (e) { window.__roundAESelfTest = { error: String(e && e.message || e) }; }
+
+  /* ---------------- MENU REGISTRATION + COUNT REBUILD ---------------- */
+  function addMenuItemE(groupName, afterKey, spec) {
+    const list = $E("menuList"); if (!list) return false;
+    if (list.querySelector('[data-key="' + spec.key + '"]')) return false;
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "menu-item"; b.dataset.key = spec.key;
+    b.dataset.search = (spec.label + " " + spec.hint + " " + spec.search).toLowerCase();
+    if (spec.level) b.dataset.uxlevel = spec.level;
+    b.innerHTML = '<span class="mi-dot" aria-hidden="true"></span><span class="mi-label"></span><small></small>';
+    b.querySelector(".mi-label").textContent = spec.label;
+    b.querySelector("small").textContent = spec.hint;
+    b.addEventListener("click", () => { const p = $E("menuPanel"); if (p) p.hidden = true; const mb = $E("menuBtn"); if (mb) mb.setAttribute("aria-expanded", "false"); spec.go(); });
+    if (afterKey) {
+      const anchor = list.querySelector('[data-key="' + afterKey + '"]');
+      if (anchor) { anchor.parentNode.insertBefore(b, anchor.nextSibling); return true; }
+    }
+    let sib = null, inGroup = false;
+    Array.prototype.slice.call(list.children).forEach(el => {
+      if (el.classList.contains("menu-group")) inGroup = (el.dataset.group || "").trim() === groupName;
+      else if (inGroup && el.classList.contains("menu-item")) sib = el;
+    });
+    if (sib) sib.parentNode.insertBefore(b, sib.nextSibling); else list.appendChild(b);
+    return true;
+  }
+  addMenuItemE("Computer Organization", "lab-memtiming", {
+    key: "lab-build-assembler", label: "Build an assembler lab — two passes, symbol table, machine code",
+    hint: "Construct a two-pass assembler for the SAP-1 yourself: predict the location counter, build the symbol table, encode every byte, and finish with a verified program of your own",
+    search: "assembler two-pass two pass build an assembler build your own assembler symbol table pass 1 pass 2 machine code location counter forward reference label encoding opcode operand sap-1 assembly construct simulator lab",
+    level: "intermediate",
+    go: () => { setTopArea("systems"); syncRail("systems"); const pb = document.querySelector('#sysPicker [data-sys="assembly"]'); if (pb) pb.click(); jumpE("buildAsmCard"); }
+  });
+  (function rebuildCountsE() {
+    const RJ = window.__uxRoundJ; if (!RJ) return;
+    const groups = RJ.menuGroups(); const counts = {}; let total = 0;
+    groups.forEach(g => {
+      counts[g.name] = g.items.length; total += g.items.length;
+      const c = g.header.querySelector(".mi-count"); if (c) c.textContent = g.items.length;
+    });
+    window.LAB_MENU = { groups: groups.map(g => ({ name: g.name, items: g.items.map(b => { const l = b.querySelector(".mi-label"); return l ? l.textContent : ""; }) })), count: total };
+    window.LAB_MODULES = { modules: groups.map(g => ({ name: g.name, count: g.items.length })), total };
+    RJ.buildRailAndList(counts);
+    RJ.buildGallery();
+    ["boards", "arch", "os", "org"].forEach(id => {
+      const h = document.querySelector("#module-" + id + " .mh-count");
+      if (!h) return;
+      const name = { boards: "Boards, Modulation & Projects", arch: "Computer Architecture", os: "Operating Systems", org: "Computer Organization" }[id];
+      if (counts[name]) h.textContent = counts[name] + " items";
+    });
+    window.__countsAE = { total, counts };
+  })();
+})();
+</script>
