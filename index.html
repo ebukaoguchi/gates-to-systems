@@ -26521,3 +26521,687 @@ html.text-large .bb-panel-note{font-size:15.5px}
   })();
 })();
 </script>
+<script>
+"use strict";
+/* ================================================================
+   ROUND AF — three new labs, each graded from its own model:
+   ARCHITECTURE: (1) Booth's algorithm — signed multiplication by
+   recoding, stepped on M = 3, Q = −3; the model is verified
+   against ordinary multiplication for all 256 pairs of 4-bit
+   signed operands, and the naive unsigned shift-and-add result
+   on the same bits is shown failing.
+   ORGANIZATION: (2) SRAM cell & DRAM refresh — a 6T SRAM cell
+   whose state comes from its cross-coupled-inverter model, side
+   by side with a 1T1C DRAM cell whose charge decays over a time
+   slider until a refresh restores it; refresh cost counted in
+   cycles stolen, cross-linked both ways with the memory timing
+   & wait states lab. (3) Extend the SAP-1 instruction set —
+   after the build-an-assembler lab: pick one of three preset
+   designs for the free opcode 9, specify its execute rows from
+   the datapath's existing control operations, have the sequence
+   validated, then assemble a program using it with the site's
+   assembler machinery (the new mnemonic is lowered to its byte
+   and the finished assembler does the rest) and run it on an
+   extended engine whose base opcodes are reSAP1's own semantics.
+   Small fixed examples, fully checkable. All start paused.
+   ================================================================ */
+(function roundAF() {
+  const $F = id => document.getElementById(id);
+  function jumpF(id) { const el = id && $F(id); if (el) setTimeout(() => el.scrollIntoView({ behavior: "smooth", block: "start" }), 60); }
+  function clickMenuKeyF(key) { const it = document.querySelector('#menuList .menu-item[data-key="' + key + '"]'); if (it) { it.click(); return true; } return false; }
+  function fbSetF(el, ok, msg) { if (!el) return; el.textContent = (ok ? "✓ " : "✗ ") + msg; el.style.color = ok ? "var(--green)" : "var(--red)"; }
+  function optBtnsF(host, labels, onPick) {
+    host.innerHTML = "";
+    labels.forEach((lab, i) => { const b = document.createElement("button"); b.type = "button"; b.className = "btn"; b.textContent = lab; b.addEventListener("click", () => onPick(i, b)); host.appendChild(b); });
+  }
+  function mkSectionF(id, title, what) {
+    const sec = document.createElement("section");
+    sec.className = "card stage-card"; sec.id = id; sec.style.marginTop = "16px"; sec.style.marginBottom = "16px";
+    sec.innerHTML = "<h2>" + title + "</h2><p class=\"what\">" + what + "</p>";
+    return sec;
+  }
+  function checkBlockF(sec, prefix) {
+    const d = document.createElement("div");
+    d.innerHTML = '<div class="lab-check"><span class="lab-check-q" id="' + prefix + 'Q"></span><span id="' + prefix + 'Opts" style="display:flex;gap:6px;flex-wrap:wrap"></span><span class="lab-check-fb" id="' + prefix + 'Fb" aria-live="polite"></span></div>' +
+      '<div class="share-row"><button type="button" class="btn" id="' + prefix + 'NewQ">New question</button></div>';
+    sec.appendChild(d);
+    return d;
+  }
+  const orgHost = $F("sysAssembly") || $F("systemsView");
+  const archHost = $F("sysArch") || $F("systemsView");
+  const afStyle = document.createElement("style");
+  afStyle.textContent = ".af-box{fill:var(--panel2);stroke:var(--line2);stroke-width:1.6}.af-wire{stroke:var(--ink);stroke-width:1.6}.af-wire.one{stroke:var(--teal);stroke-width:2.4}.af-on{fill:var(--teal)}.af-off{fill:var(--panel2);stroke:var(--line2);stroke-width:1.4}";
+  document.head.appendChild(afStyle);
+  const bin4 = v => ("0000" + (v & 15).toString(2)).slice(-4);
+  const bin5s = v => { const u = v & 31; return ("00000" + u.toString(2)).slice(-5); };
+  const hex2F = v => "0x" + (v & 255).toString(16).toUpperCase().padStart(2, "0");
+
+  /* ================================================================
+     ARCH — BOOTH'S ALGORITHM (signed multiplication by recoding)
+     Registers: A is a 5-bit two's-complement accumulator (the
+     extra bit is what lets −M exist when M = −8), Q the 4-bit
+     multiplier, Q₋₁ the bit shifted out last time. Each cycle:
+     examine (Q₀, Q₋₁): 01 → A += M, 10 → A −= M, 00/11 → nothing;
+     then arithmetic-shift the whole A:Q:Q₋₁ register right.
+     ================================================================ */
+  const BOOTH_M = 3, BOOTH_QS = -3, BOOTH_QBITS = BOOTH_QS & 15; /* 1101 */
+  function boothRun(M, Qsigned) {
+    let A = 0, Q = Qsigned & 15, q1 = 0;
+    const steps = [{ phase: "init", pair: null, op: "—", aAfter: 0, A: 0, Q, q1: 0 }];
+    for (let i = 0; i < 4; i++) {
+      const pair = ((Q & 1) << 1) | q1;
+      let op = "shift only";
+      if (pair === 1) { A += M; op = "add M"; }
+      else if (pair === 2) { A -= M; op = "subtract M"; }
+      const aAfter = A;
+      let C = (((A & 31) << 5) | (Q << 1) | q1);
+      let sC = C >= 512 ? C - 1024 : C;
+      let C2 = Math.floor(sC / 2); if (C2 < 0) C2 += 1024;
+      q1 = C2 & 1; Q = (C2 >> 1) & 15; A = (C2 >> 5) & 31; if (A >= 16) A -= 32;
+      steps.push({ phase: "cycle " + (i + 1), pair, op, aAfter, A, Q, q1 });
+    }
+    const prodBits = ((A & 15) << 4) | Q;
+    const prod = prodBits >= 128 ? prodBits - 256 : prodBits;
+    return { steps, prod, prodBits, A, Q };
+  }
+  function boothRecode(Qsigned) {
+    const bits = [0, 1, 2, 3].map(i => (Qsigned >> i) & 1);
+    let prev = 0; const digs = bits.map(b => { const d = prev - b; prev = b; return d; });
+    return digs; /* LSB first: each in {−1, 0, +1} */
+  }
+  function boothNaive(M, Qsigned) {
+    /* unsigned shift-and-add on the raw bit patterns: M treated as
+       its unsigned pattern too, exactly what a multiplier that
+       knows no sign would produce from the same wires */
+    const mu = M & 15, qu = Qsigned & 15;
+    return mu * qu;
+  }
+  function boothVerify() {
+    let allPairs = true;
+    for (let m = -8; m <= 7 && allPairs; m++) for (let q = -8; q <= 7; q++) {
+      if (boothRun(m, q).prod !== m * q) { allPairs = false; break; }
+    }
+    const ex = boothRun(BOOTH_M, BOOTH_QS);
+    const digs = boothRecode(BOOTH_QS);
+    const recodeOk = digs.join(",") === "-1,1,-1,0" && digs.reduce((s, d, i) => s + d * (1 << i), 0) === BOOTH_QS;
+    const opsOk = ex.steps.slice(1).map(s => s.op).join("|") === "subtract M|add M|subtract M|shift only";
+    return { allPairs, recodeOk, opsOk, prod: ex.prod, naive: boothNaive(BOOTH_M, BOOTH_QS),
+      pass: !!(allPairs && recodeOk && opsOk && ex.prod === -9 && boothNaive(BOOTH_M, BOOTH_QS) === 39) };
+  }
+  const BOOTH_V = boothVerify();
+  const BOOTH_R = boothRun(BOOTH_M, BOOTH_QS);
+  const BOOTH_DIGS = boothRecode(BOOTH_QS);
+  const boothSec = mkSectionF("boothCard", "Booth's algorithm — signed multiplication by recoding",
+    "The gate-level multiplier on this site multiplies <i>unsigned</i> bit patterns. Feed it a negative operand and it cheerfully computes the wrong answer, because two's-complement bits are not a magnitude. <b>Booth's algorithm</b> fixes the machine, not the data: it recodes the multiplier's bits into digits <b>0 / +1 / −1</b> — scanning pairs (Q<sub>i</sub>, Q<sub>i−1</sub>), where a 01 pair means <i>add M</i>, a 10 pair means <i>subtract M</i>, and 00 or 11 mean <i>just shift</i> — then works in the register triple <b>A : Q : Q<sub>−1</sub></b> with <b>arithmetic</b> right shifts, so the sign propagates instead of being lost. The worked example is small and has the awkward case built in: <b>M = 3 (0011)</b>, multiplier <b>Q = −3 (1101)</b>. The accumulator A is carried one bit wide (5 bits) — that extra bit is what lets −M exist when M = −8. Step the four cycles, then compare with what the naive unsigned machine makes of the same wires.");
+  boothSec.innerHTML +=
+    '<div class="ctrl-label">The recoding — Q = 1101 read as Booth digits (least significant first)</div>' +
+    '<div class="seq-state" id="boothRecode" style="margin-top:4px"></div>' +
+    '<div class="seq-state" id="boothRegs" style="margin-top:10px"></div>' +
+    '<div class="share-row"><button type="button" class="btn primary" id="boothStep">Step cycle ▸</button><button type="button" class="btn" id="boothReset">Reset</button></div>' +
+    '<div class="decimal-line" id="boothMsg" aria-live="polite"></div>' +
+    '<div class="decimal-line" id="boothFinal" aria-live="polite" hidden></div>' +
+    '<p class="proj-teaches"><b>Teaches:</b> Booth recoding (runs of 1s collapse to one subtraction and one addition), why the shift must be arithmetic, the extra accumulator bit, and the precise sense in which an unsigned multiplier is not "almost right" on signed data — on these bits it is wrong by 48.</p>';
+  if (archHost) archHost.appendChild(boothSec);
+  boothSec.querySelector("#boothRecode").innerHTML = BOOTH_DIGS.map((d, i) =>
+    '<div class="seq-cell"><b>' + (d > 0 ? "+1" : d < 0 ? "−1" : "0") + "</b>digit " + i + " — pair (" + ((BOOTH_QBITS >> i) & 1) + "," + (i === 0 ? 0 : (BOOTH_QBITS >> (i - 1)) & 1) + ") · worth " + (d * BOOTH_M * (1 << i)) + "</div>").join("") +
+    '<div class="seq-cell one"><b>' + BOOTH_DIGS.map((d, i) => d * (1 << i)).join(" + ").replace(/\+ -/g, "− ") + " = " + BOOTH_QS + "</b>the digits sum back to the multiplier</div>";
+  const booth = { i: 0 };
+  function boothRender() {
+    const st = BOOTH_R.steps[booth.i];
+    boothSec.querySelector("#boothRegs").innerHTML =
+      '<div class="seq-cell one"><b>' + bin5s(st.A) + " (" + st.A + ')</b>A — accumulator (5 bits)</div>' +
+      '<div class="seq-cell"><b>' + bin4(st.Q) + "</b>Q — multiplier, shifting out</div>" +
+      '<div class="seq-cell"><b>' + st.q1 + "</b>Q₋₁ — the bit just shifted out</div>" +
+      '<div class="seq-cell"><b>' + (st.pair === null ? "—" : bin4(st.pair).slice(2)) + "</b>(Q₀, Q₋₁) examined</div>" +
+      '<div class="seq-cell"><b>cycle ' + booth.i + " / 4</b>progress</div>";
+    const fin = boothSec.querySelector("#boothFinal");
+    if (booth.i === 0) {
+      boothSec.querySelector("#boothMsg").textContent = "Reset. A = 0, Q holds the multiplier 1101, Q₋₁ = 0. Each cycle: read the pair (Q₀, Q₋₁), add or subtract M if it says so, then arithmetic-shift A:Q:Q₋₁ right as one register.";
+      fin.hidden = true;
+    } else {
+      const prev = BOOTH_R.steps[booth.i - 1];
+      boothSec.querySelector("#boothMsg").textContent = "Cycle " + booth.i + ": pair (Q₀, Q₋₁) = (" + (prev.Q & 1) + ", " + prev.q1 + ") → " +
+        (st.op === "shift only" ? "no add or subtract — the pair is 00 or 11, a run continuing." : st.op + ": A becomes " + st.aAfter + " (" + bin5s(st.aAfter) + ").") +
+        " Then the arithmetic shift: A:Q:Q₋₁ moves right, A's sign bit replicated — A = " + st.A + ", Q = " + bin4(st.Q) + ", Q₋₁ = " + st.q1 + ".";
+      if (booth.i >= 4) {
+        fin.hidden = false;
+        fin.innerHTML = "<b>Done.</b> A:Q reads " + bin4(BOOTH_R.A) + " " + bin4(BOOTH_R.Q) + " = " + hex2F(BOOTH_R.prodBits) + " as an 8-bit two's-complement value: <b>" + BOOTH_R.prod + "</b> — and 3 × −3 is indeed −9. The naive unsigned shift-and-add on the same wires computes 0011 × 1101 as <b>3 × 13 = " + BOOTH_V.naive + "</b>: it read the multiplier's pattern as thirteen, not minus three, and no amount of shifting fixes a wrong operand. Booth never reinterprets the bits — it recodes them.";
+      } else fin.hidden = true;
+    }
+    boothSec.querySelector("#boothStep").disabled = booth.i >= 4;
+  }
+  boothSec.querySelector("#boothStep").addEventListener("click", () => { if (booth.i < 4) booth.i++; boothRender(); });
+  boothSec.querySelector("#boothReset").addEventListener("click", () => { booth.i = 0; boothRender(); });
+  checkBlockF(boothSec, "booth");
+  let boothQn = 0;
+  function boothQuestion() {
+    const fb = boothSec.querySelector("#boothFb"), host = boothSec.querySelector("#boothOpts");
+    fb.textContent = "";
+    const kind = boothQn % 3;
+    if (kind === 0) {
+      boothSec.querySelector("#boothQ").textContent = "Predict, then check: at the start (A = 0, Q = 1101, Q₋₁ = 0), the first pair examined is (Q₀, Q₋₁) = (1, 0). What does cycle 1 do before shifting?";
+      optBtnsF(host, ["Add M — A becomes 3", "Subtract M — A becomes −3", "Nothing — shift only"], i => fbSetF(fb, i === 1, i === 1
+        ? "Right — pair 10 is the start of a run of 1s, and Booth answers it with a subtraction: A = 0 − 3 = −3, then the arithmetic shift carries the sign down. The matching +M comes later, at the pair that ends the run."
+        : "Not that operation — the pair (1, 0) is a 10 pair: the low end of a run of 1s in the multiplier. Booth's table says 10 → subtract M, so A becomes −3 before the shift."));
+      window.__boothQuestion = { kind: "first-op", expected: "subtract M" };
+    } else if (kind === 1) {
+      boothSec.querySelector("#boothQ").textContent = "Predict, then check: after all four cycles, A:Q holds the product of 3 × −3. What is it?";
+      optBtnsF(host, ["−9", "9", "39 — the same bits, unsigned"], i => fbSetF(fb, i === 0, i === 0
+        ? "Right — −9, held as 1111 0111. The recoding −1, +1, −1, 0 weights M as −3 + 6 − 12 = −9; the register arithmetic lands in the same place."
+        : "Not that value — run the recoding: digits −1, +1, −1, 0 give −1×3 + 2×3 − 4×3 = −9. 39 is the unsigned machine's answer on these wires (3 × 13), and +9 is what losing the sign in the shifts would give."));
+      window.__boothQuestion = { kind: "product", expected: BOOTH_R.prod };
+    } else {
+      boothSec.querySelector("#boothQ").textContent = "Predict, then check: in cycle 4 the pair is (1, 1). What happens, and why does Booth bother examining pairs at all?";
+      optBtnsF(host, ["Shift only — 11 means a run of 1s is continuing, already paid for", "Add M — every 1 bit costs an addition", "Subtract M — every pair costs something"], i => fbSetF(fb, i === 0, i === 0
+        ? "Right — 11 (like 00) is the middle of a run: the run's cost was one subtraction at its low end and will be one addition at its high end, however long it runs. That is Booth's whole economy: a multiplier like 0111 1110 costs two operations, not six."
+        : "Not that — pair 11 sits inside a run of 1s that was already charged a subtraction when it began (and gets its addition when it ends). Inside the run: shift only. Counting one operation per 1 bit is the naive algorithm Booth replaces."));
+      window.__boothQuestion = { kind: "run", expected: "shift only" };
+    }
+  }
+  boothSec.querySelector("#boothNewQ").addEventListener("click", () => { boothQn++; boothQuestion(); });
+  boothRender(); boothQuestion();
+
+  /* ================================================================
+     ORG — SRAM CELL & DRAM REFRESH
+     SRAM model: two cross-coupled inverters; Q is the state, Q̄
+     its complement by construction. A write only lands while the
+     word line is high (the access transistors connect the cell
+     to the bit lines); a read reports Q while the word line is
+     high. Cut the power and the state is gone — but while power
+     is on, nothing decays: there is no clock in this cell.
+     DRAM model: a stored 1 is charge at 100%; the level halves
+     every 32 ms (level = 100 · 2^(−t/32)); the sense amplifier
+     reads it as a 1 while the level is at least 50%. A refresh
+     is a read-and-restore: level back to 100%, the local clock
+     back to 0, and the bank busy for 4 cycles of the memory
+     timing lab's 10 ns clock — cycles stolen from real accesses.
+     ================================================================ */
+  function sramWrite(state, bit, wl) { return wl ? { q: bit } : { q: state.q }; }
+  function sramRead(state, wl) { return wl ? state.q : null; }
+  const DRAM_HALF_MS = 32, DRAM_THRESHOLD = 50, DRAM_REFRESH_CYCLES = 4;
+  function dramLevel(tMs) { return Math.round(100 * Math.pow(0.5, tMs / DRAM_HALF_MS)); }
+  function dramReads(tMs) { return dramLevel(tMs) >= DRAM_THRESHOLD; }
+  function sdVerify() {
+    let sramOk = true;
+    [0, 1].forEach(bit => {
+      let s = { q: 0 };
+      s = sramWrite(s, bit, true);
+      if (s.q !== bit || sramRead(s, true) !== bit) sramOk = false;
+      const held = sramWrite(s, 1 - bit, false); /* word line low: write attempt must not land */
+      if (held.q !== bit) sramOk = false;
+      if (sramRead(s, false) !== null) sramOk = false;
+    });
+    let dramOk = true, prev = Infinity;
+    for (let t = 0; t <= 128; t += 4) {
+      const lv = dramLevel(t);
+      if (lv > prev) dramOk = false; /* charge never recovers on its own */
+      prev = lv;
+      if (dramReads(t) !== (t <= DRAM_HALF_MS)) dramOk = false; /* correct up to and including one half-life */
+    }
+    if (dramLevel(0) !== 100 || dramLevel(DRAM_HALF_MS) !== 50 || dramLevel(48) !== 35) dramOk = false;
+    return { sramOk, dramOk, pass: !!(sramOk && dramOk) };
+  }
+  const SD_V = sdVerify();
+  const sdSec = mkSectionF("sramCard", "SRAM cell &amp; DRAM refresh — one bit, two ways of remembering",
+    "Every cache and register file on this site is SRAM; main memory is DRAM. The difference is one stored bit. <b>Left:</b> the <b>6-transistor SRAM cell</b> — two cross-coupled inverters (4 transistors) that hold each other's state, plus 2 access transistors gated by the <b>word line</b> connecting the cell to the <b>bit lines</b> BL and BL̄. It holds its bit for as long as power is on, with no clock and no maintenance. <b>Right:</b> the <b>1-transistor/1-capacitor DRAM cell</b> — the bit is <i>charge on a capacitor</i>, and charge leaks. The slider runs time forward: watch the level fall through the sense amplifier's 50% threshold, after which the cell reads back wrong. A <b>refresh</b> — read the cell and write it back at full charge — is the only cure, and it is not free: each refresh occupies the bank for <b>4 cycles</b> of the same 10 ns clock the memory timing lab uses, cycles in which no real access can proceed. That is the refresh cost the timing lab's wait states never charged you for.");
+  sdSec.innerHTML +=
+    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;margin-top:6px">' +
+    '<div><div class="ctrl-label">SRAM — 6 transistors, cross-coupled inverters</div>' +
+    '<div class="schematic-box"><svg id="sramSvg" viewBox="0 0 300 170" role="img" aria-label="SRAM cell: two cross-coupled inverters holding Q and its complement, word line and bit lines BL and BL-bar" style="display:block;width:100%;height:auto"></svg></div>' +
+    '<div class="seq-state" id="sramState" style="margin-top:8px"></div>' +
+    '<div class="share-row"><button type="button" class="btn" id="sramWl">Word line: off</button><button type="button" class="btn" id="sramW0">Write 0</button><button type="button" class="btn" id="sramW1">Write 1</button><button type="button" class="btn" id="sramReadBtn">Read</button></div>' +
+    '<div class="decimal-line" id="sramMsg" aria-live="polite"></div></div>' +
+    '<div><div class="ctrl-label">DRAM — 1 transistor, 1 capacitor, one leaking bit</div>' +
+    '<div class="schematic-box"><svg id="dramSvg" viewBox="0 0 300 170" role="img" aria-label="DRAM cell: one access transistor and a storage capacitor whose charge bar drains over time" style="display:block;width:100%;height:auto"></svg></div>' +
+    '<div class="tool-controls"><label>Time since the bit was written (or refreshed) <input type="range" id="dramTime" min="0" max="128" step="4" value="0" style="vertical-align:middle" /> <span id="dramTimeVal">0 ms</span></label></div>' +
+    '<div class="seq-state" id="dramState" style="margin-top:4px"></div>' +
+    '<div class="share-row"><button type="button" class="btn primary" id="dramRefresh">Refresh — read &amp; restore</button><button type="button" class="btn" id="dramWrite">Write a fresh 1</button></div>' +
+    '<div class="decimal-line" id="dramMsg" aria-live="polite"></div></div></div>' +
+    '<div class="share-row"><span style="font-size:13.5px">Refresh is one entry in the memory-timing ledger — the other is how long an access itself takes:</span><button type="button" class="btn" id="sdToMem">Memory timing &amp; wait states lab →</button></div>' +
+    '<p class="proj-teaches"><b>Teaches:</b> why SRAM needs six transistors and no refresh (the inverters actively restore each other), why DRAM is dense and cheap but perishable (charge, not state), the sense threshold as the moment a bit quietly becomes a lie, and refresh as stolen cycles — a real DRAM refreshes every row within 64 ms, thousands of times a second, forever.</p>';
+  if (orgHost) orgHost.appendChild(sdSec);
+  sdSec.querySelector("#sdToMem").addEventListener("click", () => { if (!clickMenuKeyF("lab-memtiming")) jumpF("memCard"); });
+  /* --- SRAM panel --- */
+  const sram = { state: { q: 1 }, wl: false };
+  function sramDraw() {
+    const q = sram.state.q, qb = 1 - q;
+    const t = (x, y, s, anchor, cls) => '<text x="' + x + '" y="' + y + '" class="' + (cls || "ry-sub") + '" style="text-anchor:' + (anchor || "middle") + '">' + s + "</text>";
+    sdSec.querySelector("#sramSvg").innerHTML =
+      '<rect x="52" y="52" width="76" height="52" rx="6" class="af-box"/><rect x="172" y="52" width="76" height="52" rx="6" class="af-box"/>' +
+      t(90, 74, "INV 1") + t(90, 92, "in: Q̄  out: Q") + t(210, 74, "INV 2") + t(210, 92, "in: Q  out: Q̄") +
+      '<path d="M128 66 H172" class="af-wire"/><path d="M172 92 H150 V128 H110 V104" class="af-wire" fill="none"/>' +
+      '<circle cx="139" cy="78" r="13" class="' + (q ? "af-on" : "af-off") + '"/>' + t(139, 83, "Q=" + q) +
+      '<circle cx="161" cy="118" r="13" class="' + (qb ? "af-on" : "af-off") + '"/>' + t(161, 123, "Q̄=" + qb) +
+      '<path d="M60 20 V52" class="' + (sram.wl ? "af-wire one" : "af-wire") + '"/><path d="M240 20 V52" class="' + (sram.wl ? "af-wire one" : "af-wire") + '"/>' +
+      t(60, 14, "BL") + t(240, 14, "BL̄") +
+      t(150, 158, "word line " + (sram.wl ? "HIGH — access transistors on" : "low — cell disconnected, holding its bit"));
+    sdSec.querySelector("#sramState").innerHTML =
+      '<div class="seq-cell one"><b>' + q + "</b>Q — the stored bit</div>" +
+      '<div class="seq-cell"><b>' + qb + "</b>Q̄ — forced to the complement by INV 2</div>" +
+      '<div class="seq-cell"><b>' + (sram.wl ? "high" : "low") + "</b>word line</div>" +
+      '<div class="seq-cell"><b>on</b>power — no decay while powered</div>';
+  }
+  function sramSay(msg) { sdSec.querySelector("#sramMsg").textContent = msg; }
+  sdSec.querySelector("#sramWl").addEventListener("click", e => {
+    sram.wl = !sram.wl;
+    e.target.textContent = "Word line: " + (sram.wl ? "on" : "off");
+    sramDraw();
+    sramSay(sram.wl ? "Word line high: the two access transistors connect the cell to BL and BL̄. A write can now overpower the inverters; a read can sense Q." : "Word line low: the cell is disconnected from the bit lines — and holds its bit anyway. The cross-coupled inverters keep restoring each other; that loop is the memory.");
+  });
+  function sramTryWrite(bit) {
+    const before = sram.state.q;
+    sram.state = sramWrite(sram.state, bit, sram.wl);
+    sramDraw();
+    sramSay(sram.wl
+      ? (before === bit ? "Write " + bit + " with the word line high: the cell already held " + bit + " — the bit lines confirm it and the loop settles unchanged." : "Write " + bit + " lands: the bit lines, driven harder than the small cell inverters, force Q to " + bit + " and Q̄ to " + (1 - bit) + "; once the word line drops, the loop holds the new value on its own.")
+      : "Write " + bit + " attempted with the word line LOW: nothing happens. The access transistors are off, the bit lines never reach the cell, and Q stays " + before + ". A write is a connection before it is a value.");
+  }
+  sdSec.querySelector("#sramW0").addEventListener("click", () => sramTryWrite(0));
+  sdSec.querySelector("#sramW1").addEventListener("click", () => sramTryWrite(1));
+  sdSec.querySelector("#sramReadBtn").addEventListener("click", () => {
+    const v = sramRead(sram.state, sram.wl);
+    sramSay(v === null ? "Read with the word line low: the bit lines float — there is nothing to sense. Raise the word line first." : "Read: the sense amplifier sees BL = Q = " + v + " and BL̄ = " + (1 - v) + ". Note what did not happen: the value is unchanged and nothing was consumed. An SRAM read is non-destructive — contrast the DRAM cell, whose read must be followed by a restore.");
+  });
+  /* --- DRAM panel --- */
+  const dram = { t: 0, refreshes: 0, stolen: 0 };
+  function dramDraw() {
+    const lv = dramLevel(dram.t), ok = dramReads(dram.t);
+    sdSec.querySelector("#dramTimeVal").textContent = dram.t + " ms";
+    const w = Math.round(1.9 * lv);
+    sdSec.querySelector("#dramSvg").innerHTML =
+      '<rect x="30" y="30" width="240" height="34" rx="6" class="af-box"/>' +
+      '<rect x="34" y="34" width="' + w + '" height="26" rx="4" class="' + (ok ? "af-on" : "af-off") + '" opacity="0.55"/>' +
+      '<text x="150" y="52" class="ry-sub" style="text-anchor:middle">capacitor charge: ' + lv + "%</text>" +
+      '<path d="M60 96 H240 M60 104 H240" class="af-wire"/><text x="150" y="122" class="ry-sub" style="text-anchor:middle">capacitor plates — charge leaks through the access transistor</text>' +
+      '<text x="150" y="146" class="ry-sub" style="text-anchor:middle">sense threshold 50%: ' + (ok ? "the stored 1 still reads as a 1" : "below it — the cell now reads as a 0: the bit has rotted") + "</text>";
+    sdSec.querySelector("#dramState").innerHTML =
+      '<div class="seq-cell"><b>' + lv + "%</b>charge remaining</div>" +
+      '<div class="seq-cell' + (ok ? " one" : "") + '"><b>' + (ok ? "reads 1 ✓" : "reads 0 ✗") + "</b>sensed value (stored: 1)</div>" +
+      '<div class="seq-cell"><b>' + dram.refreshes + "</b>refreshes performed</div>" +
+      '<div class="seq-cell"><b>' + dram.stolen + " cycles</b>stolen by refresh (" + DRAM_REFRESH_CYCLES + " per refresh, 10 ns clock)</div>";
+    sdSec.querySelector("#dramMsg").textContent = dram.t === 0
+      ? "Fresh charge: 100%. The capacitor leaks at a fixed rate — half the remaining charge every " + DRAM_HALF_MS + " ms. Drag the time slider and find the moment the bit dies; then refresh and watch the meter — and the cycle bill."
+      : "At " + dram.t + " ms the charge is " + lv + "%: " + (ok ? "still at or above the 50% threshold, so a read returns the 1 that was written. It will not last — the leak does not pause." : "below the 50% threshold. A read now returns 0 for a bit written as 1 — not noise, not a fault: arithmetic. Refresh before this point or lose the bit.");
+  }
+  sdSec.querySelector("#dramTime").addEventListener("input", e => { dram.t = +e.target.value; dramDraw(); });
+  sdSec.querySelector("#dramRefresh").addEventListener("click", () => {
+    const wasOk = dramReads(dram.t);
+    dram.refreshes++; dram.stolen += DRAM_REFRESH_CYCLES; dram.t = 0;
+    sdSec.querySelector("#dramTime").value = "0";
+    dramDraw();
+    sdSec.querySelector("#dramMsg").textContent = (wasOk
+      ? "Refresh in time: the cell was read (" + "still a 1) and written back at full charge — the leak clock restarts at 0 ms. "
+      : "Too late for this bit: the refresh faithfully read a rotted cell (a 0 by the time it was sensed) and restored that. Refresh preserves what is there; it cannot resurrect what decay already took. ") +
+      "Cost so far: " + dram.refreshes + " refresh" + (dram.refreshes === 1 ? "" : "es") + " × " + DRAM_REFRESH_CYCLES + " cycles = " + dram.stolen + " cycles of bank time no access could use — on the memory timing lab's terms, that is " + (dram.stolen * 10) + " ns of the machine's life spent remembering.";
+  });
+  sdSec.querySelector("#dramWrite").addEventListener("click", () => {
+    dram.t = 0; sdSec.querySelector("#dramTime").value = "0"; dramDraw();
+    sdSec.querySelector("#dramMsg").textContent = "A fresh 1 written: charge 100%, leak clock at 0. A write is a refresh with new data — both are just 'charge the capacitor and start the countdown again'.";
+  });
+  sramDraw(); dramDraw();
+  sramSay("The cell powers up holding Q = 1. Raise the word line, then write and read. Leave it as long as you like between operations — unlike its neighbour, this cell is in no hurry at all.");
+  checkBlockF(sdSec, "sd");
+  let sdQn = 0;
+  function sdQuestion() {
+    const fb = sdSec.querySelector("#sdFb"), host = sdSec.querySelector("#sdOpts");
+    fb.textContent = "";
+    const kind = sdQn % 3;
+    if (kind === 0) {
+      sdSec.querySelector("#sdQ").textContent = "Predict, then check: a 1 is written to the DRAM cell and nobody refreshes it. After 48 ms, what does a read return?";
+      optBtnsF(host, ["1 — charge only leaks slowly", "0 — the level is ≈35%, below the 50% threshold", "An error — the cell reports itself dead"], i => fbSetF(fb, i === 1, i === 1
+        ? "Right — the level halves every 32 ms: at 48 ms it is 100 × 2^(−48/32) ≈ 35%, under the sense threshold, so the read returns 0. The cell does not know it has failed; that silence is why refresh is scheduled, not requested."
+        : "Not that result — do the decay: half-life 32 ms, so at 48 ms the charge is about 35%, below the 50% the sense amplifier needs. The read returns a plain, confident, wrong 0."));
+      window.__sdQuestion = { kind: "decay48", expected: dramReads(48) ? 1 : 0, level: dramLevel(48) };
+    } else if (kind === 1) {
+      sdSec.querySelector("#sdQ").textContent = "Predict, then check: which cell needs periodic refresh, and why?";
+      optBtnsF(host, ["The SRAM cell — its inverters drift", "The DRAM cell — its bit is leaking charge", "Both — all memory decays"], i => fbSetF(fb, i === 1, i === 1
+        ? "Right — the DRAM bit is charge on a capacitor with a leaky transistor for a door; nothing restores it. The SRAM bit is a powered feedback loop: each inverter continuously re-drives the other, so the state is maintained, not merely stored."
+        : "Not that cell — SRAM's cross-coupled inverters are powered and self-restoring; leave one for a year and it holds its bit. DRAM's capacitor has no such loop: charge leaves, the level falls, and only refresh puts it back."));
+      window.__sdQuestion = { kind: "which-refresh", expected: "DRAM" };
+    } else {
+      sdSec.querySelector("#sdQ").textContent = "Predict, then check: you attempt to write the SRAM cell while the word line is low. What happens to Q?";
+      optBtnsF(host, ["Q takes the new value — the bit lines always win", "Nothing — the access transistors are off, Q is unchanged", "Q is erased to 0"], i => fbSetF(fb, i === 1, i === 1
+        ? "Right — with the word line low the access transistors disconnect the cell entirely; the write never arrives. Try it on the panel: the cell ignores you until the word line rises."
+        : "Not that — the word line is the gatekeeper: low means the cell is not connected to the bit lines at all, so no write can land and nothing is erased. Q simply persists."));
+      window.__sdQuestion = { kind: "wl-low", expected: "unchanged" };
+    }
+  }
+  sdSec.querySelector("#sdNewQ").addEventListener("click", () => { sdQn++; sdQuestion(); });
+  sdQuestion();
+  /* the memory timing lab gains the return link */
+  const memCardEl = $F("memCard");
+  if (memCardEl && !memCardEl.querySelector("#memToSd")) {
+    const row = document.createElement("div");
+    row.className = "share-row";
+    const span = document.createElement("span");
+    span.style.fontSize = "13.5px";
+    span.innerHTML = "Wait states are one cost of real memory. The other is refresh — the DRAM cell's rent:";
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "btn"; b.id = "memToSd";
+    b.textContent = "SRAM cell & DRAM refresh lab →";
+    b.addEventListener("click", () => { if (!clickMenuKeyF("lab-sram-dram")) jumpF("sramCard"); });
+    row.appendChild(span); row.appendChild(b);
+    memCardEl.appendChild(row);
+  }
+
+  /* ================================================================
+     ORG — EXTEND THE SAP-1 INSTRUCTION SET
+     Opcodes 0–7 are the base eight; opcode 8 is spoken for
+     inside the capstone stepper's interrupt extension (RETI,
+     byte 0x80 — the finished assembler's own note says so), so
+     opcode 9 is the first genuinely free one. Three preset
+     designs, all at opcode 9, all operand-less, each specified
+     as execute rows in the microprogrammed lab's vocabulary.
+     A valid design: runs the shared fetch rows unchanged, does
+     its work in execute rows built from existing control
+     operations, never writes IR mid-execution (IR must survive
+     until the instruction completes — it is the only record of
+     what is executing), and invents no operand it does not have.
+     Assembly: the new mnemonic is lowered to its byte (DB 0x90)
+     and the site's finished assembler — window.__asmCheck —
+     assembles the program; the run uses an extended engine
+     whose base-opcode semantics are reSAP1's, verified against
+     reSAP1 itself on a program with no new instruction.
+     ================================================================ */
+  const SAPX_OPCODE = 9, SAPX_BYTE = SAPX_OPCODE << 4; /* 0x90 */
+  const SAPX_PRESETS = {
+    INC: { name: "INC", sem: "A ← A + 1", effect: a => (a + 1) & 0xff,
+      row: "ALUinc · Ain — A ← A + 1",
+      prog: "        LDA x\n        INC\n        INC\n        OUT\n        HLT\nx:      DB 20",
+      expectA: 22, expectOut: [22], probeIn: 41, probeOut: 42,
+      blurb: "Increment the accumulator. The SAP-1 can only add memory to A; counting in a loop currently costs an LDA, an ADD of a stored 1, and a byte of data. INC does it in the execute rows alone." },
+    CMA: { name: "CMA", sem: "A ← 255 − A (bitwise NOT)", effect: a => (~a) & 0xff,
+      row: "ALUnot · Ain — A ← ¬A",
+      prog: "        LDA x\n        CMA\n        OUT\n        HLT\nx:      DB 15",
+      expectA: 240, expectOut: [240], probeIn: 15, probeOut: 240,
+      blurb: "Complement the accumulator — every bit flipped. Subtraction from 255 is the poor machine's NOT, and it currently takes a stored 255 and a SUB; CMA makes it one execute row." },
+    CLR: { name: "CLR", sem: "A ← 0", effect: () => 0,
+      row: "ALUzero · Ain — A ← 0",
+      prog: "        LDA x\n        CLR\n        ADD y\n        OUT\n        HLT\nx:      DB 99\ny:      DB 7",
+      expectA: 7, expectOut: [7], probeIn: 99, probeOut: 0,
+      blurb: "Clear the accumulator. Zeroing A today means loading a stored 0 — a byte of data spent on nothing. CLR has the ALU pass its constant 0 instead." }
+  };
+  function sapxSeqOptions(key) {
+    const p = SAPX_PRESETS[key];
+    return [
+      { text: "Fetch (shared) → execute: " + p.row, ok: true,
+        why: "That is a legal design: the shared fetch rows run untouched, the execute block is a single row of existing control operations, nothing writes IR, and no operand is needed — " + p.name + " works entirely inside the datapath." },
+      { text: "Fetch (shared) → execute: IRout · MARin → MEMout · Ain — A ← mem[IR address field]", ok: false,
+        why: "That sequence is LDA's execute block wearing a new name: it treats the instruction's low nibble as a memory address. " + p.name + " has no operand — its low nibble is padding — so this design reads whatever address the padding happens to name and loads it into A. Wrong machine." },
+      { text: "Fetch (shared) → execute: Aout · IRin → " + p.row, ok: false,
+        why: "Invalid: the first execute row writes IR (Aout · IRin) in the middle of the instruction. IR is the machine's only record of which instruction is executing — the dispatch at the end of fetch has already happened, but the execute rows are selected from IR's opcode, and anything that reads IR later in this instruction (including the next dispatch check) would see A's value instead. A design may read IR; it must never clobber it mid-execution." }
+    ];
+  }
+  function sapxTransform(src, key) {
+    return String(src).split(/\r?\n/).map(line => {
+      const code = line.split(";")[0];
+      const m = code.match(/^(\s*(?:[A-Za-z_][A-Za-z0-9_]*\s*:\s*)?)([A-Za-z]+)(.*)$/);
+      if (m && m[2].toUpperCase() === key) return m[1] + "DB " + SAPX_BYTE + " ; " + key + " — lowered to its byte, opcode " + SAPX_OPCODE;
+      return line;
+    }).join("\n");
+  }
+  function sapxRun(memIn, key) {
+    const mem = memIn.slice(0, 16); while (mem.length < 16) mem.push(0);
+    const eff = SAPX_PRESETS[key].effect;
+    let A = 0, PC = 0, steps = 0; const out = [], trace = [];
+    while (steps++ < 200) {
+      const ir = mem[PC] & 0xff, op = ir >> 4, ad = ir & 15; const here = PC; PC = (PC + 1) & 15;
+      let note = "";
+      if (op === 0) { A = mem[ad]; note = "A ← mem[" + ad + "] = " + A; }
+      else if (op === 1) { A = (A + mem[ad]) & 0xff; note = "A ← A + mem[" + ad + "] = " + A; }
+      else if (op === 2) { A = (A - mem[ad]) & 0xff; note = "A ← A − mem[" + ad + "] = " + A; }
+      else if (op === 3) { out.push(A); note = "OUT ← A = " + A; }
+      else if (op === 4) { trace.push({ pc: here, ir, op: "HLT", ad, A, note: "halt" }); return { out, A, steps, halted: true, trace, mem }; }
+      else if (op === 5) { PC = ad; note = "PC ← " + ad; }
+      else if (op === 6) { if (A === 0) { PC = ad; note = "A = 0, PC ← " + ad; } else note = "A ≠ 0, no jump"; }
+      else if (op === 7) { mem[ad] = A; note = "mem[" + ad + "] ← A = " + A; }
+      else if (op === SAPX_OPCODE) { A = eff(A); note = key + ": " + SAPX_PRESETS[key].sem + " → A = " + A; }
+      else note = "undefined opcode " + op + " — no-op in this engine, as in reSAP1";
+      trace.push({ pc: here, ir, op: op === SAPX_OPCODE ? key : ["LDA","ADD","SUB","OUT","HLT","JMP","JZ","STA"][op] || ("op" + op), ad, A, note });
+    }
+    return { out, A, steps, halted: false, trace, mem };
+  }
+  function sapxVerify() {
+    const oracle = (window.__asmCheck && window.__asmCheck.assemble) ? window.__asmCheck.assemble : null;
+    const out = { oraclePresent: !!oracle };
+    Object.keys(SAPX_PRESETS).forEach(k => {
+      const p = SAPX_PRESETS[k];
+      if (oracle) {
+        const res = oracle(sapxTransform(p.prog, k));
+        out[k + "Asm"] = !!res.bytes && res.bytes.indexOf(SAPX_BYTE) >= 0 && !res.errors.length;
+        if (res.bytes) { const r = sapxRun(res.bytes, k); out[k + "Run"] = r.halted && r.A === p.expectA && r.out.join(",") === p.expectOut.join(","); }
+      }
+      const seqs = sapxSeqOptions(k);
+      out[k + "Seq"] = seqs.filter(s => s.ok).length === 1;
+    });
+    if (window.RE && window.RE.reSAP1 && oracle) {
+      const c = oracle("        LDA count\nloop:   OUT\n        SUB one\n        JZ done\n        JMP loop\ndone:   HLT\ncount:  DB 3\none:    DB 1");
+      if (c.bytes) {
+        const a = sapxRun(c.bytes, "INC"), b = window.RE.reSAP1(c.bytes.slice());
+        out.baseMatches = a.A === b.A && a.out.join(",") === b.out.join(",") && a.mem.join(",") === b.mem.join(",") && a.halted === b.halted;
+      }
+    }
+    out.pass = !!(out.oraclePresent && out.baseMatches && Object.keys(SAPX_PRESETS).every(k => out[k + "Asm"] && out[k + "Run"] && out[k + "Seq"]));
+    return out;
+  }
+  const SAPX_V = sapxVerify();
+  const sapxSec = mkSectionF("sapxCard", "Extend the SAP-1 instruction set — design an instruction, then run it",
+    "The build-an-assembler lab taught the machine's eight instructions as fixed law. They are not: an instruction set is a design, and this lab adds to it. The base opcodes 0–7 are taken, and opcode 8 is spoken for inside the capstone stepper's interrupt extension (RETI, byte 0x80) — so <b>opcode 9</b> is yours. Pick one of three preset designs below. For your pick you must (1) state the design, (2) choose its <b>execute sequence</b> from the datapath's existing control operations — the same register transfers the microprogrammed control lab sequences: PC, MAR, memory, IR, A, B, the ALU, OUT — and have it <b>validated</b> (the fetch rows are shared and untouchable; IR must not be clobbered mid-execution; no phantom operands), and (3) <b>assemble and run</b> a short program that uses your instruction: the site's finished assembler does the assembling, with your mnemonic lowered to its byte " + hex2F(SAPX_BYTE) + ", and an extended engine — the base semantics verified against the SAP-1's own — executes it.");
+  sapxSec.innerHTML +=
+    '<div class="share-row"><span style="font-size:13.5px">This lab stands on two earlier ones:</span>' +
+    '<button type="button" class="btn" id="sapxToBuild">Build an assembler lab →</button>' +
+    '<button type="button" class="btn" id="sapxToAsm">The two-pass assembler — extended here →</button>' +
+    '<button type="button" class="btn" id="sapxToMicro">Microprogrammed control — the execute rows\' home →</button></div>' +
+    '<div class="ctrl-label" style="margin-top:12px">Step 1 — choose your design (all take opcode 9, byte ' + hex2F(SAPX_BYTE) + ', no operand)</div>' +
+    '<div class="share-row" id="sapxPick" role="group" aria-label="Choose a new instruction design"></div>' +
+    '<div class="decimal-line" id="sapxDesign" aria-live="polite"></div>' +
+    '<div class="ctrl-label" style="margin-top:12px">Step 2 — specify the execute sequence, and have it validated</div>' +
+    '<div id="sapxSeq"></div>' +
+    '<div class="ctrl-label" style="margin-top:12px">Step 3 — assemble the test program with your instruction in it, then run it</div>' +
+    '<div class="asm-listing" id="sapxProg"></div>' +
+    '<div class="seq-state" id="sapxImage" style="margin-top:8px"><div class="seq-cell"><b>—</b>not assembled yet — validate the design first</div></div>' +
+    '<div class="share-row"><button type="button" class="btn primary" id="sapxAssemble" disabled>Assemble with my instruction ▸</button><button type="button" class="btn" id="sapxRunBtn" disabled>Run it ▸</button></div>' +
+    '<div class="decimal-line" id="sapxOut" aria-live="polite">The Assemble button unlocks once your execute sequence validates.</div>' +
+    '<p class="proj-teaches"><b>Teaches:</b> an opcode is a contract between assembler and control unit; adding an instruction means work in three places at once — a byte encoding, a row in the assembler\'s table, and execute rows in the control store — and a design rule with teeth: control state (IR above all) is not scratch space.</p>';
+  const baCardEl = $F("buildAsmCard");
+  if (baCardEl && baCardEl.parentNode) baCardEl.parentNode.insertBefore(sapxSec, baCardEl.nextSibling);
+  else if (orgHost) orgHost.appendChild(sapxSec);
+  sapxSec.querySelector("#sapxToBuild").addEventListener("click", () => { if (!clickMenuKeyF("lab-build-assembler")) jumpF("buildAsmCard"); });
+  sapxSec.querySelector("#sapxToAsm").addEventListener("click", () => { if (!clickMenuKeyF("sap1-assembler")) jumpF("asmCard"); });
+  sapxSec.querySelector("#sapxToMicro").addEventListener("click", () => { if (!clickMenuKeyF("micro-sap1")) jumpF("sapxCard"); });
+  const sapx = { key: "INC", validated: false, bytes: null };
+  const sapxPick = sapxSec.querySelector("#sapxPick");
+  Object.keys(SAPX_PRESETS).forEach(k => {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "btn"; b.textContent = k + " — " + SAPX_PRESETS[k].sem;
+    b.setAttribute("aria-pressed", k === "INC" ? "true" : "false");
+    b.addEventListener("click", () => { sapx.key = k; sapx.validated = false; sapx.bytes = null; sapxPick.querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x === b ? "true" : "false")); sapxDesignRender(); sapxSeqRender(); sapxProgRender(); sapxQuestion(); });
+    sapxPick.appendChild(b);
+  });
+  function sapxDesignRender() {
+    const p = SAPX_PRESETS[sapx.key];
+    sapxSec.querySelector("#sapxDesign").textContent = "Your design: " + p.name + " — " + p.sem + ", encoded as byte " + hex2F(SAPX_BYTE) + " (opcode 9 in the high nibble, low nibble unused). " + p.blurb;
+  }
+  function sapxSeqRender() {
+    const host = sapxSec.querySelector("#sapxSeq");
+    const rawSeqs = sapxSeqOptions(sapx.key);
+    const rot = { INC: 1, CMA: 2, CLR: 1 }[sapx.key] || 0;
+    const seqs = rawSeqs.map((_, i) => rawSeqs[(i + rot) % rawSeqs.length]);
+    host.innerHTML = '<div class="lab-check"><span class="lab-check-q">Which execute sequence correctly implements ' + sapx.key + '? The fetch rows (PCout·MARin → MEMout·IRin·PCinc → decode) run first, unchanged, for every instruction — what follows them is your design.</span></div>' +
+      '<div id="sapxSeqOpts" style="display:flex;flex-direction:column;gap:6px;margin-top:6px"></div>' +
+      '<div class="lab-check-fb" id="sapxSeqFb" aria-live="polite" style="margin-top:6px"></div>';
+    const fb = host.querySelector("#sapxSeqFb");
+    optBtnsF(host.querySelector("#sapxSeqOpts"), seqs.map(s => s.text), i => {
+      if (seqs[i].ok) {
+        sapx.validated = true;
+        fbSetF(fb, true, seqs[i].why + " Design validated — the Assemble button is unlocked.");
+        sapxSec.querySelector("#sapxAssemble").disabled = false;
+        host.querySelectorAll("#sapxSeqOpts button").forEach(x => { x.disabled = true; });
+      } else fbSetF(fb, false, seqs[i].why);
+    });
+  }
+  function sapxProgRender() {
+    const p = SAPX_PRESETS[sapx.key];
+    sapxSec.querySelector("#sapxProg").innerHTML = p.prog.split("\n").map((l, i) => '<div><span class="ln">' + i + "</span>" + l.replace(/&/g, "&amp;").replace(/</g, "&lt;") + "</div>").join("");
+    sapxSec.querySelector("#sapxImage").innerHTML = '<div class="seq-cell"><b>—</b>not assembled yet — validate the design first</div>';
+    sapxSec.querySelector("#sapxRunBtn").disabled = true;
+    sapxSec.querySelector("#sapxAssemble").disabled = !sapx.validated;
+    sapxSec.querySelector("#sapxOut").textContent = sapx.validated ? "Design validated. Assemble the program — watch for byte " + hex2F(SAPX_BYTE) + " where " + sapx.key + " stands." : "The Assemble button unlocks once your execute sequence validates.";
+  }
+  sapxSec.querySelector("#sapxAssemble").addEventListener("click", () => {
+    const out = sapxSec.querySelector("#sapxOut");
+    const oracle = window.__asmCheck && window.__asmCheck.assemble;
+    if (!oracle) { out.textContent = "The site's assembler did not initialise on this page load, so the assembly cannot run — the design above is still validated by the lab's own checks."; return; }
+    const p = SAPX_PRESETS[sapx.key];
+    const res = oracle(sapxTransform(p.prog, sapx.key));
+    if (!res.bytes) { out.textContent = "Assembly failed: " + res.errors.map(e => "line " + e.line + ": " + e.msg).join("; "); return; }
+    sapx.bytes = res.bytes;
+    sapxSec.querySelector("#sapxImage").innerHTML = res.bytes.slice(0, 8).map((b, a) =>
+      '<div class="seq-cell' + (b === SAPX_BYTE ? " one" : "") + '"><b>' + hex2F(b) + "</b>mem[" + a + "]" + (b === SAPX_BYTE ? " · " + sapx.key + " — your byte" : "") + "</div>").join("");
+    sapxSec.querySelector("#sapxRunBtn").disabled = false;
+    out.innerHTML = "<b>Assembled by the site's two-pass assembler</b>, extended with your opcode: the " + sapx.key + " line was lowered to <b>DB " + SAPX_BYTE + "</b> and the finished assembler built the symbol table and image around it — the byte " + hex2F(SAPX_BYTE) + " sits in the image exactly where your instruction stands. Now run it.";
+  });
+  sapxSec.querySelector("#sapxRunBtn").addEventListener("click", () => {
+    if (!sapx.bytes) return;
+    const r = sapxRun(sapx.bytes, sapx.key);
+    const p = SAPX_PRESETS[sapx.key];
+    sapxSec.querySelector("#sapxOut").innerHTML = r.halted
+      ? "<b>Ran to HLT</b> in " + r.steps + " steps on the extended engine. Output: <b>[" + r.out.join(", ") + "]</b> · final A = <b>" + r.A + "</b>. Trace of your instruction: " + r.trace.filter(t => t.op === sapx.key).map(t => "at PC " + t.pc + ", " + t.note).join("; ") + ". The program could not have produced this on the base machine — opcode 9 did not exist there this morning."
+      : "<b>Did not halt</b> within " + r.steps + " steps. Output so far: [" + r.out.join(", ") + "], A = " + r.A + ".";
+  });
+  checkBlockF(sapxSec, "sapx");
+  let sapxQn = 0;
+  function sapxQuestion() {
+    const fb = sapxSec.querySelector("#sapxFb"), host = sapxSec.querySelector("#sapxOpts");
+    if (!fb || !host) return;
+    fb.textContent = "";
+    const p = SAPX_PRESETS[sapx.key];
+    const kind = sapxQn % 3;
+    if (kind === 0) {
+      sapxSec.querySelector("#sapxQ").textContent = "Predict, then check: " + sapx.key + " executes with A = " + p.probeIn + ". What is A immediately after?";
+      const wrong = [(p.probeIn + 2) & 0xff, p.probeIn];
+      optBtnsF(host, [String(p.probeOut), String(wrong[0]), String(wrong[1])], i => fbSetF(fb, i === 0, i === 0
+        ? "Right — " + sapx.key + " is " + p.sem + ", so A = " + p.probeIn + " becomes " + p.probeOut + ". That single register transfer is the whole execute block you validated."
+        : "Not that value — apply your own design: " + sapx.key + " performs " + p.sem + ". From A = " + p.probeIn + " that gives " + p.probeOut + "."));
+      window.__sapxQuestion = { kind: "effect", design: sapx.key, expected: p.probeOut };
+    } else if (kind === 1) {
+      sapxSec.querySelector("#sapxQ").textContent = "Predict, then check: the test program for " + sapx.key + " (above) runs to HLT. What does it output?";
+      const alts = Array.from(new Set([p.expectOut[0], (p.expectOut[0] + 1) & 0xff, 0])).slice(0, 3);
+      optBtnsF(host, alts.map(v => "[" + v + "]"), i => fbSetF(fb, alts[i] === p.expectOut[0], alts[i] === p.expectOut[0]
+        ? "Right — [" + p.expectOut.join(", ") + "]. Assemble and run it above and the extended engine lands on exactly this."
+        : "Not that output — walk the program: the loads set A up, " + sapx.key + " transforms it per " + p.sem + ", and OUT prints what survives: [" + p.expectOut.join(", ") + "]."));
+      window.__sapxQuestion = { kind: "program", design: sapx.key, expected: p.expectOut[0] };
+    } else {
+      sapxSec.querySelector("#sapxQ").textContent = "Predict, then check: your instruction is encoded as one byte. Which byte, and why that one?";
+      optBtnsF(host, [hex2F(SAPX_BYTE) + " — opcode 9, the first free opcode, in the high nibble", hex2F(8 << 4) + " — opcode 8, the next number after STA", hex2F(7 << 4) + " — share STA's opcode and let the operand decide"], i => fbSetF(fb, i === 0, i === 0
+        ? "Right — opcode 9 in the high nibble, low nibble unused: " + hex2F(SAPX_BYTE) + ". Opcode 8 is not free: inside the capstone stepper it is RETI, the interrupt return, and colliding with it would make one byte mean two instructions."
+        : "Not that byte — opcodes 0–7 are the base eight and 8 is taken by the capstone's RETI extension. The first encoding that collides with nothing is opcode 9: " + hex2F(SAPX_BYTE) + "."));
+      window.__sapxQuestion = { kind: "encoding", expected: SAPX_BYTE };
+    }
+  }
+  sapxSec.querySelector("#sapxNewQ").addEventListener("click", () => { sapxQn++; sapxQuestion(); });
+  sapxDesignRender(); sapxSeqRender(); sapxProgRender(); sapxQuestion();
+  /* cross-links back from the two labs this one extends */
+  if (baCardEl && !baCardEl.querySelector("#baToSapx")) {
+    const row = document.createElement("div");
+    row.className = "share-row";
+    const span = document.createElement("span");
+    span.style.fontSize = "13.5px";
+    span.innerHTML = "You built an assembler for the existing eight instructions. Now change the instruction set it assembles for:";
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "btn"; b.id = "baToSapx";
+    b.textContent = "Extend the SAP-1 instruction set lab →";
+    b.addEventListener("click", () => { if (!clickMenuKeyF("lab-sap1-extend")) jumpF("sapxCard"); });
+    row.appendChild(span); row.appendChild(b);
+    baCardEl.appendChild(row);
+  }
+  const asmCardElF = $F("asmCard");
+  if (asmCardElF && !asmCardElF.querySelector("#asmToSapx")) {
+    const row = document.createElement("div");
+    row.className = "share-row";
+    const span = document.createElement("span");
+    span.style.fontSize = "13.5px";
+    span.innerHTML = "This assembler knows eight instructions because the machine does. Design a ninth, and extend both:";
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "btn"; b.id = "asmToSapx";
+    b.textContent = "Extend the SAP-1 instruction set lab →";
+    b.addEventListener("click", () => { if (!clickMenuKeyF("lab-sap1-extend")) jumpF("sapxCard"); });
+    row.appendChild(span); row.appendChild(b);
+    asmCardElF.appendChild(row);
+  }
+
+  /* ---------------- verification handles + self-tests ---------------- */
+  window.__boothCheck = { run: boothRun, recode: boothRecode, naive: boothNaive, verify: boothVerify };
+  window.__sdCheck = { sramWrite, sramRead, dramLevel, dramReads, verify: sdVerify };
+  window.__sapxCheck = { presets: SAPX_PRESETS, seqOptions: sapxSeqOptions, transform: sapxTransform, run: sapxRun, verify: sapxVerify, opcode: SAPX_OPCODE };
+  try {
+    window.__roundAFSelfTest = { booth: BOOTH_V, sd: SD_V, sapx: SAPX_V };
+    const bad = Object.keys(window.__roundAFSelfTest).filter(k => !window.__roundAFSelfTest[k].pass);
+    if (bad.length && window.console) console.warn("[Round AF self-test] failures:", bad);
+  } catch (e) { window.__roundAFSelfTest = { error: String(e && e.message || e) }; }
+
+  /* ---------------- MENU REGISTRATION + COUNT REBUILD ---------------- */
+  function addMenuItemF(groupName, afterKey, spec) {
+    const list = $F("menuList"); if (!list) return false;
+    if (list.querySelector('[data-key="' + spec.key + '"]')) return false;
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "menu-item"; b.dataset.key = spec.key;
+    b.dataset.search = (spec.label + " " + spec.hint + " " + spec.search).toLowerCase();
+    if (spec.level) b.dataset.uxlevel = spec.level;
+    b.innerHTML = '<span class="mi-dot" aria-hidden="true"></span><span class="mi-label"></span><small></small>';
+    b.querySelector(".mi-label").textContent = spec.label;
+    b.querySelector("small").textContent = spec.hint;
+    b.addEventListener("click", () => { const p = $F("menuPanel"); if (p) p.hidden = true; const mb = $F("menuBtn"); if (mb) mb.setAttribute("aria-expanded", "false"); spec.go(); });
+    if (afterKey) {
+      const anchor = list.querySelector('[data-key="' + afterKey + '"]');
+      if (anchor) { anchor.parentNode.insertBefore(b, anchor.nextSibling); return true; }
+    }
+    let sib = null, inGroup = false;
+    Array.prototype.slice.call(list.children).forEach(el => {
+      if (el.classList.contains("menu-group")) inGroup = (el.dataset.group || "").trim() === groupName;
+      else if (inGroup && el.classList.contains("menu-item")) sib = el;
+    });
+    if (sib) sib.parentNode.insertBefore(b, sib.nextSibling); else list.appendChild(b);
+    return true;
+  }
+  const goOrgF = id => () => { setTopArea("systems"); syncRail("systems"); const pb = document.querySelector('#sysPicker [data-sys="assembly"]'); if (pb) pb.click(); jumpF(id); };
+  const goArchF = id => () => { setTopArea("systems"); syncRail("systems"); const pb = document.querySelector('#sysPicker [data-sys="arch"]'); if (pb) pb.click(); jumpF(id); };
+  addMenuItemF("Computer Architecture", "lab-prefetch", {
+    key: "lab-booth", label: "Booth's algorithm lab — signed multiplication by recoding",
+    hint: "Recode a negative multiplier into 0/+1/−1 digits and step A:Q:Q₋₁ through add, subtract and arithmetic shifts — then watch the unsigned machine get the same bits wrong",
+    search: "booth booths algorithm signed multiplication multiply recoding partial products arithmetic shift two's complement twos complement negative operand shift-and-add shift and add multiplier sign extension simulator lab",
+    level: "advanced", go: goArchF("boothCard")
+  });
+  addMenuItemF("Computer Organization", "lab-memtiming", {
+    key: "lab-sram-dram", label: "SRAM cell & DRAM refresh lab — one bit, two ways of remembering",
+    hint: "A 6-transistor cross-coupled SRAM cell that holds its bit for free, beside a 1T1C DRAM cell whose charge decays on a time slider until refresh restores it — at a cost in stolen cycles",
+    search: "sram dram cell refresh static ram dynamic ram 6t six transistor cross-coupled cross coupled inverters word line bit line capacitor charge decay leakage sense threshold refresh cycles stolen memory timing companion simulator lab",
+    level: "intermediate", go: goOrgF("sramCard")
+  });
+  addMenuItemF("Computer Organization", "lab-build-assembler", {
+    key: "lab-sap1-extend", label: "Extend the SAP-1 instruction set lab — design opcode 9",
+    hint: "Design a new SAP-1 instruction (INC, CMA or CLR) at the free opcode 9: specify its execute rows from the datapath's control operations, pass validation, then assemble and run a program that uses it",
+    search: "extend instruction set sap-1 sap1 new instruction design opcode isa control signals register transfer datapath ir mar mdr alu execute rows validate assembler extension inc cma clr complement increment simulator lab",
+    level: "intermediate", go: goOrgF("sapxCard")
+  });
+  (function rebuildCountsF() {
+    const RJ = window.__uxRoundJ; if (!RJ) return;
+    const groups = RJ.menuGroups(); const counts = {}; let total = 0;
+    groups.forEach(g => {
+      counts[g.name] = g.items.length; total += g.items.length;
+      const c = g.header.querySelector(".mi-count"); if (c) c.textContent = g.items.length;
+    });
+    window.LAB_MENU = { groups: groups.map(g => ({ name: g.name, items: g.items.map(b => { const l = b.querySelector(".mi-label"); return l ? l.textContent : ""; }) })), count: total };
+    window.LAB_MODULES = { modules: groups.map(g => ({ name: g.name, count: g.items.length })), total };
+    RJ.buildRailAndList(counts);
+    RJ.buildGallery();
+    ["boards", "arch", "os", "org"].forEach(id => {
+      const h = document.querySelector("#module-" + id + " .mh-count");
+      if (!h) return;
+      const name = { boards: "Boards, Modulation & Projects", arch: "Computer Architecture", os: "Operating Systems", org: "Computer Organization" }[id];
+      if (counts[name]) h.textContent = counts[name] + " items";
+    });
+    window.__countsAF = { total, counts };
+  })();
+})();
+</script>
