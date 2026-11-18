@@ -2032,7 +2032,7 @@ GPIO.output(17, GPIO.LOW)</pre>
     <a class="btn primary feedback-link" href="https://docs.google.com/forms/d/e/1FAIpQLSdzhUaqIo4sETPXgwitwxqZrOQW1xq2MHIku6izn-HagQpUEw/viewform" target="_blank" rel="noopener">Leave feedback</a>
   </section>
 
-  <footer class="site"><span class="owner-credit">From Gates to Systems — designed and built by Ebuka Philip Oguchi.</span><br />Built gate by gate — every output and every truth-table row on this page is computed live by the same netlist engine that lights the wires.</footer>
+  <footer class="site"><span class="owner-credit">From Gates to Systems — designed and built by Ebuka Philip Oguchi, Ph.D.</span><br />Built gate by gate — every output and every truth-table row on this page is computed live by the same netlist engine that lights the wires.</footer>
 </div>
 
 <script>
@@ -27203,5 +27203,275 @@ html.text-large .bb-panel-note{font-size:15.5px}
     });
     window.__countsAF = { total, counts };
   })();
+})();
+</script>
+
+<style>
+/* ===== Round AA — findability: cross-links + boards A–Z index ===== */
+.fx-xlink{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:10px 0 2px}
+.fx-xlink .fx-note{font-size:13px;color:var(--muted);font-weight:600}
+.fx-xbtn{appearance:none;border:1.5px solid var(--amber);background:var(--amber-soft);color:var(--ink);border-radius:9px;padding:8px 13px;font:inherit;font-size:13.5px;font-weight:700;cursor:pointer;min-height:40px}
+.fx-xbtn:hover{border-color:var(--ink)}
+.fx-xbtn:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+.bb-index{display:flex;flex-wrap:wrap;gap:1px 2px;align-items:baseline;margin:0 0 8px;padding-bottom:8px;border-bottom:1px dashed var(--line)}
+.bb-index-label{font-size:11.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-right:4px}
+.bb-idx-link{border:0;background:transparent;padding:4px 5px;font:inherit;font-size:12.5px;font-weight:600;color:var(--amber);cursor:pointer;text-decoration:underline;text-underline-offset:2px;min-height:32px;border-radius:6px}
+.bb-idx-link:hover{color:var(--ink)}
+.bb-idx-link[aria-pressed="true"]{color:var(--ink);text-decoration:none;background:var(--amber-soft)}
+.bb-idx-link:focus-visible{outline:2px solid var(--amber);outline-offset:1px}
+</style>
+<script>
+"use strict";
+/* ================================================================
+   ROUND AA — findability (owner's test case: the half adder's
+   breadboard build was hard to find; the full adder's was not).
+   Diagnosis of the state this round found:
+   - Every breadboard project WAS already a Menu item
+     ("X — on the breadboard", keys bb-*), so the Menu is untouched
+     here and the activity count is unchanged.
+   - But search ranked by catalogue order only: for "half adder"
+     the circuit came first and its breadboard twin sat several
+     places down; a "board" query got no breadboard boost at all
+     (only the literal word "breadboard" did, in Round W).
+   - The breadboard picker folds its levels: the half adder hides
+     behind the closed "Intermediate" row.
+   - No circuit activity linked to its breadboard build, or back.
+   This round fixes exactly those three things:
+   1) ranking — in the live dropdown and the activity gallery, a
+      query that names a build puts its breadboard version first,
+      and breadboard/board/bench queries boost all bench builds.
+      Matching itself is unchanged (Round W's token matcher).
+   2) cross-links on the stage: "Build this on the breadboard →"
+      on every circuit with a bench counterpart, and
+      "See the circuit →" back from every such bench build.
+      The full adder keeps its Schematic/Breadboard toggle only.
+   3) an A–Z index of every breadboard build at the top of the
+      breadboard picker — names only, one tap each, no level row
+      to open first.
+   ================================================================ */
+(function roundAA() {
+  const $A = id => document.getElementById(id);
+  const normA = s => String(s == null ? "" : s).toLowerCase().replace(/\s+/g, " ").trim();
+
+  /* ---------------- 1) search ranking ---------------- */
+  const BOARD_TOK = /^(breadboard|breadbord|board|bench)$/;
+  const isBBKey = k => k === "breadboard" || /^bb-/.test(k || "");
+  function coreName(label) {
+    return normA(label).replace(/^\d+\.\s*/, "").replace(/\s+— on the breadboard$/, "").trim();
+  }
+  function strippedName(n) { return n.replace(/^\d+-bit\s+/, "").replace(/^\d+:\d+\s+/, ""); }
+  let hayCache = null;
+  function hayFor(key) {
+    if (!hayCache) {
+      hayCache = {};
+      document.querySelectorAll("#menuList .menu-item").forEach(it => {
+        const l = it.querySelector(".mi-label");
+        hayCache[it.dataset.key || ""] = normA((l ? l.textContent : "") + " " + (it.dataset.search || ""));
+      });
+    }
+    return hayCache[key] || "";
+  }
+  function fxScore(key, label, q) {
+    const toks = normA(q).split(" ").filter(Boolean);
+    if (!toks.length) return 0;
+    const wantsBoard = toks.some(t => BOARD_TOK.test(t));
+    const coreToks = toks.filter(t => !BOARD_TOK.test(t));
+    const core = coreToks.join(" ");
+    const name = coreName(label), stripped = strippedName(name);
+    let s = 0;
+    if (core) {
+      if (name === core || stripped === core) s += 100;
+      else if (name.indexOf(core) === 0 || stripped.indexOf(core) === 0) s += 60;
+      else if (name.indexOf(core) >= 0) s += 45;
+      else if (coreToks.every(t => name.indexOf(t) >= 0)) s += 30;
+      if (isBBKey(key)) {
+        if (s >= 30) s += 25;
+        else if (coreToks.every(t => hayFor(key).indexOf(t) >= 0)) s += 30;
+      }
+    }
+    if (wantsBoard && isBBKey(key)) s += 50;
+    return s;
+  }
+  function catalogA() {
+    const list = $A("menuList"); const out = []; let group = "";
+    if (!list) return out;
+    Array.prototype.slice.call(list.children).forEach(el => {
+      if (el.classList.contains("menu-group")) group = (el.dataset.group || "").trim();
+      else if (el.classList.contains("menu-item")) {
+        const lbl = el.querySelector(".mi-label");
+        out.push({ key: el.dataset.key || "", label: lbl ? lbl.textContent.trim() : "", group, search: el.dataset.search || "" });
+      }
+    });
+    return out.filter(a => a.key);
+  }
+  function fxRankGallery() {
+    const inp = $A("uxSearch"); if (!inp) return;
+    const q = normA(inp.value); if (!q) return;
+    const gal = $A("uxGallery"); if (!gal) return;
+    gal.querySelectorAll(".ux-cards").forEach(grid => {
+      const cards = Array.prototype.slice.call(grid.children);
+      if (cards.length < 2) return;
+      const scored = cards.map((c, i) => {
+        const t = c.querySelector(".ux-title");
+        return { c, i, s: fxScore(c.dataset.key || "", t ? t.textContent : c.textContent, q) };
+      });
+      const sorted = scored.slice().sort((a, b) => (b.s - a.s) || (a.i - b.i));
+      if (sorted.every((x, j) => x.c === cards[j])) return;
+      sorted.forEach(x => grid.appendChild(x.c));
+    });
+  }
+  function fxRankDropdown() {
+    const inp = $A("uxSearch"); if (!inp) return;
+    const q = normA(inp.value); if (!q) return;
+    const box = document.querySelector(".ux-results");
+    if (!box || box.hidden) return;
+    const btns = Array.prototype.slice.call(box.querySelectorAll(".ux-result:not([data-fgs-instr-result])"));
+    if (!btns.length) return;
+    const labelOf = b => { const sp = b.querySelector("span"); return sp ? sp.textContent : b.textContent; };
+    const scored = btns.map((b, i) => ({ b, i, s: fxScore(b.dataset.key || "", labelOf(b), q) }));
+    const sorted = scored.slice().sort((a, b) => (b.s - a.s) || (a.i - b.i));
+    const orderChanged = sorted.some((x, j) => x.b !== btns[j]);
+    /* a top-scoring breadboard build that the dropdown's own
+       substring pass left outside its first 8: rebuild the list
+       from the same catalogue with the site's token matcher */
+    const dispKeys = new Set(btns.map(b => b.dataset.key || ""));
+    const hits = catalogA().filter(a => {
+      const hay = normA(a.label + " " + a.group + " " + a.search);
+      return window.__fgsQMatch ? window.__fgsQMatch(hay, q) : hay.indexOf(q) >= 0;
+    }).map((a, i) => ({ a, i, s: fxScore(a.key, a.label, q) }))
+      .sort((x, y) => (y.s - x.s) || (x.i - y.i));
+    const missingTop = hits.slice(0, 8).find(h => h.s >= 65 && !dispKeys.has(h.a.key));
+    if (missingTop) {
+      const instr = box.querySelector("[data-fgs-instr-result]");
+      const rawQ = (inp.value || "").trim();
+      box.innerHTML = "";
+      const cnt = document.createElement("div"); cnt.className = "ux-rcount";
+      cnt.textContent = hits.length + " activit" + (hits.length === 1 ? "y" : "ies") + " match “" + rawQ + "” — tap one to go there";
+      box.appendChild(cnt);
+      if (instr) box.appendChild(instr);
+      hits.slice(0, 8).forEach(h => {
+        const b = document.createElement("button");
+        b.type = "button"; b.className = "ux-result"; b.dataset.key = h.a.key; b.setAttribute("role", "option");
+        const sp = document.createElement("span"); sp.textContent = h.a.label;
+        const sm = document.createElement("small"); sm.textContent = h.a.group;
+        b.appendChild(sp); b.appendChild(sm);
+        b.addEventListener("click", () => {
+          const it = document.querySelector('#menuList .menu-item[data-key="' + (window.CSS && CSS.escape ? CSS.escape(b.dataset.key) : b.dataset.key) + '"]');
+          box.hidden = true;
+          if (it) it.click();
+        });
+        box.appendChild(b);
+      });
+      if (hits.length > 8) {
+        const more = document.createElement("div"); more.className = "ux-rcount";
+        more.textContent = "…and " + (hits.length - 8) + " more — keep typing to narrow";
+        box.appendChild(more);
+      }
+      return;
+    }
+    if (!orderChanged) return;
+    /* re-append in score order (appendChild moves a node to the
+       end, so going in sorted order leaves them sorted); the
+       trailing "…and N more" count line goes back last */
+    const more = Array.prototype.slice.call(box.querySelectorAll(".ux-rcount")).slice(1);
+    sorted.forEach(x => box.appendChild(x.b));
+    more.forEach(m => box.appendChild(m));
+  }
+  let fxTimer = null, fxTimer2 = null;
+  function fxSchedule() { clearTimeout(fxTimer); fxTimer = setTimeout(() => { fxRankGallery(); fxRankDropdown(); }, 90); }
+  function fxScheduleLate() { clearTimeout(fxTimer2); fxTimer2 = setTimeout(() => { fxRankGallery(); fxRankDropdown(); }, 430); }
+  const galEl = $A("uxGallery");
+  if (galEl && "MutationObserver" in window) new MutationObserver(fxSchedule).observe(galEl, { childList: true });
+  const resBox = document.querySelector(".ux-results");
+  if (resBox && "MutationObserver" in window) new MutationObserver(fxSchedule).observe(resBox, { childList: true });
+  const searchEl = $A("uxSearch");
+  if (searchEl) {
+    searchEl.addEventListener("input", fxScheduleLate);
+    searchEl.addEventListener("focus", fxScheduleLate);
+  }
+
+  /* ---------------- 2) circuit <-> breadboard cross-links ---------------- */
+  const C2B = { half: "halfadd", halfsub: "halfsub", fullsub: "fullsub", mux2: "mux", mux4: "mux4", comp1: "comp", ripple: "ripple2", alu: "alu" };
+  const G2B = { NOT: "not", AND: "and", OR: "or", XOR: "xor", NAND: "nand", NOR: "nor" };
+  const B2C = { halfadd: "half", halfsub: "halfsub", fullsub: "fullsub", mux: "mux2", mux4: "mux4", comp: "comp1", ripple2: "ripple", alu: "alu" };
+  const B2G = { not: "NOT", and: "AND", or: "OR", xor: "XOR", nand: "NAND", nor: "NOR" };
+  let fxRow = null, fxNote = null, fxBtn = null;
+  (function buildXlink() {
+    const title = $A("stageTitle"); if (!title) return;
+    const head = title.closest(".stage-head"); if (!head || !head.parentNode) return;
+    fxRow = document.createElement("div");
+    fxRow.className = "fx-xlink"; fxRow.id = "fxXlink"; fxRow.hidden = true;
+    fxNote = document.createElement("span"); fxNote.className = "fx-note";
+    fxBtn = document.createElement("button"); fxBtn.type = "button"; fxBtn.className = "fx-xbtn";
+    fxRow.appendChild(fxNote); fxRow.appendChild(fxBtn);
+    head.parentNode.insertBefore(fxRow, head.nextSibling);
+  })();
+  function fxScrollStage() {
+    const t = $A("stageTitle");
+    if (t) setTimeout(() => t.scrollIntoView({ behavior: "smooth", block: "start" }), 60);
+  }
+  function fxUpdate() {
+    if (!fxRow) return;
+    try {
+      const inBB = state.circuitId === "full" && state.view === "breadboard";
+      if (inBB) {
+        if (BBH.active === "full") { fxRow.hidden = true; return; }
+        const gate = B2G[BBH.active], circ = B2C[BBH.active];
+        if (!gate && !circ) { fxRow.hidden = true; return; }
+        fxRow.hidden = false;
+        fxNote.textContent = gate ? "This gate is also in the Gate Lab:" : "This build is also a circuit:";
+        fxBtn.textContent = "See the circuit →";
+        fxBtn.onclick = () => {
+          if (gate) {
+            selectCircuit("gatelab");
+            const gb = document.querySelector('#gateChooser button[data-gate="' + gate + '"]');
+            if (gb) gb.click();
+          } else selectCircuit(circ);
+          fxScrollStage();
+        };
+      } else {
+        let bbId = null;
+        if (state.circuitId === "gatelab") bbId = G2B[state.gateType] || null;
+        else if (C2B[state.circuitId]) bbId = C2B[state.circuitId];
+        if (!bbId || !BBH.projects[bbId]) { fxRow.hidden = true; return; }
+        fxRow.hidden = false;
+        fxNote.textContent = "On the breadboard:";
+        fxBtn.textContent = "Build this on the breadboard →";
+        fxBtn.onclick = () => { bbSetProject(bbId); fxScrollStage(); };
+      }
+    } catch (e) { fxRow.hidden = true; }
+  }
+  if (typeof renderStage === "function") {
+    const _fxRS = renderStage;
+    renderStage = function () { const r = _fxRS.apply(this, arguments); fxUpdate(); return r; };
+  }
+  document.addEventListener("click", e => {
+    if (e.target && e.target.closest && e.target.closest("[data-bbproj], #picker [data-circuit], #gateChooser button")) setTimeout(fxUpdate, 90);
+  }, false);
+  fxUpdate();
+
+  /* ---------------- 3) A–Z index at the top of the picker ---------------- */
+  (function boardsIndex() {
+    const pk = $A("bbPicker");
+    if (!pk || typeof BBP_PROJECTS === "undefined" || $A("bbIndex")) return;
+    const wrap = document.createElement("div");
+    wrap.className = "bb-index"; wrap.id = "bbIndex";
+    const lab = document.createElement("span");
+    lab.className = "bb-index-label"; lab.textContent = "All breadboard builds A–Z — tap one:";
+    wrap.appendChild(lab);
+    const items = [{ id: "full", name: "Full adder" }].concat(BBP_PROJECTS.map(p => ({ id: p.id, name: p.name })));
+    items.sort((a, b) => a.name.localeCompare(b.name));
+    items.forEach(it => {
+      const b = document.createElement("button");
+      b.type = "button"; b.className = "bb-idx-link"; b.dataset.bbproj = it.id;
+      b.textContent = it.name;
+      b.setAttribute("aria-pressed", it.id === "full" ? "true" : "false");
+      b.addEventListener("click", () => bbSetProject(it.id));
+      wrap.appendChild(b);
+    });
+    pk.insertBefore(wrap, pk.firstChild);
+  })();
+
+  window.__roundAA = { fxScore, fxUpdate };
 })();
 </script>
