@@ -27475,3 +27475,598 @@ html.text-large .bb-panel-note{font-size:15.5px}
   window.__roundAA = { fxScore, fxUpdate };
 })();
 </script>
+<script>
+"use strict";
+/* ================================================================
+   ROUND AG — three new labs, each graded from its own model:
+   ARCHITECTURE: (1) Hardware FIFO / circular buffer — depth-4
+   ring with write/read pointers that wrap, full and empty flags
+   computed from a count, and writes to a full buffer refused
+   (overflow counted, nothing overwritten), verified against a
+   reference queue on every write/read sequence up to length 10.
+   LOGIC & CIRCUITS: (2) VGA timing — 640x480 from two counters:
+   horizontal 640+16+96+48 = 800 pixel clocks, vertical
+   480+10+2+33 = 525 lines, sync pulses active-low, verified by
+   scanning a whole frame and counting active and sync pixels.
+   ORGANIZATION: (3) Stack & subroutine calls on the SAP-1 —
+   CALL (opcode 10) pushes the return address onto a stack that
+   grows down from address 15, RET (opcode 11) pops it; opcodes
+   8 (RETI) and 9 (the extend-the-ISA lab's) are left alone.
+   The worked countdown-with-subroutine is hand-assembled,
+   checked by disassembly round-trip, and its output is checked
+   against reSAP1's run of the original subroutine-free
+   countdown. All animations start paused.
+   ================================================================ */
+(function roundAG() {
+  const $G = id => document.getElementById(id);
+  function jumpG(id) { const el = id && $G(id); if (el) setTimeout(() => el.scrollIntoView({ behavior: "smooth", block: "start" }), 60); }
+  function clickMenuKeyG(key) { const it = document.querySelector('#menuList .menu-item[data-key="' + key + '"]'); if (it) { it.click(); return true; } return false; }
+  function fbSetG(el, ok, msg) { if (!el) return; el.textContent = (ok ? "✓ " : "✗ ") + msg; el.style.color = ok ? "var(--green)" : "var(--red)"; }
+  function optBtnsG(host, labels, onPick) {
+    host.innerHTML = "";
+    labels.forEach((lab, i) => { const b = document.createElement("button"); b.type = "button"; b.className = "btn"; b.textContent = lab; b.addEventListener("click", () => onPick(i, b)); host.appendChild(b); });
+  }
+  function mkSectionG(id, title, what) {
+    const sec = document.createElement("section");
+    sec.className = "card stage-card"; sec.id = id; sec.style.marginTop = "16px"; sec.style.marginBottom = "16px";
+    sec.innerHTML = "<h2>" + title + "</h2><p class=\"what\">" + what + "</p>";
+    return sec;
+  }
+  function checkBlockG(sec, prefix) {
+    const d = document.createElement("div");
+    d.innerHTML = '<div class="lab-check"><span class="lab-check-q" id="' + prefix + 'Q"></span><span id="' + prefix + 'Opts" style="display:flex;gap:6px;flex-wrap:wrap"></span><span class="lab-check-fb" id="' + prefix + 'Fb" aria-live="polite"></span></div>' +
+      '<div class="share-row"><button type="button" class="btn" id="' + prefix + 'NewQ">New question</button></div>';
+    sec.appendChild(d);
+    return d;
+  }
+  const archHostG = $G("sysArch") || $G("systemsView");
+  const circHostG = $G("circuitsView");
+  const orgHostG = $G("sysAssembly") || $G("systemsView");
+  const agStyle = document.createElement("style");
+  agStyle.textContent = ".ag-band{fill:var(--panel2);stroke:var(--line2);stroke-width:1.2}.ag-active{fill:var(--teal);opacity:.28}.ag-sync{fill:var(--amber,#d97706);opacity:.55}.ag-beam{fill:var(--red)}.ag-wave{stroke:var(--ink);stroke-width:2;fill:none}.ag-mark{stroke:var(--red);stroke-width:2.4}.ag-txt{font-size:15px;fill:var(--ink);font-weight:700}";
+  document.head.appendChild(agStyle);
+  const hex2G = v => "0x" + (v & 255).toString(16).toUpperCase().padStart(2, "0");
+
+  /* ================================================================
+     ARCH — HARDWARE FIFO / CIRCULAR BUFFER
+     Depth 4. State: slots[4], write pointer w, read pointer r,
+     count. Invariants: 0 <= count <= 4; w == (r + count) mod 4;
+     empty iff count == 0; full iff count == 4. Note w == r in
+     BOTH the empty and the full state — the pointers alone
+     cannot tell them apart, which is why the count (or an extra
+     flag bit) exists. A write while full is refused: overflow
+     counter increments, slots and pointers do not move, and the
+     oldest value survives — overwriting it silently would be a
+     different (and worse) design, the lossy ring buffer.
+     ================================================================ */
+  const FIFO_DEPTH = 4;
+  function fifoNew() { return { slots: [null, null, null, null], w: 0, r: 0, count: 0, nextVal: 1, writes: 0, reads: 0, overflows: 0, underflows: 0 }; }
+  function fifoWrite(st) {
+    if (st.count >= FIFO_DEPTH) { st.overflows++; return { ok: false, why: "full" }; }
+    const v = st.nextVal++;
+    st.slots[st.w] = v; st.w = (st.w + 1) % FIFO_DEPTH; st.count++; st.writes++;
+    return { ok: true, value: v };
+  }
+  function fifoRead(st) {
+    if (st.count <= 0) { st.underflows++; return { ok: false, why: "empty" }; }
+    const v = st.slots[st.r];
+    st.slots[st.r] = null; st.r = (st.r + 1) % FIFO_DEPTH; st.count--; st.reads++;
+    return { ok: true, value: v };
+  }
+  function fifoSim(ops) { const st = fifoNew(); ops.split("").forEach(c => { if (c === "W") fifoWrite(st); else if (c === "R") fifoRead(st); }); return st; }
+  function fifoVerify() {
+    /* every W/R sequence up to length 10 against a plain queue */
+    let ok = true, checked = 0;
+    function walk(prefix) {
+      const st = fifoNew(); const ref = []; let nextVal = 1, ovf = 0, unf = 0;
+      for (const c of prefix) {
+        if (c === "W") { const r = fifoWrite(st); if (ref.length < FIFO_DEPTH) { if (!r.ok || r.value !== nextVal) ok = false; ref.push(nextVal++); } else { if (r.ok) ok = false; ovf++; } }
+        else { const r = fifoRead(st); if (ref.length) { if (!r.ok || r.value !== ref[0]) ok = false; ref.shift(); } else { if (r.ok) ok = false; unf++; } }
+      }
+      if (st.count !== ref.length) ok = false;
+      if (st.w !== (st.r + st.count) % FIFO_DEPTH) ok = false;
+      if (st.overflows !== ovf || st.underflows !== unf) ok = false;
+      const held = []; for (let i = 0; i < st.count; i++) held.push(st.slots[(st.r + i) % FIFO_DEPTH]);
+      if (held.join(",") !== ref.join(",")) ok = false;
+      checked++;
+      if (prefix.length < 10) { walk(prefix + "W"); walk(prefix + "R"); }
+    }
+    walk("");
+    const full = fifoSim("WWWW");
+    const fullWrite = fifoWrite(fifoSim("WWWW"));
+    return { sequences: checked, orderOk: ok, fullFlags: full.count === 4 && full.w === full.r,
+      overflowRefused: !fullWrite.ok && fullWrite.why === "full",
+      pass: !!(ok && full.count === 4 && !fullWrite.ok) };
+  }
+  const FIFO_V = fifoVerify();
+  const fifoSec = mkSectionG("fifoCard", "Hardware FIFO — the circular buffer",
+    "Between a fast producer and a slow consumer sits the oldest structure in hardware: a <b>first-in, first-out queue</b> built as a <b>circular buffer</b>. This one is four slots deep. A <b>write pointer</b> chases a <b>read pointer</b> around the ring, both wrapping from slot 3 back to slot 0, and a <b>count</b> of occupied slots computes the two flags that run the machine: <b>empty</b> (count = 0) and <b>full</b> (count = 4). The count is not bookkeeping for its own sake: when the buffer is empty the pointers are equal, and when it is full the pointers are <i>also</i> equal — the pointers alone cannot tell those two states apart, so something else has to. Fill the buffer, then write once more: the write is <b>refused</b> and counted as an <b>overflow</b>. Nothing is overwritten. (A design that silently overwrites the oldest value exists — the lossy ring buffer in audio and logging — but it is a different contract, and this lab does not pretend refusal and loss are the same thing.) This is the queue inside every UART, every DMA engine's staging buffer, and every keyboard controller: the adder labs made values, the memory labs stored them, and this is how values <i>wait in line</i> between the two.");
+  fifoSec.innerHTML +=
+    '<div class="seq-state" id="fifoSlots" style="margin-top:6px"></div>' +
+    '<div class="seq-state" id="fifoPtrs" style="margin-top:8px"></div>' +
+    '<div class="share-row"><button type="button" class="btn primary" id="fifoWriteBtn">Write next value ▸</button><button type="button" class="btn" id="fifoReadBtn">Read oldest ▸</button><button type="button" class="btn" id="fifoFillBtn">Fill it, then one more</button><button type="button" class="btn" id="fifoResetBtn">Reset</button></div>' +
+    '<div class="decimal-line" id="fifoMsg" aria-live="polite"></div>' +
+    '<div class="share-row"><span style="font-size:13.5px">Who fills and drains queues like this one, without the CPU carrying each word?</span><button type="button" class="btn" id="fifoToDma">The DMA controller lab →</button></div>' +
+    '<p class="proj-teaches"><b>Teaches:</b> pointer wrap-around, why full and empty both show equal pointers and need a count or an extra bit to separate, backpressure (a refused write is information the producer must honour), and the difference between a FIFO and a lossy ring buffer — same wiring, opposite promise about your data.</p>';
+  if (archHostG) archHostG.appendChild(fifoSec);
+  fifoSec.querySelector("#fifoToDma").addEventListener("click", () => { if (!clickMenuKeyG("dma-controller")) jumpG("dmaCard"); });
+  const fifo = { st: fifoNew() };
+  function fifoRender(msg) {
+    const st = fifo.st;
+    fifoSec.querySelector("#fifoSlots").innerHTML = st.slots.map((v, i) => {
+      const marks = [];
+      if (st.w === i) marks.push("write →");
+      if (st.r === i) marks.push("→ read");
+      return '<div class="seq-cell' + (v !== null ? " one" : "") + '"><b>' + (v === null ? "·" : v) + "</b>slot " + i + (marks.length ? " · " + marks.join(" ") : "") + "</div>";
+    }).join("");
+    fifoSec.querySelector("#fifoPtrs").innerHTML =
+      '<div class="seq-cell"><b>' + st.w + "</b>write pointer</div>" +
+      '<div class="seq-cell"><b>' + st.r + "</b>read pointer</div>" +
+      '<div class="seq-cell"><b>' + st.count + " / " + FIFO_DEPTH + "</b>values held</div>" +
+      '<div class="seq-cell' + (st.count === 0 ? " one" : "") + '"><b>' + (st.count === 0 ? "EMPTY = 1" : "empty = 0") + "</b>flag from the count</div>" +
+      '<div class="seq-cell' + (st.count === FIFO_DEPTH ? " one" : "") + '"><b>' + (st.count === FIFO_DEPTH ? "FULL = 1" : "full = 0") + "</b>flag from the count</div>" +
+      '<div class="seq-cell"><b>' + st.overflows + "</b>overflows refused</div>" +
+      '<div class="seq-cell"><b>' + st.underflows + "</b>reads refused (empty)</div>" +
+      (st.w === st.r ? '<div class="seq-cell"><b>w = r</b>pointers equal — count says ' + (st.count === 0 ? "empty" : st.count === FIFO_DEPTH ? "full" : "?") + "</div>" : "");
+    if (msg) fifoSec.querySelector("#fifoMsg").textContent = msg;
+  }
+  fifoSec.querySelector("#fifoWriteBtn").addEventListener("click", () => {
+    const before = fifo.st.slots.slice();
+    const r = fifoWrite(fifo.st);
+    fifoRender(r.ok
+      ? "Wrote " + r.value + " into the slot the write pointer named; the pointer advanced (and wraps from 3 to 0). Count is now " + fifo.st.count + "."
+      : "Write REFUSED — the buffer is full (count = 4, FULL = 1). Overflow #" + fifo.st.overflows + " counted, and look at the slots: value " + before[fifo.st.r] + ", the oldest, is still exactly where it was. Refusal, not overwrite: the producer must wait or drop its own value — the FIFO will not quietly lose the consumer's data.");
+  });
+  fifoSec.querySelector("#fifoReadBtn").addEventListener("click", () => {
+    const r = fifoRead(fifo.st);
+    fifoRender(r.ok
+      ? "Read returned " + r.value + " — the oldest value in the buffer, because the read pointer has been chasing the write pointer in order. That is the whole FIFO promise: out in the order they went in. Count is now " + fifo.st.count + "."
+      : "Read REFUSED — the buffer is empty (count = 0, EMPTY = 1). There is no oldest value; returning a stale slot would be inventing data. Underflow #" + fifo.st.underflows + " counted and nothing moved.");
+  });
+  fifoSec.querySelector("#fifoFillBtn").addEventListener("click", () => {
+    fifo.st = fifoNew();
+    for (let i = 0; i < FIFO_DEPTH; i++) fifoWrite(fifo.st);
+    const r = fifoWrite(fifo.st);
+    fifoRender("Filled from empty with four writes — and note the pointers: write = " + fifo.st.w + ", read = " + fifo.st.r + ", equal, exactly as they were when the buffer was empty. The count (4, not 0) is the only thing telling full from empty. The fifth write was then attempted and " + (r.ok ? "accepted (this should not happen)" : "REFUSED as overflow #" + fifo.st.overflows) + " — the four values are untouched.");
+  });
+  fifoSec.querySelector("#fifoResetBtn").addEventListener("click", () => { fifo.st = fifoNew(); fifoRender("Reset: both pointers at slot 0, count 0, EMPTY = 1. The next value written will be value 1."); });
+  fifoRender("Reset: both pointers at slot 0, count 0, EMPTY = 1. Write values in, read them back out — and try to break the order, or the full buffer.");
+  checkBlockG(fifoSec, "fifo");
+  let fifoQn = 0;
+  function fifoQuestion() {
+    const fb = fifoSec.querySelector("#fifoFb"), host = fifoSec.querySelector("#fifoOpts");
+    fb.textContent = "";
+    const kind = fifoQn % 3;
+    if (kind === 0) {
+      const st = fifoSim("WWWRW");
+      fifoSec.querySelector("#fifoQ").textContent = "Predict, then check: from empty, the operations are Write, Write, Write, Read, Write. What is the count, and is the buffer full?";
+      optBtnsG(host, ["Count 3 — not full", "Count 4 — full", "Count 2 — the read emptied a slot permanently"], i => fbSetG(fb, i === 0, i === 0
+        ? "Right — three writes (count 3), one read (count 2), one write into the freed slot (count 3). The read did not waste the slot: the write pointer wrapped into it. Count " + st.count + ", full = 0 — the lab model agrees."
+        : "Not that state — count the operations: +1 +1 +1 −1 +1 = 3 values held, so count = 3 and FULL = 0. Circular means the slot the read freed is exactly where the next write lands."));
+      window.__fifoQuestion = { kind: "count", expected: st.count };
+    } else if (kind === 1) {
+      fifoSec.querySelector("#fifoQ").textContent = "Predict, then check: the buffer is full and one more write arrives. What happens to the oldest value?";
+      optBtnsG(host, ["It survives — the write is refused and counted as an overflow", "It is overwritten — oldest out, newest in", "It is read out automatically to make room"], i => fbSetG(fb, i === 0, i === 0
+        ? "Right — refusal is this FIFO's contract: overflow counted, pointers frozen, oldest value intact. Overwriting designs exist (lossy ring buffers), but they must say so — a FIFO that loses data silently is a bug with good wiring."
+        : "Not in this design — the write is refused and the overflow counter increments; every stored value survives. Silent overwrite is the lossy ring buffer's contract, and confusing the two is how data vanishes without an error anywhere."));
+      window.__fifoQuestion = { kind: "overflow", expected: "refused" };
+    } else {
+      fifoSec.querySelector("#fifoQ").textContent = "Predict, then check: the write and read pointers are equal. What state is the buffer in?";
+      optBtnsG(host, ["Cannot tell from the pointers — equal means empty OR full; the count decides", "Empty — equal pointers always mean empty", "Full — equal pointers always mean full"], i => fbSetG(fb, i === 0, i === 0
+        ? "Right — that ambiguity is the circular buffer's classic trap: after 4 writes from empty the write pointer wraps all the way back to the read pointer, looking exactly like empty. Hardware pays one extra bit (or a count, as here) precisely to separate the two."
+        : "Not decidable — and that is the point. From empty, four writes wrap the write pointer back onto the read pointer: equal pointers, completely full. Any design using pointers alone must add a count or a flag bit, or it will mistake a full buffer for an empty one."));
+      window.__fifoQuestion = { kind: "ptrs", expected: "ambiguous" };
+    }
+  }
+  fifoSec.querySelector("#fifoNewQ").addEventListener("click", () => { fifoQn++; fifoQuestion(); });
+  fifoQuestion();
+  /* the DMA lab gains the return link */
+  const dmaCardEl = $G("dmaCard");
+  if (dmaCardEl && !dmaCardEl.querySelector("#dmaToFifo")) {
+    const row = document.createElement("div");
+    row.className = "share-row";
+    const span = document.createElement("span");
+    span.style.fontSize = "13.5px";
+    span.innerHTML = "Engines like this one stage their words in a small hardware queue:";
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "btn"; b.id = "dmaToFifo";
+    b.textContent = "Hardware FIFO — the circular buffer lab →";
+    b.addEventListener("click", () => { if (!clickMenuKeyG("fifo-lab")) jumpG("fifoCard"); });
+    row.appendChild(span); row.appendChild(b);
+    dmaCardEl.appendChild(row);
+  }
+
+  /* ================================================================
+     LOGIC — VGA TIMING SIGNALS (640x480)
+     One pixel clock (25.175 MHz) drives a horizontal counter
+     0..799; at the end of each line a vertical counter advances
+     0..524. Horizontal: active 640, front porch 16, sync 96
+     (active-low, counts 656..751), back porch 48. Vertical:
+     active 480, front porch 10, sync 2 (active-low, lines
+     490..491), back porch 33. The beam is only "drawing" when
+     BOTH counters are in their active regions; the porches and
+     sync pulses are blanking — the price of giving the beam
+     (historically) time to fly back, kept because monitors
+     still lock to it. Frame: 800 x 525 = 420,000 clocks, so
+     refresh = 25.175 MHz / 420,000 = 59.94 Hz.
+     ================================================================ */
+  const VGA = { hA: 640, hFP: 16, hS: 96, hBP: 48, vA: 480, vFP: 10, vS: 2, vBP: 33, clock: 25175000 };
+  VGA.hT = VGA.hA + VGA.hFP + VGA.hS + VGA.hBP; /* 800 */
+  VGA.vT = VGA.vA + VGA.vFP + VGA.vS + VGA.vBP; /* 525 */
+  VGA.refresh = VGA.clock / (VGA.hT * VGA.vT);
+  function vgaHRegion(x) { return x < VGA.hA ? "active — picture" : x < VGA.hA + VGA.hFP ? "front porch (blanking)" : x < VGA.hA + VGA.hFP + VGA.hS ? "sync pulse (blanking)" : "back porch (blanking)"; }
+  function vgaVRegion(y) { return y < VGA.vA ? "active — picture lines" : y < VGA.vA + VGA.vFP ? "front porch (blanking)" : y < VGA.vA + VGA.vFP + VGA.vS ? "sync pulse (blanking)" : "back porch (blanking)"; }
+  function vgaHSync(x) { return (x >= VGA.hA + VGA.hFP && x < VGA.hA + VGA.hFP + VGA.hS) ? 0 : 1; }
+  function vgaVSync(y) { return (y >= VGA.vA + VGA.vFP && y < VGA.vA + VGA.vFP + VGA.vS) ? 0 : 1; }
+  function vgaVerify() {
+    let active = 0, hLow = 0, vLowLines = 0;
+    for (let y = 0; y < VGA.vT; y++) {
+      if (vgaVSync(y) === 0) vLowLines++;
+      for (let x = 0; x < VGA.hT; x++) {
+        if (x < VGA.hA && y < VGA.vA) active++;
+        if (vgaHSync(x) === 0) hLow++;
+      }
+    }
+    const sums = VGA.hT === 800 && VGA.vT === 525;
+    const counts = active === 640 * 480 && hLow === 96 * 525 && vLowLines === 2;
+    const edges = vgaHSync(655) === 1 && vgaHSync(656) === 0 && vgaHSync(751) === 0 && vgaHSync(752) === 1 &&
+      vgaVSync(489) === 1 && vgaVSync(490) === 0 && vgaVSync(491) === 0 && vgaVSync(492) === 1;
+    const refr = Math.abs(VGA.refresh - 59.94) < 0.01;
+    return { sums, counts, edges, refr, active, refresh: VGA.refresh, pass: !!(sums && counts && edges && refr) };
+  }
+  const VGA_V = vgaVerify();
+  const vgaSec = mkSectionG("vgaCard", "VGA timing — two counters draw a 640×480 frame",
+    "A VGA monitor draws nothing on its own: it follows two counters in the source. A <b>horizontal counter</b> counts pixel clocks 0–799 across one line; a <b>vertical counter</b> counts lines 0–524 down one frame. Only the first <b>640</b> clocks of a line and the first <b>480</b> lines carry picture — the rest is <b>blanking</b>, divided into a <b>front porch</b>, a <b>sync pulse</b> (HSYNC and VSYNC are <b>active-low</b>: the pulse is the counter spending 96 clocks, or 2 lines, at 0), and a <b>back porch</b>. The numbers are not decoration: 640 + 16 + 96 + 48 = <b>800 clocks per line</b>, 480 + 10 + 2 + 33 = <b>525 lines per frame</b>, 800 × 525 = 420,000 clocks per frame, and at the standard 25.175 MHz pixel clock that is a <b>59.94 Hz</b> refresh. Step the pixel counter and watch the beam cross from picture into porch into sync; step whole lines to reach the vertical sync; play it and the counters run on their own. Nearly a third of the horizontal time and a tenth of the frame draw nothing at all — blanking is the tax every frame pays so the receiver can find the edges.");
+  vgaSec.innerHTML +=
+    '<div class="schematic-box"><svg id="vgaMap" viewBox="0 0 800 560" role="img" aria-label="Frame map: the 640 by 480 active area inside the 800 by 525 total frame, with sync bands and the beam position" style="display:block;width:100%;height:auto"></svg></div>' +
+    '<div class="schematic-box" style="margin-top:10px"><svg id="vgaWave" viewBox="0 0 800 96" role="img" aria-label="One horizontal line: active region, front porch, active-low HSYNC pulse, back porch, and the beam marker" style="display:block;width:100%;height:auto"></svg></div>' +
+    '<div class="seq-state" id="vgaState" style="margin-top:10px"></div>' +
+    '<div class="share-row"><button type="button" class="btn primary" id="vgaStepPx">Step pixel ▸</button><button type="button" class="btn" id="vgaStepLine">Step line ▸</button><button type="button" class="btn" id="vgaPlay">Play</button><button type="button" class="btn" id="vgaReset">Reset</button></div>' +
+    '<div class="decimal-line" id="vgaMsg" aria-live="polite"></div>' +
+    '<div class="share-row"><span style="font-size:13.5px">The counters doing this work are the same counters built from flip-flops in the sequential pack:</span><button type="button" class="btn" id="vgaToSeq">Sequential logic pack →</button></div>' +
+    '<p class="proj-teaches"><b>Teaches:</b> timing as a specification — a display mode is four numbers per direction, not a resolution; active-low sync; why blanking exists and what it costs (105,600 of every frame\'s 420,000 clocks draw background or nothing); and how a refresh rate is just a clock divided by two counter ranges.</p>';
+  if (circHostG) circHostG.appendChild(vgaSec);
+  vgaSec.querySelector("#vgaToSeq").addEventListener("click", () => { if (!clickMenuKeyG("seq")) jumpG("seqView"); });
+  const vga = { h: 0, v: 0, timer: null };
+  function vgaRender(msg) {
+    const h = vga.h, v = vga.v;
+    const drawing = h < VGA.hA && v < VGA.vA;
+    vgaSec.querySelector("#vgaMap").innerHTML =
+      '<rect x="0" y="0" width="800" height="525" class="ag-band"/>' +
+      '<rect x="656" y="0" width="96" height="525" class="ag-sync"/>' +
+      '<rect x="0" y="490" width="800" height="2" class="ag-sync"/>' +
+      '<rect x="0" y="0" width="640" height="480" class="ag-active"/>' +
+      '<text x="320" y="240" class="ag-txt" style="text-anchor:middle">ACTIVE 640 × 480 — picture</text>' +
+      '<text x="704" y="270" class="ag-txt" style="text-anchor:middle;font-size:12px">HSYNC</text>' +
+      '<text x="400" y="545" class="ag-txt" style="text-anchor:middle;font-size:12px">blanking: porches + sync on every side — the frame is 800 × 525, the picture is only the middle</text>' +
+      (drawing || true ? '<circle cx="' + h + '" cy="' + v + '" r="9" class="ag-beam"/>' : "");
+    const yHi = 22, yLo = 62;
+    vgaSec.querySelector("#vgaWave").innerHTML =
+      '<rect x="0" y="0" width="640" height="96" class="ag-active"/>' +
+      '<rect x="640" y="0" width="16" height="96" class="ag-band"/>' +
+      '<rect x="656" y="0" width="96" height="96" class="ag-sync"/>' +
+      '<rect x="752" y="0" width="48" height="96" class="ag-band"/>' +
+      '<polyline class="ag-wave" points="0,' + yHi + ' 656,' + yHi + ' 656,' + yLo + ' 752,' + yLo + ' 752,' + yHi + ' 800,' + yHi + '"/>' +
+      '<text x="320" y="90" class="ag-txt" style="text-anchor:middle;font-size:12px">active 640</text>' +
+      '<text x="704" y="90" class="ag-txt" style="text-anchor:middle;font-size:12px">HSYNC low 96</text>' +
+      '<line x1="' + h + '" y1="2" x2="' + h + '" y2="94" class="ag-mark"/>';
+    vgaSec.querySelector("#vgaState").innerHTML =
+      '<div class="seq-cell"><b>' + h + " / 799</b>horizontal counter</div>" +
+      '<div class="seq-cell"><b>' + v + " / 524</b>vertical counter (line)</div>" +
+      '<div class="seq-cell"><b>' + vgaHRegion(h) + "</b>horizontal region</div>" +
+      '<div class="seq-cell"><b>' + vgaVRegion(v) + "</b>vertical region</div>" +
+      '<div class="seq-cell"><b>HSYNC = ' + vgaHSync(h) + "</b>" + (vgaHSync(h) === 0 ? "pulse — active-low" : "idle high") + "</div>" +
+      '<div class="seq-cell"><b>VSYNC = ' + vgaVSync(v) + "</b>" + (vgaVSync(v) === 0 ? "pulse — active-low" : "idle high") + "</div>" +
+      '<div class="seq-cell' + (drawing ? " one" : "") + '"><b>' + (drawing ? "DRAWING" : "BLANKING") + "</b>" + (drawing ? "beam inside the picture" : "no picture at this count") + "</div>" +
+      '<div class="seq-cell"><b>59.94 Hz</b>25.175 MHz ÷ 420,000 clocks</div>';
+    if (msg) vgaSec.querySelector("#vgaMsg").textContent = msg;
+  }
+  function vgaStepPx() {
+    vga.h++;
+    if (vga.h >= VGA.hT) { vga.h = 0; vga.v = (vga.v + 1) % VGA.vT; }
+    vgaRender("Pixel clock: H = " + vga.h + ", line " + vga.v + " — " + vgaHRegion(vga.h) + (vga.h < VGA.hA && vga.v < VGA.vA ? "; the beam is drawing." : "; blanking — the counters keep counting, the picture does not change."));
+  }
+  function vgaStop() { if (vga.timer) { clearInterval(vga.timer); vga.timer = null; vgaSec.querySelector("#vgaPlay").textContent = "Play"; } }
+  vgaSec.querySelector("#vgaStepPx").addEventListener("click", () => { vgaStop(); vgaStepPx(); });
+  vgaSec.querySelector("#vgaStepLine").addEventListener("click", () => {
+    vgaStop(); vga.h = 0; vga.v = (vga.v + 1) % VGA.vT;
+    vgaRender("One whole line done (800 pixel clocks): now on line " + vga.v + " — " + vgaVRegion(vga.v) + (vgaVSync(vga.v) === 0 ? ". VSYNC is LOW on this line: lines 490–491 are the vertical sync pulse, the frame's own reset edge." : "."));
+  });
+  vgaSec.querySelector("#vgaPlay").addEventListener("click", e => {
+    if (vga.timer) { vgaStop(); vgaRender("Paused at H = " + vga.h + ", line " + vga.v + ". The counters hold their state — a paused source is a frozen frame."); return; }
+    e.target.textContent = "Pause";
+    vga.timer = setInterval(() => { for (let i = 0; i < 10; i++) { vga.h++; if (vga.h >= VGA.hT) { vga.h = 0; vga.v = (vga.v + 1) % VGA.vT; } } vgaRender("Playing: the counters advance 10 pixel clocks per tick. Watch the beam marker sweep the active area, disappear into the porches, and the HSYNC band flash past on every line."); }, 40);
+  });
+  vgaSec.querySelector("#vgaReset").addEventListener("click", () => { vgaStop(); vga.h = 0; vga.v = 0; vgaRender("Reset: both counters at 0 — the top-left pixel of the frame, the first active clock of the first active line."); });
+  vgaRender("Both counters at 0: the beam sits on the first pixel of the picture. Step pixels to walk one line; the interesting country starts at count 640, where the picture ends and the porches begin.");
+  checkBlockG(vgaSec, "vga");
+  let vgaQn = 0;
+  function vgaQuestion() {
+    const fb = vgaSec.querySelector("#vgaFb"), host = vgaSec.querySelector("#vgaOpts");
+    fb.textContent = "";
+    const kind = vgaQn % 3;
+    if (kind === 0) {
+      vgaSec.querySelector("#vgaQ").textContent = "Predict, then check: how many pixel clocks make one complete line, picture and blanking together?";
+      optBtnsG(host, ["640 — the visible width", "800 — 640 active + 16 porch + 96 sync + 48 porch", "525 — the line count"], i => fbSetG(fb, i === 1, i === 1
+        ? "Right — 800. The monitor times its line from the full count, not the picture: a quarter of every line (160 clocks) is blanking. That is why the pixel clock is 25.175 MHz and not the 640 × 480 × 60 ≈ 18.4 MHz the picture alone would suggest."
+        : "Not that count — a line is everything the horizontal counter cycles through: 640 + 16 + 96 + 48 = 800 clocks. 640 is only the visible part; 525 is the number of lines in a frame, the other counter's range."));
+      window.__vgaQuestion = { kind: "line-clocks", expected: VGA.hT };
+    } else if (kind === 1) {
+      vgaSec.querySelector("#vgaQ").textContent = "Predict, then check: the horizontal counter reads 700 on an active line. Where is the beam, and what is HSYNC?";
+      optBtnsG(host, ["In the sync pulse — HSYNC = 0", "Still drawing picture — HSYNC = 1", "In the back porch — HSYNC = 1"], i => fbSetG(fb, i === 0, i === 0
+        ? "Right — 700 sits inside 656–751, the sync window: the beam is blanked and HSYNC is at 0, because VGA sync pulses are active-low. Step the counter to 700 in the lab and both readouts agree."
+        : "Not there — do the sums: picture ends at 640, the front porch covers 640–655, so 700 is inside the sync pulse (656–751), where HSYNC is pulled to 0. The back porch (752–799) comes after the pulse, not before."));
+      window.__vgaQuestion = { kind: "at-700", expected: vgaHSync(700) };
+    } else {
+      vgaSec.querySelector("#vgaQ").textContent = "Predict, then check: at 25.175 MHz, what refresh rate do the two counters produce?";
+      optBtnsG(host, ["About 59.94 Hz — 25,175,000 ÷ (800 × 525)", "Exactly 82 Hz — 25,175,000 ÷ (640 × 480)", "60 Hz from the clock alone — the counters don't matter"], i => fbSetG(fb, i === 0, i === 0
+        ? "Right — the frame costs 800 × 525 = 420,000 clocks including every porch, so 25.175 MHz ÷ 420,000 ≈ 59.94 Hz. Dividing by the active pixels alone (82 Hz) forgets that blanking consumes real time."
+        : "Not that rate — the counters spend clocks on blanking too: one frame is 800 × 525 = 420,000 clocks, and 25,175,000 ÷ 420,000 ≈ 59.94 Hz. The porches are why the standard rate is 59.94 and not a rounder number."));
+      window.__vgaQuestion = { kind: "refresh", expected: Math.round(VGA.refresh * 100) / 100 };
+    }
+  }
+  vgaSec.querySelector("#vgaNewQ").addEventListener("click", () => { vgaQn++; vgaQuestion(); });
+  vgaQuestion();
+
+  /* ================================================================
+     ORG — STACK & SUBROUTINE CALLS ON THE SAP-1
+     The base eight opcodes (0-7) keep reSAP1's semantics exactly.
+     Opcode 8 stays the capstone's RETI and opcode 9 stays the
+     extend-the-ISA lab's design space, so this extension takes
+     the next two: CALL = opcode 10 (byte 0xA0|addr), RET =
+     opcode 11 (byte 0xB0, operand ignored). A stack pointer SP
+     starts at 15 and the stack grows DOWN from the top of the
+     16-byte memory, sharing it with program and data — the
+     honest constraint of a 16-byte machine, stated in the lab.
+     CALL: mem[SP] <- PC (already the return address, the next
+     instruction), SP <- SP-1, PC <- addr. RET: SP <- SP+1,
+     PC <- mem[SP]. A RET with the stack empty (SP = 15) and a
+     CALL with SP exhausted are reported, not silently wrapped.
+     ================================================================ */
+  const SPS_CALL = 10, SPS_RET = 11, SPS_SP0 = 15;
+  const SPS_SRC = [
+    { a: 0, b: 0x0C, s: "        LDA count", note: "A ← count (3)" },
+    { a: 1, b: 0xA6, s: "loop:   CALL print", note: "push return address 2, jump to the subroutine" },
+    { a: 2, b: 0x2D, s: "        SUB one", note: "A ← A − 1" },
+    { a: 3, b: 0x65, s: "        JZ done", note: "finished when A reaches 0" },
+    { a: 4, b: 0x51, s: "        JMP loop", note: "call the subroutine again" },
+    { a: 5, b: 0x40, s: "done:   HLT", note: "halt — SP must be back at 15" },
+    { a: 6, b: 0x30, s: "print:  OUT", note: "the subroutine body: print A" },
+    { a: 7, b: 0xB0, s: "        RET", note: "pop the return address into PC" },
+    { a: 12, b: 3, s: "count:  DB 3", note: "data" },
+    { a: 13, b: 1, s: "one:    DB 1", note: "data" }
+  ];
+  const SPS_BYTES = [0x0C, 0xA6, 0x2D, 0x65, 0x51, 0x40, 0x30, 0xB0, 0, 0, 0, 0, 3, 1, 0, 0];
+  const SPS_NEST = [0x09, 0xA4, 0x30, 0x40, 0xA6, 0xB0, 0x1A, 0xB0, 0, 40, 2, 0, 0, 0, 0, 0];
+  const SPS_BASE_CD = [0x09, 0x30, 0x2A, 0x65, 0x51, 0x40, 0, 0, 0, 3, 1, 0, 0, 0, 0, 0];
+  function spsDisasm(byte) {
+    const op = (byte >> 4) & 15, ad = byte & 15;
+    const names = ["LDA", "ADD", "SUB", "OUT", "HLT", "JMP", "JZ", "STA"];
+    if (op < 8) return (op === 3 || op === 4) ? names[op] : names[op] + " " + ad;
+    if (op === SPS_CALL) return "CALL " + ad;
+    if (op === SPS_RET) return "RET";
+    return "op" + op;
+  }
+  function spsStep(st) {
+    /* one instruction on state {mem,A,PC,SP,out,steps,halted,maxDepth,note,fault} */
+    if (st.halted || st.fault) return st;
+    const ir = st.mem[st.PC] & 0xff, op = ir >> 4, ad = ir & 15, here = st.PC;
+    st.PC = (st.PC + 1) & 15; st.steps++;
+    if (op === 0) { st.A = st.mem[ad]; st.note = "LDA: A ← mem[" + ad + "] = " + st.A; }
+    else if (op === 1) { st.A = (st.A + st.mem[ad]) & 0xff; st.note = "ADD: A ← A + mem[" + ad + "] = " + st.A; }
+    else if (op === 2) { st.A = (st.A - st.mem[ad]) & 0xff; st.note = "SUB: A ← A − mem[" + ad + "] = " + st.A; }
+    else if (op === 3) { st.out.push(st.A); st.note = "OUT: printed A = " + st.A + " — this is the subroutine's whole body."; }
+    else if (op === 4) { st.halted = true; st.note = "HLT at address " + here + ". Final A = " + st.A + ", output [" + st.out.join(", ") + "], and SP = " + st.SP + " — every CALL was answered by a RET, so the stack is balanced."; }
+    else if (op === 5) { st.PC = ad; st.note = "JMP: PC ← " + ad + "."; }
+    else if (op === 6) { if (st.A === 0) { st.PC = ad; st.note = "JZ: A = 0, so PC ← " + ad + " — the loop is done."; } else st.note = "JZ: A = " + st.A + " ≠ 0, no jump."; }
+    else if (op === 7) { st.mem[ad] = st.A; st.note = "STA: mem[" + ad + "] ← A = " + st.A; }
+    else if (op === SPS_CALL) {
+      if (st.SP < 0) { st.fault = "stack overflow: SP ran off the bottom of memory — on a 16-byte machine the stack and the program share everything, and this program spent it all."; st.note = st.fault; return st; }
+      st.mem[st.SP] = st.PC;
+      st.note = "CALL " + ad + ": pushed the return address " + st.PC + " (the instruction after this CALL) into mem[" + st.SP + "], SP " + st.SP + " → " + (st.SP - 1) + ", then PC ← " + ad + ". The subroutine address came from the instruction; the way back is now in memory.";
+      st.SP = st.SP - 1; st.PC = ad;
+      st.maxDepth = Math.max(st.maxDepth, SPS_SP0 - st.SP);
+    }
+    else if (op === SPS_RET) {
+      if (st.SP >= SPS_SP0) { st.fault = "RET with an empty stack: SP is already at 15, there is no return address to pop — a subroutine returned from a call that never happened."; st.note = st.fault; return st; }
+      st.SP = st.SP + 1; st.PC = st.mem[st.SP] & 15;
+      st.note = "RET: SP " + (st.SP - 1) + " → " + st.SP + ", popped mem[" + st.SP + "] = " + st.PC + " into PC. Execution resumes at the instruction after the CALL — which is why the pushed value was " + st.PC + " and not the CALL's own address. (The popped byte stays in memory; RET does not erase it, it just stops pointing at it.)";
+    }
+    else st.note = "Opcode " + op + " is not part of this machine (8 is the capstone's RETI, 9 is the extend-the-ISA lab's) — treated as a no-op here, as undefined opcodes are in reSAP1.";
+    return st;
+  }
+  function spsRun(memIn) {
+    const st = { mem: memIn.slice(0, 16), A: 0, PC: 0, SP: SPS_SP0, out: [], steps: 0, halted: false, maxDepth: 0, note: "", fault: null };
+    while (st.mem.length < 16) st.mem.push(0);
+    let guard = 0;
+    while (!st.halted && !st.fault && guard++ < 200) spsStep(st);
+    return st;
+  }
+  function spsVerify() {
+    const worked = spsRun(SPS_BYTES);
+    const workedOk = worked.halted && !worked.fault && worked.out.join(",") === "3,2,1" && worked.A === 0 && worked.SP === SPS_SP0 && worked.maxDepth === 1 && worked.mem[15] === 2;
+    const nest = spsRun(SPS_NEST);
+    const nestOk = nest.halted && !nest.fault && nest.out.join(",") === "42" && nest.A === 42 && nest.SP === SPS_SP0 && nest.maxDepth === 2;
+    let baseOk = false, sameAsBase = false;
+    if (window.RE && window.RE.reSAP1) {
+      const a = spsRun(SPS_BASE_CD), b = window.RE.reSAP1(SPS_BASE_CD.slice());
+      baseOk = a.halted === b.halted && a.A === b.A && a.out.join(",") === b.out.join(",") && a.mem.join(",") === b.mem.join(",");
+      sameAsBase = worked.out.join(",") === b.out.join(",");
+    }
+    const listing = SPS_SRC.map(r => spsDisasm(r.b)).join("|");
+    const disOk = listing === "LDA 12|CALL 6|SUB 13|JZ 5|JMP 1|HLT|OUT|RET|op0|op0" || SPS_SRC.slice(0, 8).map(r => spsDisasm(r.b)).join("|") === "LDA 12|CALL 6|SUB 13|JZ 5|JMP 1|HLT|OUT|RET";
+    const bytesOk = SPS_SRC.every(r => SPS_BYTES[r.a] === r.b) && SPS_BYTES[12] === 3 && SPS_BYTES[13] === 1;
+    return { workedOk, nestOk, baseOk, sameAsBase, disOk, bytesOk, workedOut: worked.out, pass: !!(workedOk && nestOk && baseOk && sameAsBase && disOk && bytesOk) };
+  }
+  const SPS_V = spsVerify();
+  const spsSec = mkSectionG("sapstackCard", "Stack &amp; subroutine calls on the SAP-1 — CALL and RET",
+    "Every SAP-1 program on this site so far is one straight line of code with jumps — because the base machine has no way to <i>leave and come back</i>. This lab extends it, honestly and in the open: two new instructions in the two opcodes that are genuinely free. Opcode 8 belongs to the capstone's interrupt RETI and opcode 9 is the extend-the-ISA lab's design space, so <b>CALL is opcode 10</b> (byte <span class=\"mono\">0xA0 | address</span>) and <b>RET is opcode 11</b> (<span class=\"mono\">0xB0</span>). A new register, the <b>stack pointer SP</b>, starts at <b>15</b> and the stack grows <b>down</b> from the top of the same 16 bytes everything else lives in. <b>CALL</b> pushes the return address — the address of the <i>next</i> instruction — onto the stack and jumps; <b>RET</b> pops it back into the PC. The worked program is the countdown you already know from the assembler labs, restructured: the printing now lives in a subroutine at address 6, called once per number. Same output, [3, 2, 1] — verified below against the base engine's run of the original — but the code can now be <i>reused</i> instead of repeated. Watch SP and mem[15] as you step: the stack is not a metaphor, it is two memory cells doing clerical work.");
+  spsSec.innerHTML +=
+    '<div class="share-row"><span style="font-size:13.5px">This lab stands beside two earlier ones:</span>' +
+    '<button type="button" class="btn" id="spsToExtend">Extend the SAP-1 instruction set lab →</button>' +
+    '<button type="button" class="btn" id="spsToBuild">Build an assembler lab →</button>' +
+    '<button type="button" class="btn" id="spsToAsm">The two-pass assembler →</button></div>' +
+    '<div class="ctrl-label" style="margin-top:12px">The worked program — the countdown, with its printing moved into a subroutine</div>' +
+    '<div class="asm-listing" id="spsListing"></div>' +
+    '<div class="seq-state" id="spsRegs" style="margin-top:10px"></div>' +
+    '<div class="ctrl-label" style="margin-top:10px">Memory — code low, data at 12–13, the stack at the top (first push lands in mem[15])</div>' +
+    '<div class="seq-state" id="spsMem"></div>' +
+    '<div class="share-row"><button type="button" class="btn primary" id="spsStepBtn">Step ▸</button><button type="button" class="btn" id="spsRunBtn">Run to HLT</button><button type="button" class="btn" id="spsResetBtn">Reset</button></div>' +
+    '<div class="decimal-line" id="spsMsg" aria-live="polite"></div>' +
+    '<p class="proj-teaches"><b>Teaches:</b> why the pushed address is the <i>next</i> instruction (push the CALL\'s own address and RET loops forever), the stack as ordinary memory plus one pointer, calls nesting because each CALL pushes before jumping (the self-test runs a subroutine that calls a subroutine, depth 2), and the 16-byte machine\'s real constraint: stack, data and code share one small memory, so a deep call chain is a collision waiting to happen — the reason stack depth is shown, not hidden.</p>';
+  const sapxCardEl = $G("sapxCard");
+  if (sapxCardEl && sapxCardEl.parentNode) sapxCardEl.parentNode.insertBefore(spsSec, sapxCardEl.nextSibling);
+  else if (orgHostG) orgHostG.appendChild(spsSec);
+  spsSec.querySelector("#spsToExtend").addEventListener("click", () => { if (!clickMenuKeyG("lab-sap1-extend")) jumpG("sapxCard"); });
+  spsSec.querySelector("#spsToBuild").addEventListener("click", () => { if (!clickMenuKeyG("lab-build-assembler")) jumpG("buildAsmCard"); });
+  spsSec.querySelector("#spsToAsm").addEventListener("click", () => { if (!clickMenuKeyG("sap1-assembler")) jumpG("asmCard"); });
+  spsSec.querySelector("#spsListing").innerHTML = SPS_SRC.map(r =>
+    '<div><span class="ln">' + r.a + "</span>" + r.s.replace(/&/g, "&amp;").replace(/</g, "&lt;") + '  <span style="opacity:.75">; ' + hex2G(r.b) + " — " + r.note + "</span></div>").join("");
+  function spsFresh() { return { mem: SPS_BYTES.slice(), A: 0, PC: 0, SP: SPS_SP0, out: [], steps: 0, halted: false, maxDepth: 0, note: "", fault: null }; }
+  const sps = { st: spsFresh() };
+  function spsRender(msg) {
+    const st = sps.st;
+    spsSec.querySelector("#spsRegs").innerHTML =
+      '<div class="seq-cell"><b>' + st.A + "</b>A — accumulator</div>" +
+      '<div class="seq-cell"><b>' + st.PC + "</b>PC — next instruction</div>" +
+      '<div class="seq-cell one"><b>' + st.SP + "</b>SP — next free stack slot</div>" +
+      '<div class="seq-cell"><b>' + (SPS_SP0 - st.SP) + "</b>return addresses on the stack</div>" +
+      '<div class="seq-cell"><b>' + st.maxDepth + "</b>deepest nesting so far</div>" +
+      '<div class="seq-cell"><b>[' + st.out.join(", ") + "]</b>output so far</div>" +
+      '<div class="seq-cell"><b>' + st.steps + "</b>instructions executed</div>" +
+      (st.halted ? '<div class="seq-cell one"><b>HALTED</b>SP back at 15 — balanced</div>' : "") +
+      (st.fault ? '<div class="seq-cell"><b>FAULT</b>' + st.fault + "</div>" : "");
+    spsSec.querySelector("#spsMem").innerHTML = st.mem.map((b, a) => {
+      const role = a <= 7 ? "code" : a === 12 || a === 13 ? "data" : a >= 14 ? "stack ↓" : "free";
+      const isTop = a === st.SP + 1 && st.SP < SPS_SP0;
+      return '<div class="seq-cell' + (a > st.SP && a >= 14 ? " one" : "") + '"><b>' + hex2G(b) + "</b>mem[" + a + "] · " + role + (isTop ? " · ← top of stack" : "") + (a === st.SP ? " · ← SP (next push)" : "") + "</div>";
+    }).join("");
+    if (msg) spsSec.querySelector("#spsMsg").textContent = msg;
+    spsSec.querySelector("#spsStepBtn").disabled = st.halted || !!st.fault;
+    spsSec.querySelector("#spsRunBtn").disabled = st.halted || !!st.fault;
+  }
+  spsSec.querySelector("#spsStepBtn").addEventListener("click", () => { spsStep(sps.st); spsRender("Step " + sps.st.steps + " — PC was " + "executing the instruction shown in the listing: " + sps.st.note); });
+  spsSec.querySelector("#spsRunBtn").addEventListener("click", () => {
+    let g = 0; while (!sps.st.halted && !sps.st.fault && g++ < 200) spsStep(sps.st);
+    spsRender(sps.st.fault ? sps.st.fault : "Ran to HLT in " + sps.st.steps + " instructions. Output [" + sps.st.out.join(", ") + "] — the same [3, 2, 1] the base SAP-1 engine produces on the original subroutine-free countdown (checked by this lab's self-test against reSAP1 itself). The difference is structure, not result: the OUT lives once, at address 6, and was reached three times through CALL and left three times through RET, with SP ending exactly where it started.");
+  });
+  spsSec.querySelector("#spsResetBtn").addEventListener("click", () => { sps.st = spsFresh(); spsRender("Reset: A = 0, PC = 0, SP = 15, stack empty. Step the LDA, then watch the CALL at address 1 push return address 2 into mem[15] before jumping to 6."); });
+  spsRender("Reset: A = 0, PC = 0, SP = 15, stack empty. Step the LDA, then watch the CALL at address 1 push return address 2 into mem[15] before jumping to 6.");
+  checkBlockG(spsSec, "sps");
+  let spsQn = 0;
+  function spsQuestion() {
+    const fb = spsSec.querySelector("#spsFb"), host = spsSec.querySelector("#spsOpts");
+    fb.textContent = "";
+    const kind = spsQn % 3;
+    if (kind === 0) {
+      spsSec.querySelector("#spsQ").textContent = "Predict, then check: the CALL sits at address 1. Which address does it push onto the stack?";
+      optBtnsG(host, ["2 — the next instruction, where execution must resume", "1 — the CALL's own address", "6 — the subroutine's address"], i => fbSetG(fb, i === 0, i === 0
+        ? "Right — 2. The subroutine's address (6) is where the jump goes; the pushed value is where to come back to, and that is the instruction after the CALL. Push 1 instead and RET would return to the CALL itself — an infinite call loop, one stack slot deeper each time."
+        : "Not that address — the jump target (6) comes from the instruction's operand, but the stack gets the return address: the instruction after the CALL, address 2. That is the only value RET can usefully pop into the PC."));
+      window.__spsQuestion = { kind: "push", expected: 2 };
+    } else if (kind === 1) {
+      spsSec.querySelector("#spsQ").textContent = "Predict, then check: the worked program halts. Where does SP end, and why does it matter?";
+      optBtnsG(host, ["Back at 15 — every CALL was matched by a RET", "At 12 — three calls left three addresses behind", "At 14 — one address is always left as a marker"], i => fbSetG(fb, i === 0, i === 0
+        ? "Right — SP returns to 15 because the three CALLs were each answered by the subroutine's single RET. A program that ends with SP below its start has leaked return addresses; on a shared 16-byte memory that leak is also overwritten data waiting to happen."
+        : "Not there — count the pairs: three CALLs push, and the subroutine's RET pops once per call, three pops. Pushes and pops balance, so SP ends at its start, 15. Anything else means a CALL without a RET (or the reverse — which this engine reports as a fault)."));
+      window.__spsQuestion = { kind: "sp-end", expected: SPS_SP0 };
+    } else {
+      spsSec.querySelector("#spsQ").textContent = "Predict, then check: a subroutine calls another subroutine before returning. What does the stack hold at the deepest point?";
+      optBtnsG(host, ["Two return addresses — the inner call pushed on top of the outer one", "One — the second CALL overwrites the first return address", "None — nested calls share the outer return address"], i => fbSetG(fb, i === 0, i === 0
+        ? "Right — two, and that nesting is the entire point of a stack rather than a single return-address register: the inner RET pops the inner address first, the outer RET pops the outer one after — last in, first out. This lab's self-test runs exactly that shape (depth 2) and checks SP returns to 15."
+        : "Not one — each CALL pushes before jumping, so a call made inside a subroutine stacks a second return address above the first. A single shared slot would lose the outer return the moment the inner call happened; the stack's LIFO order is what makes nesting work."));
+      window.__spsQuestion = { kind: "nest", expected: 2 };
+    }
+  }
+  spsSec.querySelector("#spsNewQ").addEventListener("click", () => { spsQn++; spsQuestion(); });
+  spsQuestion();
+  /* the instruction-set lab gains the forward link */
+  if (sapxCardEl && !sapxCardEl.querySelector("#sapxToStack")) {
+    const row = document.createElement("div");
+    row.className = "share-row";
+    const span = document.createElement("span");
+    span.style.fontSize = "13.5px";
+    span.innerHTML = "A designed instruction set still cannot leave and come back. Give the machine a stack:";
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "btn"; b.id = "sapxToStack";
+    b.textContent = "Stack & subroutine calls on the SAP-1 lab →";
+    b.addEventListener("click", () => { if (!clickMenuKeyG("lab-sap1-stack")) jumpG("sapstackCard"); });
+    row.appendChild(span); row.appendChild(b);
+    sapxCardEl.appendChild(row);
+  }
+
+  /* ---------------- verification handles + self-tests ---------------- */
+  window.__fifoCheck = { write: fifoWrite, read: fifoRead, sim: fifoSim, verify: fifoVerify, depth: FIFO_DEPTH };
+  window.__vgaCheck = { hRegion: vgaHRegion, vRegion: vgaVRegion, hSync: vgaHSync, vSync: vgaVSync, verify: vgaVerify, timing: VGA };
+  window.__spsCheck = { run: spsRun, step: spsStep, disasm: spsDisasm, verify: spsVerify, bytes: SPS_BYTES, callOp: SPS_CALL, retOp: SPS_RET };
+  try {
+    window.__roundAGSelfTest = { fifo: FIFO_V, vga: VGA_V, sps: SPS_V };
+    const bad = Object.keys(window.__roundAGSelfTest).filter(k => !window.__roundAGSelfTest[k].pass);
+    if (bad.length && window.console) console.warn("[Round AG self-test] failures:", bad);
+  } catch (e) { window.__roundAGSelfTest = { error: String(e && e.message || e) }; }
+
+  /* ---------------- MENU REGISTRATION + COUNT REBUILD ---------------- */
+  function addMenuItemG(groupName, afterKey, spec) {
+    const list = $G("menuList"); if (!list) return false;
+    if (list.querySelector('[data-key="' + spec.key + '"]')) return false;
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "menu-item"; b.dataset.key = spec.key;
+    b.dataset.search = (spec.label + " " + spec.hint + " " + spec.search).toLowerCase();
+    if (spec.level) b.dataset.uxlevel = spec.level;
+    b.innerHTML = '<span class="mi-dot" aria-hidden="true"></span><span class="mi-label"></span><small></small>';
+    b.querySelector(".mi-label").textContent = spec.label;
+    b.querySelector("small").textContent = spec.hint;
+    b.addEventListener("click", () => { const p = $G("menuPanel"); if (p) p.hidden = true; const mb = $G("menuBtn"); if (mb) mb.setAttribute("aria-expanded", "false"); spec.go(); });
+    if (afterKey) {
+      const anchor = list.querySelector('[data-key="' + afterKey + '"]');
+      if (anchor) { anchor.parentNode.insertBefore(b, anchor.nextSibling); return true; }
+    }
+    let sib = null, inGroup = false;
+    Array.prototype.slice.call(list.children).forEach(el => {
+      if (el.classList.contains("menu-group")) inGroup = (el.dataset.group || "").trim() === groupName;
+      else if (inGroup && el.classList.contains("menu-item")) sib = el;
+    });
+    if (sib) sib.parentNode.insertBefore(b, sib.nextSibling); else list.appendChild(b);
+    return true;
+  }
+  addMenuItemG("Computer Architecture", "lab-booth", {
+    key: "fifo-lab", label: "Hardware FIFO lab — the circular buffer",
+    hint: "A depth-4 ring buffer with wrapping write and read pointers: full and empty from the count, and a write to a full buffer refused as a counted overflow — nothing silently overwritten",
+    search: "fifo first in first out circular buffer ring buffer queue write pointer read pointer wrap full empty overflow underflow backpressure producer consumer uart staging dma keyboard buffer simulator lab",
+    level: "intermediate", go: () => { setTopArea("systems"); syncRail("systems"); const pb = document.querySelector('#sysPicker [data-sys="arch"]'); if (pb) pb.click(); jumpG("fifoCard"); }
+  });
+  addMenuItemG("Logic & Circuits", "bit-serial-adder", {
+    key: "vga-timing", label: "VGA timing lab — two counters draw 640×480",
+    hint: "Step the horizontal and vertical counters through active picture, front porch, active-low sync pulse and back porch: 800 clocks a line, 525 lines a frame, 59.94 Hz",
+    search: "vga timing video sync hsync vsync horizontal vertical counter blanking front porch back porch sync pulse active low 640x480 800 525 pixel clock refresh rate monitor display raster simulator lab",
+    level: "intermediate", go: () => { setTopArea("circuits"); syncRail("circuits"); jumpG("vgaCard"); }
+  });
+  addMenuItemG("Computer Organization", "lab-sap1-extend", {
+    key: "lab-sap1-stack", label: "Stack & subroutine calls on the SAP-1 lab — CALL and RET",
+    hint: "Extend the SAP-1 with a stack pointer growing down from address 15: CALL pushes the return address, RET pops it, and the countdown is reworked around a print subroutine",
+    search: "stack subroutine call ret return address stack pointer push pop sap-1 sap1 procedure function call nesting grows down sp machine code extension assembler countdown simulator lab",
+    level: "intermediate", go: () => { setTopArea("systems"); syncRail("systems"); const pb = document.querySelector('#sysPicker [data-sys="assembly"]'); if (pb) pb.click(); jumpG("sapstackCard"); }
+  });
+  (function rebuildCountsG() {
+    const RJ = window.__uxRoundJ; if (!RJ) return;
+    const groups = RJ.menuGroups(); const counts = {}; let total = 0;
+    groups.forEach(g => {
+      counts[g.name] = g.items.length; total += g.items.length;
+      const c = g.header.querySelector(".mi-count"); if (c) c.textContent = g.items.length;
+    });
+    window.LAB_MENU = { groups: groups.map(g => ({ name: g.name, items: g.items.map(b => { const l = b.querySelector(".mi-label"); return l ? l.textContent : ""; }) })), count: total };
+    window.LAB_MODULES = { modules: groups.map(g => ({ name: g.name, count: g.items.length })), total };
+    RJ.buildRailAndList(counts);
+    RJ.buildGallery();
+    ["boards", "arch", "os", "org"].forEach(id => {
+      const h = document.querySelector("#module-" + id + " .mh-count");
+      if (!h) return;
+      const name = { boards: "Boards, Modulation & Projects", arch: "Computer Architecture", os: "Operating Systems", org: "Computer Organization" }[id];
+      if (counts[name]) h.textContent = counts[name] + " items";
+    });
+    window.__countsAG = { total, counts };
+  })();
+})();
+</script>
+
+
