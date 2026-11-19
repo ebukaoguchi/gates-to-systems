@@ -28070,3 +28070,600 @@ html.text-large .bb-panel-note{font-size:15.5px}
 </script>
 
 
+<script>
+"use strict";
+/* ================================================================
+   ROUND AH — three new labs, each graded from its own model:
+   BOARDS: (1) Successive-approximation ADC — an 8-bit SAR drives
+   the DAC model (Vout = Vref x code / 256, Vref = 5 V) into a
+   comparator, one trial bit at a time from bit 7 to bit 0. The
+   claimed rule, code = floor(Vin / Vref x 256) clamped to 255,
+   is verified EXHAUSTIVELY at load: every code 0-255 at its exact
+   DAC voltage and at its mid-step voltage, plus full scale.
+   BOARDS: (2) Quadrature rotary encoder — channels A and B in
+   quadrature (A leads B clockwise). One detent = one full
+   4-state cycle = one count. A transition that flips both
+   channels at once is illegal: flagged, tallied, never counted.
+   OS: (3) Programmable interval timer — prescaler x target count
+   ÷ clock rate sets the tick; the counter auto-reloads and fires
+   an interrupt flag each period (or holds in one-shot mode).
+   Verified by stepped simulation, never wall-clock. All
+   animations load paused; stepping is student-driven.
+   ================================================================ */
+(function roundAH() {
+  const $H = id => document.getElementById(id);
+  function jumpH(id) { const el = id && $H(id); if (el) setTimeout(() => el.scrollIntoView({ behavior: "smooth", block: "start" }), 60); }
+  function clickMenuKeyH(key) { const it = document.querySelector('#menuList .menu-item[data-key="' + key + '"]'); if (it) { it.click(); return true; } return false; }
+  function fbSetH(el, ok, msg) { if (!el) return; el.textContent = (ok ? "✓ " : "✗ ") + msg; el.style.color = ok ? "var(--green)" : "var(--red)"; }
+  function optBtnsH(host, labels, onPick) {
+    host.innerHTML = "";
+    labels.forEach((lab, i) => { const b = document.createElement("button"); b.type = "button"; b.className = "btn"; b.textContent = lab; b.addEventListener("click", () => onPick(i, b)); host.appendChild(b); });
+  }
+  function checkBlockH(sec, prefix) {
+    const d = document.createElement("div");
+    d.innerHTML = '<div class="lab-check"><span class="lab-check-q" id="' + prefix + 'Q"></span><span id="' + prefix + 'Opts" style="display:flex;gap:6px;flex-wrap:wrap"></span><span class="lab-check-fb" id="' + prefix + 'Fb" aria-live="polite"></span></div>' +
+      '<div class="share-row"><button type="button" class="btn" id="' + prefix + 'NewQ">New question</button></div>';
+    sec.appendChild(d);
+    return d;
+  }
+  const fmtV = v => v.toFixed(4) + " V";
+  const fmtMs = v => (Math.abs(v) >= 100 ? v.toFixed(1) : Math.abs(v) >= 1 ? v.toFixed(3) : v.toFixed(4));
+
+  /* ================================================================
+     1) SUCCESSIVE-APPROXIMATION ADC — 8 bits, Vref = 5 V.
+     DAC model (the same formula the R-2R lab obeys, at 8 bits):
+     Vdac(code) = Vref x code / 256. One LSB = Vref / 256.
+     SAR trial: for bit 7 down to 0, tentatively set the bit; if
+     Vdac(trial) <= Vin keep it, else clear it. Because every DAC
+     voltage here is an exact binary fraction (denominator 256),
+     comparisons at code-exact and mid-step inputs are exact.
+     ================================================================ */
+  const SAR_VREF = 5, SAR_BITS = 8, SAR_CODES = 256, SAR_LSB = SAR_VREF / SAR_CODES;
+  function sarDac(code) { return SAR_VREF * code / SAR_CODES; }
+  function sarRule(vin) { return Math.max(0, Math.min(255, Math.floor(vin / SAR_VREF * SAR_CODES + 1e-9))); }
+  function sarConvert(vin) {
+    let code = 0; const trials = [];
+    for (let bit = SAR_BITS - 1; bit >= 0; bit--) {
+      const trial = code | (1 << bit);
+      const tv = sarDac(trial);
+      const kept = tv <= vin + 1e-12;
+      if (kept) code = trial;
+      trials.push({ bit, trial, trialV: tv, kept });
+    }
+    return { code, trials, dacV: sarDac(code), err: vin - sarDac(code) };
+  }
+  function sarVerify() {
+    let passed = 0, total = 0;
+    for (let code = 0; code < SAR_CODES; code++) {
+      [sarDac(code), sarDac(code) + SAR_LSB / 2].forEach(vin => {
+        total++;
+        if (sarConvert(vin).code === sarRule(vin) && sarRule(vin) === code) passed++;
+      });
+    }
+    total++; if (sarConvert(SAR_VREF).code === 255 && sarRule(SAR_VREF) === 255) passed++; /* full scale clamps */
+    total++; if (sarConvert(0).code === 0) passed++;
+    return { passed, total, pass: passed === total };
+  }
+  const SAR_V = sarVerify();
+  const sarCard = document.createElement("div");
+  sarCard.className = "card proj-card"; sarCard.id = "sarCard"; sarCard.style.gridColumn = "1/-1";
+  sarCard.innerHTML =
+    '<div class="proj-head"><h2>Successive-approximation ADC — hunting a voltage, one bit at a time</h2><span class="badge">Tool</span></div>' +
+    '<p class="what">The <b>R-2R ladder DAC</b> turns a code into a voltage. This lab runs one backwards, as a measuring instrument: an <b>8-bit successive-approximation register (SAR)</b> drives that same DAC model — <b>Vdac = Vref × code / 256</b>, with <b>Vref = 5 V</b>, so one LSB is <b>19.53 mV</b> — into a <b>comparator</b> against an analog input you set. The search is a binary hunt, <b>bit 7 first</b>: tentatively set the bit, read the trial DAC voltage against the input, and <b>keep the bit if the trial is at or below the input, clear it if it overshoots</b>. Eight trials, one per bit, and the register holds the answer: the model claims <b>code = floor(Vin / Vref × 256)</b>, clamped to 255 at full scale — and the load-time check below ran that claim <b>exhaustively</b>, all 256 codes at their exact DAC voltages and at mid-step. The leftover is honest: the final DAC voltage sits at or below the input, so the <b>quantisation error (Vin − Vdac) is never negative and at most 1 LSB</b> — strictly less than 1 LSB for every input below full scale, and exactly 1 LSB only at Vin = Vref itself, where the code clamps at 255 and the DAC tops out at 4.9805 V. This is the converter inside nearly every microcontroller ADC peripheral — slower than a flash converter\'s 255 comparators, at the price of one comparator and eight decisions.</p>' +
+    '<div class="tool-controls"><label>Analog input Vin <input type="range" id="sarVinRange" min="0" max="5" step="0.01" value="3.30" style="width:200px;accent-color:var(--amber)" /> <input type="number" id="sarVinNum" min="0" max="5" step="0.01" value="3.30" style="width:90px" /> V &nbsp;(Vref = 5 V)</label></div>' +
+    '<div class="ctrl-label">The SAR register — trial bit by bit, MSB first</div>' +
+    '<div class="seq-state" id="sarBits" style="margin-top:4px"></div>' +
+    '<div class="share-row"><button type="button" class="btn primary" id="sarStep">Trial next bit ▸</button><button type="button" class="btn" id="sarRun">Run to completion ▸</button><button type="button" class="btn" id="sarReset">Restart conversion</button></div>' +
+    '<div class="ctrl-label" style="margin-top:12px">Trial DAC voltages converging on the input (dashed line)</div>' +
+    '<div class="schematic-box"><svg id="sarTrace" viewBox="0 0 920 240" role="img" aria-label="SAR convergence trace: each trial DAC voltage against the input level" style="display:block;width:100%;height:auto"></svg></div>' +
+    '<div class="decimal-line" id="sarOut" aria-live="polite"></div>' +
+    '<div class="seq-state" id="sarFinal" style="margin-top:6px"></div>' +
+    '<div class="share-row"><span style="font-size:13.5px">The DAC this converter drives, run forwards:</span><button type="button" class="btn" id="sarToDac">R-2R ladder DAC — digital back to analog →</button></div>' +
+    '<p class="proj-teaches"><b>Teaches:</b> binary search as a measurement strategy (each trial halves the remaining uncertainty, so 8 bits cost exactly 8 decisions), why the comparator verdict — not a formula — decides each bit, and quantisation: a digital answer to an analog question is a staircase, and the error is bounded by the step size, never zero in general. Load-time check: ' + SAR_V.passed + ' of ' + SAR_V.total + ' exhaustive cases (every code at its exact and mid-step voltage, plus 0 V and full scale) convert to exactly the code the floor rule predicts.</p>';
+  const dacCardEl = $H("dacCard");
+  if (dacCardEl && dacCardEl.parentNode) dacCardEl.parentNode.insertBefore(sarCard, dacCardEl.nextSibling);
+  else { const at = $H("advTools"); if (at) at.appendChild(sarCard); }
+  sarCard.querySelector("#sarToDac").addEventListener("click", () => { if (!clickMenuKeyH("r2r-dac")) jumpH("dacCard"); });
+  /* the DAC lab gains the return link */
+  if (dacCardEl && !dacCardEl.querySelector("#dacToSar")) {
+    const row = document.createElement("div");
+    row.className = "share-row";
+    const span = document.createElement("span"); span.style.fontSize = "13.5px";
+    span.textContent = "Run this ladder backwards — recover the bits from an analog voltage:";
+    const b = document.createElement("button"); b.type = "button"; b.className = "btn"; b.id = "dacToSar";
+    b.textContent = "Successive-approximation ADC — recover the bits from analog →";
+    b.addEventListener("click", () => { if (!clickMenuKeyH("sar-adc")) jumpH("sarCard"); });
+    row.appendChild(span); row.appendChild(b);
+    dacCardEl.appendChild(row);
+  }
+  const sar = { vin: 3.30, nextBit: 7, code: 0, trials: [] };
+  function sarResetConv(msg) {
+    sar.nextBit = 7; sar.code = 0; sar.trials = [];
+    sarRender(msg || "Conversion armed: the register is 00000000 and the first trial sets bit 7 alone — code 10000000, DAC " + fmtV(sarDac(128)) + ". One comparator verdict per bit, eight verdicts total.");
+  }
+  function sarRender(msg) {
+    const host = sarCard.querySelector("#sarBits"); host.innerHTML = "";
+    for (let bit = 7; bit >= 0; bit--) {
+      const t = sar.trials.find(x => x.bit === bit);
+      const decided = !!t;
+      const val = decided ? (t.kept ? 1 : 0) : (bit === sar.nextBit ? "?" : "·");
+      const c = document.createElement("div");
+      c.className = "seq-cell" + (decided && t.kept ? " one" : "");
+      c.innerHTML = "<b>" + val + "</b>bit " + bit + (decided ? (t.kept ? " · kept" : " · cleared") : bit === sar.nextBit ? " · on trial" : " · waiting");
+      host.appendChild(c);
+    }
+    const X0 = 60, Y0 = 200, W = 800, H = 160;
+    const X = i => X0 + (i / 8) * W, Y = v => Y0 - (v / SAR_VREF) * H;
+    let s = '<line x1="' + X0 + '" y1="' + Y0 + '" x2="' + (X0 + W) + '" y2="' + Y0 + '" stroke="var(--line2)"/><line x1="' + X0 + '" y1="' + (Y0 - H) + '" x2="' + X0 + '" y2="' + Y0 + '" stroke="var(--line2)"/>' +
+      '<line x1="' + X0 + '" y1="' + Y(sar.vin) + '" x2="' + (X0 + W) + '" y2="' + Y(sar.vin) + '" stroke="var(--red)" stroke-width="2" stroke-dasharray="7 5"/>' +
+      '<text class="net-label strong" x="' + (X0 + W) + '" y="' + (Y(sar.vin) - 6) + '" text-anchor="end">Vin = ' + sar.vin.toFixed(2) + ' V</text>' +
+      '<text class="net-label" x="' + X0 + '" y="' + (Y0 + 20) + '">trial 1 (bit 7) →</text><text class="net-label" x="' + (X0 + W) + '" y="' + (Y0 + 20) + '" text-anchor="end">→ trial 8 (bit 0)</text>';
+    if (sar.trials.length) {
+      let p = "";
+      sar.trials.forEach((t, i) => { p += (i === 0 ? "M" : "L") + X(i + 0.5) + " " + Y(t.trialV) + " "; });
+      s += '<path d="' + p + '" fill="none" stroke="var(--slate-wire)" stroke-width="1.8"/>';
+      sar.trials.forEach((t, i) => { s += '<circle cx="' + X(i + 0.5) + '" cy="' + Y(t.trialV) + '" r="6" fill="' + (t.kept ? "var(--amber)" : "var(--panel)") + '" stroke="var(--amber)" stroke-width="2"/><text class="net-label" x="' + X(i + 0.5) + '" y="' + (Y(t.trialV) - 12) + '" text-anchor="middle">' + t.trialV.toFixed(2) + ' V</text>'; });
+    }
+    sarCard.querySelector("#sarTrace").innerHTML = s;
+    const done = sar.nextBit < 0;
+    const fin = sarCard.querySelector("#sarFinal"); fin.innerHTML = "";
+    const cells = done ? [["final code (binary)", sar.code.toString(2).padStart(8, "0")], ["final code (decimal)", sar.code], ["final DAC voltage", fmtV(sarDac(sar.code))], ["quantisation error", fmtV(sar.vin - sarDac(sar.code)) + "  (" + (sar.vin >= SAR_VREF ? "= 1 LSB, the clamped full-scale case" : "< 1 LSB = " + fmtV(SAR_LSB)) + ")"], ["rule check", "floor(" + sar.vin.toFixed(2) + " / 5 × 256) = " + sarRule(sar.vin) + (sarRule(sar.vin) === sar.code ? " ✓ agrees" : "")]]
+      : [["trials done", sar.trials.length + " / 8"], ["register so far", sar.code.toString(2).padStart(8, "0")], ["current DAC", fmtV(sarDac(sar.code))], ["1 LSB", fmtV(SAR_LSB)], ["exhaustive self-test", SAR_V.passed + " / " + SAR_V.total + " cases pass"]];
+    cells.forEach(([k, v]) => { const c = document.createElement("div"); c.className = "seq-cell"; c.innerHTML = "<b>" + v + '</b><span style="font-size:11px">' + k + "</span>"; fin.appendChild(c); });
+    if (msg) sarCard.querySelector("#sarOut").textContent = msg;
+    sarCard.querySelector("#sarStep").disabled = done;
+    sarCard.querySelector("#sarRun").disabled = done;
+  }
+  function sarStepOnce() {
+    if (sar.nextBit < 0) return null;
+    const bit = sar.nextBit;
+    const trial = sar.code | (1 << bit);
+    const tv = sarDac(trial);
+    const kept = tv <= sar.vin + 1e-12;
+    if (kept) sar.code = trial;
+    const t = { bit, trial, trialV: tv, kept };
+    sar.trials.push(t); sar.nextBit--;
+    return t;
+  }
+  sarCard.querySelector("#sarStep").addEventListener("click", () => {
+    const t = sarStepOnce(); if (!t) return;
+    sarRender("Trial bit " + t.bit + ": trial code " + t.trial.toString(2).padStart(8, "0") + " gives DAC " + fmtV(t.trialV) + " against Vin " + sar.vin.toFixed(2) + " V — comparator says " + (t.kept ? "DAC ≤ Vin, so the bit is KEPT." : "DAC > Vin (overshoot), so the bit is CLEARED.") + (sar.nextBit < 0 ? " Conversion complete: code " + sar.code + " (" + sar.code.toString(2).padStart(8, "0") + "), final DAC " + fmtV(sarDac(sar.code)) + ", error " + fmtV(sar.vin - sarDac(sar.code)) + " — at most 1 LSB, as promised." : " " + (sar.nextBit + 1) + " trial(s) remain."));
+  });
+  sarCard.querySelector("#sarRun").addEventListener("click", () => {
+    while (sar.nextBit >= 0) sarStepOnce();
+    sarRender("Ran all 8 trials: the DAC hunted " + sar.trials.map(t => t.trialV.toFixed(2)).join(" → ") + " V and settled on code " + sar.code + " (" + sar.code.toString(2).padStart(8, "0") + ") — DAC " + fmtV(sarDac(sar.code)) + ", error " + fmtV(sar.vin - sarDac(sar.code)) + ", at most 1 LSB (" + fmtV(SAR_LSB) + "). The floor rule predicts " + sarRule(sar.vin) + " — the comparator's hunt and the formula agree, as the exhaustive check says they must.");
+  });
+  sarCard.querySelector("#sarReset").addEventListener("click", () => sarResetConv());
+  function sarSetVin(v, src) {
+    v = Math.max(0, Math.min(5, isNaN(v) ? 0 : v));
+    sar.vin = Math.round(v * 100) / 100;
+    if (src !== "range") sarCard.querySelector("#sarVinRange").value = sar.vin;
+    if (src !== "num") sarCard.querySelector("#sarVinNum").value = sar.vin.toFixed(2);
+    sarResetConv("Input set to " + sar.vin.toFixed(2) + " V — conversion restarted. The floor rule predicts code " + sarRule(sar.vin) + "; run the trials and watch the comparator arrive at the same answer one bit at a time.");
+  }
+  sarCard.querySelector("#sarVinRange").addEventListener("input", e => sarSetVin(parseFloat(e.target.value), "range"));
+  sarCard.querySelector("#sarVinNum").addEventListener("change", e => sarSetVin(parseFloat(e.target.value), "num"));
+  checkBlockH(sarCard, "sar");
+  let sarQn = 0;
+  function sarQuestion() {
+    const fb = sarCard.querySelector("#sarFb"), host = sarCard.querySelector("#sarOpts");
+    fb.textContent = "";
+    const kind = sarQn % 3;
+    if (kind === 0) {
+      const vins = [1.25, 2.70, 4.10, 0.60, 3.85];
+      const vin = vins[Math.floor(sarQn / 3) % vins.length];
+      const exp = sarRule(vin);
+      sarCard.querySelector("#sarQ").textContent = "Predict, then check: Vin = " + vin.toFixed(2) + " V, Vref = 5 V, 8-bit SAR. What final code does the conversion produce?";
+      const cand = Array.from(new Set([exp, Math.min(255, exp + 1), Math.max(0, exp - 1), Math.min(255, exp + 16)]));
+      optBtnsH(host, cand.map(c => c + " (" + c.toString(2).padStart(8, "0") + ")"), i => fbSetH(fb, cand[i] === exp, cand[i] === exp
+        ? "Right — floor(" + vin.toFixed(2) + " / 5 × 256) = floor(" + (vin / 5 * 256).toFixed(2) + ") = " + exp + ". Set the lab's input to " + vin.toFixed(2) + " V and run it: the comparator's eight verdicts land on the same code."
+        : "Not that code — the rule is floor(Vin / Vref × 256) = floor(" + (vin / 5 * 256).toFixed(2) + ") = " + exp + ". Rounding instead of flooring is the classic off-by-one here: the DAC must never overshoot the input at the end."));
+      window.__sarQuestion = { kind: "code", vin, expected: exp };
+    } else if (kind === 1) {
+      const vin = 2.70;
+      const partial = sarConvert(vin).trials.slice(0, 3);
+      const bit4 = sarConvert(vin).trials[3];
+      const desc = partial.map(t => "bit " + t.bit + " " + (t.kept ? "kept" : "cleared")).join(", ");
+      sarCard.querySelector("#sarQ").textContent = "Predict, then check: Vin = 2.70 V. The first three trials went: " + desc + ". Is bit 4 kept?";
+      optBtnsH(host, ["Kept — the trial DAC stays at or below 2.70 V", "Cleared — the trial DAC overshoots 2.70 V"], i => { const want = bit4.kept ? 0 : 1; fbSetH(fb, i === want, bit4.kept
+        ? "Right — after three trials the register holds " + partial.reduce((c, t) => t.kept ? c | (1 << t.bit) : c, 0).toString(2).padStart(8, "0") + "; setting bit 4 trials DAC " + fmtV(bit4.trialV) + ", which is at or below 2.70 V, so the comparator keeps it."
+        : "Right — setting bit 4 trials DAC " + fmtV(bit4.trialV) + ", above 2.70 V: overshoot, so the comparator clears it. Each verdict depends on every verdict before it — that is what makes it a search, not eight independent guesses."); });
+      window.__sarQuestion = { kind: "bit4", vin, expected: bit4.kept ? "kept" : "cleared" };
+    } else {
+      sarCard.querySelector("#sarQ").textContent = "Predict, then check: after any completed conversion in this lab, what is true of the quantisation error (Vin − final DAC)?";
+      optBtnsH(host, ["Always ≥ 0 and ≤ 1 LSB (19.53 mV) — under 1 LSB except exactly at full scale", "Always exactly 0 — the hunt is exact", "Either sign, up to half of full scale"], i => fbSetH(fb, i === 0, i === 0
+        ? "Right — the SAR only keeps trial codes whose DAC sits at or below Vin, so the final DAC never overshoots (error ≥ 0); and the last trial, bit 0, guarantees the next code up would overshoot, which puts the final DAC within one step — error < 1 LSB = 5/256 V ≈ 19.53 mV. The one exception is Vin = Vref itself: the code clamps at 255, the DAC tops out at 4.9805 V, and the error is exactly 1 LSB."
+        : "Not that — the final DAC is the largest code voltage at or below Vin, so the error is the gap up to Vin: never negative, and no more than the distance to the next code, which is exactly 1 LSB (19.53 mV) — reached only at full scale, where the code clamps. Zero only when Vin happens to be an exact code voltage."));
+      window.__sarQuestion = { kind: "error", expected: "0<=err<=1LSB" };
+    }
+  }
+  sarCard.querySelector("#sarNewQ").addEventListener("click", () => { sarQn++; sarQuestion(); });
+  sarResetConv(); sarQuestion();
+
+  /* ================================================================
+     2) QUADRATURE ROTARY ENCODER.
+     Phase states in clockwise order (A leads B):
+       0:(A,B)=(0,0)  1:(1,0)  2:(1,1)  3:(0,1)  then back to 0.
+     Counting convention, stated everywhere: one full 4-state
+     cycle = one detent = one count. The decoder tracks net phase
+     steps; position = net steps / 4 at detent boundaries. A
+     transition flipping BOTH bits is illegal (a real encoder
+     cannot do it — it means a missed step or bounce across two
+     edges): it is flagged, tallied as a glitch, and the position
+     and phase do not move.
+     ================================================================ */
+  const QUAD_STATES = [[0, 0], [1, 0], [1, 1], [0, 1]];
+  function quadNext(idx, dir) { return (idx + dir + 4) % 4; }
+  function quadNewDec() { return { idx: 0, netSteps: 0, glitches: 0, lastDir: 0 }; }
+  function quadTransition(dec, newIdx) {
+    const a = QUAD_STATES[dec.idx], b = QUAD_STATES[newIdx];
+    const flipped = (a[0] !== b[0] ? 1 : 0) + (a[1] !== b[1] ? 1 : 0);
+    if (flipped === 2) { dec.glitches++; return { ok: false, why: "illegal" }; }
+    if (flipped === 0) return { ok: true, dir: 0 };
+    const dir = newIdx === quadNext(dec.idx, 1) ? 1 : -1;
+    dec.idx = newIdx; dec.netSteps += dir; dec.lastDir = dir;
+    return { ok: true, dir };
+  }
+  function quadDetent(dec, dir) { for (let i = 0; i < 4; i++) quadTransition(dec, quadNext(dec.idx, dir)); }
+  function quadPosition(dec) { return dec.netSteps / 4; }
+  function quadVerify() {
+    let passed = 0, total = 0;
+    const d1 = quadNewDec();
+    for (let i = 0; i < 10; i++) quadDetent(d1, 1);
+    for (let i = 0; i < 10; i++) quadDetent(d1, -1);
+    total++; if (quadPosition(d1) === 0 && d1.glitches === 0) passed++;
+    const d2 = quadNewDec();
+    for (let i = 0; i < 37; i++) quadDetent(d2, 1);
+    total++; if (quadPosition(d2) === 37) passed++;
+    const d3 = quadNewDec();
+    for (let i = 0; i < 12; i++) quadDetent(d3, -1);
+    total++; if (quadPosition(d3) === -12) passed++;
+    const d4 = quadNewDec();
+    quadDetent(d4, 1); quadDetent(d4, 1);
+    const before = quadPosition(d4);
+    const r = quadTransition(d4, 2); /* (0,0) -> (1,1): both bits flip */
+    total++; if (!r.ok && quadPosition(d4) === before && d4.glitches === 1) passed++;
+    total++; if (QUAD_STATES.every((s, i) => { const n = QUAD_STATES[quadNext(i, 1)]; return (s[0] !== n[0]) + (s[1] !== n[1]) === 1; })) passed++; /* every legal step flips exactly one bit */
+    return { passed, total, pass: passed === total };
+  }
+  const QUAD_V = quadVerify();
+  const quadCard = document.createElement("div");
+  quadCard.className = "card proj-card"; quadCard.id = "quadCard"; quadCard.style.gridColumn = "1/-1";
+  quadCard.innerHTML =
+    '<div class="proj-head"><h2>Quadrature rotary encoder — direction from two square waves</h2><span class="badge">Tool</span></div>' +
+    '<p class="what">A rotary encoder knob reports movement on two channels, <b>A</b> and <b>B</b>, drawn as square waves shifted by a quarter cycle — <b>90° of phase</b>. Turning one way, <b>A leads B</b>; the other way, <b>B leads A</b> — and that lead is the whole direction signal. The state (A,B) walks a four-state cycle: clockwise <b>(0,0) → (1,0) → (1,1) → (0,1) → (0,0)</b>, each step flipping exactly one channel (the same one-bit-at-a-time discipline as a Gray code, which is no accident). <b>Counting convention used throughout this lab: one full 4-state cycle is one detent — one click of the knob — and counts once.</b> Turn the knob with the detent buttons and watch the waves, the state, and the position counter agree. Then press the glitch button: it flips <b>both channels at once</b>, a jump no real rotation can make — the signature of contact bounce or a missed sample. The decoder <b>flags it as an illegal transition, tallies it, and refuses to count it</b>: position does not move. An encoder that counted glitches would report motion that never happened.</p>' +
+    '<div class="schematic-box"><svg id="quadWave" viewBox="0 0 920 190" role="img" aria-label="Quadrature waveforms: channels A and B as offset square waves with the current state marked" style="display:block;width:100%;height:auto"></svg></div>' +
+    '<div class="seq-state" id="quadState" style="margin-top:10px"></div>' +
+    '<div class="share-row"><button type="button" class="btn primary" id="quadCW">One detent clockwise ▸</button><button type="button" class="btn primary" id="quadCCW">One detent counter-clockwise ▸</button><button type="button" class="btn" id="quadGlitch">Inject glitch / bounce (flip both)</button><button type="button" class="btn" id="quadReset">Reset</button></div>' +
+    '<div class="decimal-line" id="quadMsg" aria-live="polite"></div>' +
+    '<p class="proj-teaches"><b>Teaches:</b> phase as information — two identical pulse trains carry direction only in their offset; decoding as a state machine over (A,B) rather than edge counting on one channel (a single channel cannot tell forward from backward at all); and defensive decoding: an illegal both-bits flip is detected and discarded instead of silently corrupting position. Volume knobs, motor shaft encoders, and scroll wheels all speak exactly this protocol. Load-time check: ' + QUAD_V.passed + ' of ' + QUAD_V.total + ' scripted rotation and glitch cases pass (10 CW + 10 CCW returns to 0; 37 CW counts 37; an injected illegal transition moves nothing and raises the glitch tally).</p>';
+  if (sarCard.parentNode) sarCard.parentNode.insertBefore(quadCard, sarCard.nextSibling);
+  else { const at2 = $H("advTools"); if (at2) at2.appendChild(quadCard); }
+  const quad = { dec: quadNewDec(), history: [[0, 0]], glitchMark: -1 };
+  function quadRender(msg) {
+    const dec = quad.dec, st = QUAD_STATES[dec.idx];
+    const hist = quad.history.slice(-24);
+    const X0 = 70, W = 800, stepW = W / 24;
+    const yA = v => v ? 52 : 84, yB = v => v ? 122 : 154;
+    let s = '<text class="net-label strong" x="30" y="72">A</text><text class="net-label strong" x="30" y="142">B</text>';
+    let pA = "", pB = "";
+    hist.forEach((hst, i) => {
+      const x = X0 + i * stepW;
+      if (i === 0) { pA = "M" + x + " " + yA(hst[0]); pB = "M" + x + " " + yB(hst[1]); }
+      else { const px = X0 + (i - 1) * stepW; pA += " L" + x + " " + yA(hist[i - 1][0]) + " L" + x + " " + yA(hst[0]); pB += " L" + x + " " + yB(hist[i - 1][1]) + " L" + x + " " + yB(hst[1]); }
+      if (i === hist.length - 1) { pA += " L" + (x + stepW) + " " + yA(hst[0]); pB += " L" + (x + stepW) + " " + yB(hst[1]); }
+    });
+    s += '<path d="' + pA + '" fill="none" stroke="var(--amber-wire)" stroke-width="2.4"/><path d="' + pB + '" fill="none" stroke="var(--slate-wire)" stroke-width="2.4"/>';
+    if (quad.glitchMark >= 0 && quad.glitchMark >= quad.history.length - 24) {
+      const gx = X0 + (quad.glitchMark - (quad.history.length - hist.length)) * stepW;
+      s += '<line x1="' + gx + '" y1="30" x2="' + gx + '" y2="168" stroke="var(--red)" stroke-width="2.4" stroke-dasharray="5 4"/><text class="net-label" x="' + gx + '" y="22" text-anchor="middle" style="fill:var(--red);font-weight:700">ILLEGAL — both flipped</text>';
+    }
+    s += '<text class="net-label" x="' + X0 + '" y="182">each column is one phase step · a detent is four steps · the newest state is at the right</text>';
+    quadCard.querySelector("#quadWave").innerHTML = s;
+    const pos = quadPosition(dec);
+    quadCard.querySelector("#quadState").innerHTML =
+      '<div class="seq-cell one"><b>(' + st[0] + ", " + st[1] + ')</b>current state (A, B)</div>' +
+      '<div class="seq-cell"><b>' + pos + '</b>position (detents)</div>' +
+      '<div class="seq-cell"><b>' + (dec.lastDir === 1 ? "CW — A leads B" : dec.lastDir === -1 ? "CCW — B leads A" : "—") + '</b>last direction</div>' +
+      '<div class="seq-cell"><b>' + dec.netSteps + '</b>net phase steps (÷4 = detents)</div>' +
+      '<div class="seq-cell' + (dec.glitches ? '" style="border-color:var(--red);color:var(--red)' : "") + '"><b>' + dec.glitches + '</b>illegal transitions flagged</div>' +
+      '<div class="seq-cell"><b>' + QUAD_STATES.map(x => "(" + x[0] + "," + x[1] + ")").join(" → ") + ' → …</b>CW state cycle</div>';
+    if (msg) quadCard.querySelector("#quadMsg").textContent = msg;
+  }
+  function quadDoDetent(dir) {
+    for (let i = 0; i < 4; i++) { quadTransition(quad.dec, quadNext(quad.dec.idx, dir)); quad.history.push(QUAD_STATES[quad.dec.idx].slice()); }
+    quadRender(dir === 1
+      ? "One detent clockwise: the state walked (0,0) → (1,0) → (1,1) → (0,1) → (0,0), A changing first — A leads B. Position is now " + quadPosition(quad.dec) + "."
+      : "One detent counter-clockwise: the state walked the cycle backwards, (0,0) → (0,1) → (1,1) → (1,0) → (0,0), B changing first — B leads A. Position is now " + quadPosition(quad.dec) + ".");
+  }
+  quadCard.querySelector("#quadCW").addEventListener("click", () => quadDoDetent(1));
+  quadCard.querySelector("#quadCCW").addEventListener("click", () => quadDoDetent(-1));
+  quadCard.querySelector("#quadGlitch").addEventListener("click", () => {
+    const before = quadPosition(quad.dec);
+    const target = quadNext(quadNext(quad.dec.idx, 1), 1); /* two steps away = both bits flipped */
+    const r = quadTransition(quad.dec, target);
+    quad.glitchMark = quad.history.length;
+    quad.history.push(QUAD_STATES[quad.dec.idx].slice());
+    quadRender(r.ok ? "The injected jump was accepted — this should not happen." : "ILLEGAL TRANSITION flagged: both channels flipped at once, (" + QUAD_STATES[quad.dec.idx].join(",") + ") straight to the state two steps away. No rotation does that — it is bounce or a missed sample. The decoder refused it: position stays " + before + ", phase does not move, and the glitch tally is now " + quad.dec.glitches + ".");
+  });
+  quadCard.querySelector("#quadReset").addEventListener("click", () => { quad.dec = quadNewDec(); quad.history = [[0, 0]]; quad.glitchMark = -1; quadRender("Reset: state (0,0), position 0, glitch tally cleared. Turn a few detents each way and check the position returns to 0 — the self-test does exactly that, 10 CW then 10 CCW."); });
+  checkBlockH(quadCard, "quad");
+  let quadQn = 0;
+  function quadQuestion() {
+    const fb = quadCard.querySelector("#quadFb"), host = quadCard.querySelector("#quadOpts");
+    fb.textContent = "";
+    const kind = quadQn % 3;
+    if (kind === 0) {
+      quadCard.querySelector("#quadQ").textContent = "Predict, then check: watching the two channels, A changes state before B on every step. Which way is the knob turning (in this lab's convention)?";
+      optBtnsH(host, ["Clockwise — A leads B", "Counter-clockwise — B leads A", "Cannot be told from the channels"], i => fbSetH(fb, i === 0, i === 0
+        ? "Right — the lead is the direction. Clockwise the cycle runs (0,0) → (1,0) → …: A rises while B is still 0. Reversed, B moves first. One channel alone carries no direction at all — that is why encoders have two."
+        : "It can be told, and it is clockwise: A moving first on each step is exactly 'A leads B', this lab's clockwise convention. With only one channel you would be right that direction is unknowable — quadrature exists to fix that."));
+      window.__quadQuestion = { kind: "lead", expected: "CW" };
+    } else if (kind === 1) {
+      const idx = 1; /* state (1,0) */
+      const nxt = QUAD_STATES[quadNext(idx, 1)];
+      quadCard.querySelector("#quadQ").textContent = "Predict, then check: the current state is (A,B) = (1,0). Turning clockwise, what is the next state?";
+      const cand = [[1, 1], [0, 0], [0, 1]];
+      optBtnsH(host, cand.map(c => "(" + c[0] + "," + c[1] + ")"), i => fbSetH(fb, cand[i][0] === nxt[0] && cand[i][1] === nxt[1], cand[i][0] === nxt[0] && cand[i][1] === nxt[1]
+        ? "Right — (1,1): clockwise from (1,0), B rises to join A. Each step flips exactly one channel; a jump to (0,1) would flip both and be flagged illegal, and (0,0) is the counter-clockwise neighbour."
+        : "Not that state — the CW cycle is (0,0) → (1,0) → (1,1) → (0,1) → (0,0), one bit per step. From (1,0) the next clockwise state is (1,1)."));
+      window.__quadQuestion = { kind: "next", from: [1, 0], expected: nxt };
+    } else {
+      const cw = 7, ccw = 3, exp = cw - ccw;
+      quadCard.querySelector("#quadQ").textContent = "Predict, then check: from position 0, the knob turns 7 detents clockwise then 3 detents counter-clockwise. What does the position counter read?";
+      const cand = [exp, cw + ccw, -exp];
+      optBtnsH(host, cand.map(c => String(c)), i => fbSetH(fb, cand[i] === exp, cand[i] === exp
+        ? "Right — position counts detents signed: +7 − 3 = +4. Each detent is one full 4-state cycle counting once, in whichever direction it was walked."
+        : "Not that count — detents are signed: clockwise adds, counter-clockwise subtracts, so +7 − 3 = +4. (Adding them, 10, would be total travel, not position.)"));
+      window.__quadQuestion = { kind: "position", expected: exp };
+    }
+  }
+  quadCard.querySelector("#quadNewQ").addEventListener("click", () => { quadQn++; quadQuestion(); });
+  quadRender("State (0,0), position 0. Turn one detent clockwise and read the wave: A rises first. That ordering — not the pulses themselves — is the direction signal.");
+  quadQuestion();
+
+  /* ================================================================
+     3) PROGRAMMABLE INTERVAL TIMER (Operating Systems).
+     Model, all in integers so stepped checks are exact:
+       phase counts raw clock cycles 0..prescaler-1;
+       each completed phase = one counter tick;
+       counter counts ticks 0..target-1; at target the interrupt
+       flag fires. Period in clock cycles = prescaler x target;
+       tick period (seconds) = prescaler x target / clock rate;
+       tick frequency = clock rate / (prescaler x target).
+     Periodic mode: counter auto-reloads to 0 and repeats.
+     One-shot: counter holds at target, flag stays set until
+     cleared. Playback loads PAUSED.
+     ================================================================ */
+  function timerNew(cfg) { return { cfg, phase: 0, counter: 0, elapsedTicks: 0, elapsedClocks: 0, interrupts: 0, flag: false, held: false }; }
+  function timerClockStep(st) {
+    if (st.held) return false;
+    st.elapsedClocks++;
+    st.phase++;
+    if (st.phase < st.cfg.prescaler) return false;
+    st.phase = 0;
+    st.counter++; st.elapsedTicks++;
+    if (st.counter >= st.cfg.target) {
+      st.interrupts++; st.flag = true;
+      if (st.cfg.mode === "oneshot") { st.held = true; }
+      else st.counter = 0;
+      return true;
+    }
+    return false;
+  }
+  function timerTickStep(st) { let fired = false; for (let i = 0; i < st.cfg.prescaler; i++) if (timerClockStep(st)) fired = true; return fired; }
+  function timerFreq(cfg) { return cfg.clock / (cfg.prescaler * cfg.target); }
+  function timerPeriodSec(cfg) { return cfg.prescaler * cfg.target / cfg.clock; }
+  function timerVerify() {
+    let passed = 0, total = 0;
+    [{ clock: 1000000, prescaler: 1, target: 50, mode: "periodic" }, { clock: 8000000, prescaler: 8, target: 100, mode: "periodic" }, { clock: 16000000, prescaler: 64, target: 25, mode: "periodic" }].forEach(cfg => {
+      const st = timerNew(cfg);
+      const periodClocks = cfg.prescaler * cfg.target;
+      const fireAt = [];
+      let clocks = 0;
+      while (fireAt.length < 3 && clocks < periodClocks * 4) { clocks++; if (timerClockStep(st)) fireAt.push(clocks); }
+      total++; if (fireAt[0] === periodClocks) passed++;
+      total++; if (fireAt[1] === periodClocks * 2 && fireAt[2] === periodClocks * 3) passed++;
+      total++; if (st.interrupts === 3) passed++;
+      total++; if (Math.abs(timerFreq(cfg) - cfg.clock / (fireAt[1] - fireAt[0])) < 1e-9) passed++;
+    });
+    return { passed, total, pass: passed === total };
+  }
+  const TIMER_V = timerVerify();
+  const timerSec = document.createElement("section");
+  timerSec.className = "card stage-card"; timerSec.id = "timerCard"; timerSec.style.marginBottom = "16px";
+  timerSec.innerHTML =
+    "<h2>Programmable interval timer — where the OS tick comes from</h2>" +
+    '<p class="what">Every scheduler in the Operating Systems wing quietly assumes something interrupts the CPU on a regular beat so it can switch tasks. This is that something: a <b>programmable interval timer</b>. A <b>counter</b> is fed from a clock through a <b>prescaler</b> (a divider: one counter tick per prescaler clock cycles), counts up from 0, and when it reaches the programmed <b>compare/target count</b> it raises an <b>interrupt flag</b>, reloads to 0, and starts again — <b>periodic mode</b>. In <b>one-shot mode</b> it instead holds at the target with the flag set until you clear it. The arithmetic is the whole design: <b>tick period = prescaler × target ÷ clock rate</b> and <b>tick frequency = clock rate ÷ (prescaler × target)</b> — the readout below recomputes both from your own settings, live. The playback loads <b>paused</b>: step single ticks to watch the counter and flag deterministically, or press Play. And the connection is direct, not decorative: <b>this periodic interrupt is where the OS scheduler\'s tick comes from</b> — each flag below is one moment the kernel gets the CPU back.</p>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0;align-items:flex-end">' +
+    '<label class="fld">Clock rate <select id="tmClock"><option value="1000000">1 MHz</option><option value="8000000">8 MHz</option><option value="16000000" selected>16 MHz</option></select></label>' +
+    '<label class="fld">Prescaler <select id="tmPresc"><option value="1">1</option><option value="8">8</option><option value="64" selected>64</option><option value="256">256</option></select></label>' +
+    '<label class="fld">Compare / target count <input type="number" id="tmTarget" value="2500" min="2" max="100000" step="1" style="width:110px" /></label>' +
+    '<label class="fld">Mode <span class="seg" role="group" aria-label="Timer mode" id="tmModeSeg"><button type="button" data-tmode="periodic" aria-pressed="true">Periodic (auto-reload)</button><button type="button" data-tmode="oneshot" aria-pressed="false">One-shot</button></span></label></div>' +
+    '<div class="decimal-line" id="tmMath" aria-live="polite"></div>' +
+    '<div class="seq-state" id="tmState" style="margin-top:10px"></div>' +
+    '<div id="tmFlag" style="margin-top:10px;border:1px solid var(--line2);border-radius:9px;padding:10px 13px;font-weight:700" aria-live="polite">Interrupt flag: clear — the counter is counting toward the target.</div>' +
+    '<div class="share-row"><button type="button" class="btn primary" id="tmStep">Step one tick ▸</button><button type="button" class="btn" id="tmStep10">Step 10 ticks ▸</button><button type="button" class="btn" id="tmPlay">Play</button><button type="button" class="btn" id="tmClear">Clear flag</button><button type="button" class="btn" id="tmReset">Reset</button></div>' +
+    '<div class="decimal-line" id="tmMsg" aria-live="polite"></div>' +
+    '<div class="share-row"><span style="font-size:13.5px">Each interrupt hands the CPU to the kernel — see what it does with it:</span><button type="button" class="btn" id="tmToSched">CPU scheduling simulator — the tick\'s customer →</button></div>' +
+    '<p class="proj-teaches"><b>Teaches:</b> how one hardware counter turns a fast clock into a slow, exact beat (three numbers in, one frequency out — and doubling the prescaler halves the tick rate, which the questions make you predict); periodic versus one-shot as the two honest modes (an OS tick versus a timeout); and why the scheduler can promise time slices at all: it does not poll, it is interrupted. Load-time check: ' + TIMER_V.passed + ' of ' + TIMER_V.total + ' stepped assertions pass across three (prescaler, target) configurations — first interrupt exactly at prescaler × target clock cycles, repeating every period for three periods, with the computed frequency matching the stepped simulation.</p>';
+  const osHostH = $H("sysOs");
+  if (osHostH) osHostH.appendChild(timerSec);
+  timerSec.querySelector("#tmToSched").addEventListener("click", () => { if (!clickMenuKeyH("sys-sched")) jumpH("sys-sched"); });
+  /* the scheduling simulator gains the back-link */
+  const schedEl = $H("sys-sched");
+  if (schedEl && !schedEl.querySelector("#schedToTimer")) {
+    const row = document.createElement("div");
+    row.className = "share-row";
+    const span = document.createElement("span"); span.style.fontSize = "13.5px";
+    span.textContent = "Round Robin's quantum is counted in ticks — see the hardware that makes them:";
+    const b = document.createElement("button"); b.type = "button"; b.className = "btn"; b.id = "schedToTimer";
+    b.textContent = "Programmable interval timer — where the tick comes from →";
+    b.addEventListener("click", () => { if (!clickMenuKeyH("interval-timer")) jumpH("timerCard"); });
+    row.appendChild(span); row.appendChild(b);
+    schedEl.appendChild(row);
+  }
+  function tmCfg() {
+    return { clock: parseInt(timerSec.querySelector("#tmClock").value, 10), prescaler: parseInt(timerSec.querySelector("#tmPresc").value, 10), target: Math.max(2, Math.min(100000, parseInt(timerSec.querySelector("#tmTarget").value, 10) || 2500)), mode: timerSec.querySelector('#tmModeSeg button[aria-pressed="true"]').dataset.tmode };
+  }
+  let tm = { st: timerNew(tmCfg()), timer: null };
+  function tmStop() { if (tm.timer) { clearInterval(tm.timer); tm.timer = null; timerSec.querySelector("#tmPlay").textContent = "Play"; } }
+  function tmRender(msg) {
+    const cfg = tm.st.cfg, st = tm.st;
+    const per = timerPeriodSec(cfg), fr = timerFreq(cfg);
+    timerSec.querySelector("#tmMath").innerHTML = "Tick period = prescaler × target ÷ clock = " + cfg.prescaler + " × " + cfg.target + " ÷ " + cfg.clock.toLocaleString("en-US") + " Hz = <b>" + fmtMs(per * 1000) + " ms</b> &nbsp;·&nbsp; Tick frequency = clock ÷ (prescaler × target) = <b>" + (fr >= 100 ? fr.toFixed(1) : fr.toFixed(3)) + " Hz</b> &nbsp;·&nbsp; one period = <b>" + (cfg.prescaler * cfg.target).toLocaleString("en-US") + " clock cycles</b>";
+    timerSec.querySelector("#tmState").innerHTML =
+      '<div class="seq-cell one"><b>' + st.counter + " / " + cfg.target + '</b>counter</div>' +
+      '<div class="seq-cell"><b>' + st.elapsedTicks.toLocaleString("en-US") + '</b>elapsed ticks</div>' +
+      '<div class="seq-cell"><b>' + st.elapsedClocks.toLocaleString("en-US") + '</b>clock cycles elapsed</div>' +
+      '<div class="seq-cell"><b>' + st.interrupts + '</b>interrupts so far</div>' +
+      '<div class="seq-cell"><b>' + (cfg.mode === "periodic" ? "periodic — auto-reload" : "one-shot — holds") + '</b>mode</div>' +
+      '<div class="seq-cell"><b>' + (st.flag ? "SET" : "clear") + '</b>interrupt flag</div>';
+    const flagEl = timerSec.querySelector("#tmFlag");
+    if (st.flag) { flagEl.style.borderColor = "var(--amber)"; flagEl.style.background = "var(--amber-soft)"; flagEl.textContent = "⚑ INTERRUPT — the target was reached (interrupt #" + st.interrupts + "). In periodic mode the counter has already reloaded to 0 and is counting the next period; the flag stays set until cleared, exactly as a kernel would find it."; }
+    else { flagEl.style.borderColor = "var(--line2)"; flagEl.style.background = "transparent"; flagEl.textContent = "Interrupt flag: clear — the counter is counting toward the target."; }
+    if (msg) timerSec.querySelector("#tmMsg").textContent = msg;
+    timerSec.querySelector("#tmStep").disabled = st.held;
+    timerSec.querySelector("#tmStep10").disabled = st.held;
+  }
+  function tmReset(msg) {
+    tmStop();
+    tm.st = timerNew(tmCfg());
+    tmRender(msg || "Reset with your settings: counter 0, flag clear, playback paused. One period is " + (tm.st.cfg.prescaler * tm.st.cfg.target).toLocaleString("en-US") + " clock cycles = " + tm.st.cfg.target + " ticks. Step ticks to reach the interrupt deterministically.");
+  }
+  timerSec.querySelector("#tmStep").addEventListener("click", () => {
+    const fired = timerTickStep(tm.st);
+    tmRender(fired ? "INTERRUPT #" + tm.st.interrupts + " — the counter reached " + tm.st.cfg.target + (tm.st.cfg.mode === "periodic" ? " and auto-reloaded to 0. Elapsed: " + tm.st.elapsedTicks + " ticks." : " and is holding (one-shot). Clear the flag and reset to run it again.") : "One tick: counter " + tm.st.counter + " of " + tm.st.cfg.target + " (" + tm.st.cfg.prescaler + " clock cycles per tick). " + (tm.st.cfg.target - tm.st.counter) + " ticks to the interrupt.");
+  });
+  timerSec.querySelector("#tmStep10").addEventListener("click", () => {
+    let fired = 0; for (let i = 0; i < 10; i++) if (timerTickStep(tm.st)) fired++;
+    tmRender("Stepped 10 ticks: counter " + tm.st.counter + " of " + tm.st.cfg.target + ", elapsed " + tm.st.elapsedTicks + " ticks" + (fired ? ", and the interrupt fired " + fired + " time(s) in those 10 ticks." : "."));
+  });
+  timerSec.querySelector("#tmPlay").addEventListener("click", e => {
+    if (tm.timer) { tmStop(); tmRender("Paused at counter " + tm.st.counter + " — the counter holds its state; nothing advances until you step or play again."); return; }
+    if (tm.st.held) { tmRender("One-shot has fired and is holding at the target. Clear the flag and reset to run again."); return; }
+    e.target.textContent = "Pause";
+    const perFrame = Math.max(1, Math.round(tm.st.cfg.target / 60));
+    tm.timer = setInterval(() => {
+      let fired = false;
+      for (let i = 0; i < perFrame; i++) if (timerTickStep(tm.st)) fired = true;
+      tmRender(fired ? "INTERRUPT #" + tm.st.interrupts + " fired during playback — in periodic mode the counter reloaded and kept counting. Total elapsed: " + tm.st.elapsedTicks.toLocaleString("en-US") + " ticks." : "Playing: " + perFrame + " ticks per frame toward target " + tm.st.cfg.target + ". Counter " + tm.st.counter + ", interrupts so far " + tm.st.interrupts + ".");
+      if (tm.st.held) tmStop();
+    }, 40);
+  });
+  timerSec.querySelector("#tmClear").addEventListener("click", () => { tm.st.flag = false; tmRender("Flag cleared — the kernel has serviced the interrupt. " + (tm.st.held ? "The one-shot counter is still holding at the target; Reset re-arms it." : "The counter kept counting throughout: clearing the flag does not touch the count.")); });
+  timerSec.querySelector("#tmReset").addEventListener("click", () => tmReset());
+  ["#tmClock", "#tmPresc", "#tmTarget"].forEach(sel => timerSec.querySelector(sel).addEventListener("change", () => tmReset("Settings changed — timer reset. New tick: " + fmtMs(timerPeriodSec(tmCfg()) * 1000) + " ms, " + timerFreq(tmCfg()).toFixed(3) + " Hz. Change any one of the three numbers and watch which way the tick moves.")));
+  timerSec.querySelectorAll("#tmModeSeg button").forEach(b => b.addEventListener("click", () => {
+    timerSec.querySelectorAll("#tmModeSeg button").forEach(x => x.setAttribute("aria-pressed", x === b ? "true" : "false"));
+    tmReset(b.dataset.tmode === "oneshot" ? "One-shot mode: the counter will climb to the target once, fire, and hold with the flag set until cleared." : "Periodic mode: at the target the flag fires and the counter auto-reloads to 0 — the OS tick, repeating forever.");
+  }));
+  checkBlockH(timerSec, "tm");
+  let tmQn = 0;
+  function tmQuestion() {
+    const fb = timerSec.querySelector("#tmFb"), host = timerSec.querySelector("#tmOpts");
+    fb.textContent = "";
+    const kind = tmQn % 3;
+    if (kind === 0) {
+      const cfg = { clock: 8000000, prescaler: 64, target: 1250, mode: "periodic" };
+      const exp = timerFreq(cfg);
+      timerSec.querySelector("#tmQ").textContent = "Predict, then check: clock 8 MHz, prescaler 64, target 1250. What is the tick frequency?";
+      const cand = [exp, exp * 2, exp / 2];
+      optBtnsH(host, cand.map(c => c.toFixed(1) + " Hz"), i => fbSetH(fb, cand[i] === exp, cand[i] === exp
+        ? "Right — 8,000,000 ÷ (64 × 1250) = 8,000,000 ÷ 80,000 = 100 Hz, a 10 ms tick. Set the lab to those numbers and its readout agrees."
+        : "Not that rate — divide the clock by prescaler × target: 8,000,000 ÷ 80,000 = 100 Hz. The prescaler divides first, then the target counts what is left."));
+      window.__timerQuestion = { kind: "freq", expected: exp };
+    } else if (kind === 1) {
+      const cfg = { clock: 1000000, prescaler: 8, target: 100, mode: "periodic" };
+      const clocks = 10000, exp = Math.floor(clocks / (cfg.prescaler * cfg.target));
+      timerSec.querySelector("#tmQ").textContent = "Predict, then check: prescaler 8, target 100, periodic mode. How many interrupts fire in 10,000 clock cycles?";
+      const cand = [exp, exp + 1, Math.floor(clocks / cfg.target)];
+      optBtnsH(host, cand.map(c => String(c)), i => fbSetH(fb, cand[i] === exp, cand[i] === exp
+        ? "Right — one period is 8 × 100 = 800 clock cycles, and floor(10,000 ÷ 800) = 12 complete periods, so 12 interrupts (the 13th is 400 cycles short)."
+        : "Not that count — the period in clock cycles is prescaler × target = 800, not the target alone: floor(10,000 ÷ 800) = 12 interrupts."));
+      window.__timerQuestion = { kind: "count", expected: exp };
+    } else {
+      timerSec.querySelector("#tmQ").textContent = "Predict, then check: the prescaler doubles (say 64 → 128) with clock and target unchanged. What happens to the tick rate?";
+      optBtnsH(host, ["It halves — each tick now costs twice the clock cycles", "It doubles — a bigger prescaler ticks faster", "Nothing — the prescaler only affects the counter's width"], i => fbSetH(fb, i === 0, i === 0
+        ? "Right — tick frequency = clock ÷ (prescaler × target): doubling one factor of the denominator halves the result. Try it in the lab: 64 → 128 and the readout's frequency halves exactly."
+        : "Not that — the prescaler is a divider sitting in the denominator: frequency = clock ÷ (prescaler × target). Doubling it doubles the clock cycles per tick, so the tick rate halves."));
+      window.__timerQuestion = { kind: "prescaler", expected: "halves" };
+    }
+  }
+  timerSec.querySelector("#tmNewQ").addEventListener("click", () => { tmQn++; tmQuestion(); });
+  tmReset("Loaded paused, as every animation on this site loads: counter 0, flag clear. Step one tick at a time, or play it — and read the tick math above with your own numbers in it.");
+  tmQuestion();
+
+  /* ---------------- verification handles + self-tests ---------------- */
+  window.__sarCheck = { convert: sarConvert, rule: sarRule, dac: sarDac, verify: sarVerify, vref: SAR_VREF, lsb: SAR_LSB };
+  window.__quadCheck = { transition: quadTransition, detent: quadDetent, position: quadPosition, verify: quadVerify, states: QUAD_STATES };
+  window.__timerCheck = { clockStep: timerClockStep, tickStep: timerTickStep, freq: timerFreq, periodSec: timerPeriodSec, verify: timerVerify, fresh: timerNew };
+  try {
+    window.__roundAHSelfTest = { sar: SAR_V, quad: QUAD_V, timer: TIMER_V };
+    const bad = Object.keys(window.__roundAHSelfTest).filter(k => !window.__roundAHSelfTest[k].pass);
+    if (bad.length && window.console) console.warn("[Round AH self-test] failures:", bad);
+  } catch (e) { window.__roundAHSelfTest = { error: String(e && e.message || e) }; }
+
+  /* ---------------- MENU REGISTRATION + COUNT REBUILD ---------------- */
+  function addMenuItemH(groupName, afterKey, spec) {
+    const list = $H("menuList"); if (!list) return false;
+    if (list.querySelector('[data-key="' + spec.key + '"]')) return false;
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "menu-item"; b.dataset.key = spec.key;
+    b.dataset.search = (spec.label + " " + spec.hint + " " + spec.search).toLowerCase();
+    if (spec.level) b.dataset.uxlevel = spec.level;
+    b.innerHTML = '<span class="mi-dot" aria-hidden="true"></span><span class="mi-label"></span><small></small>';
+    b.querySelector(".mi-label").textContent = spec.label;
+    b.querySelector("small").textContent = spec.hint;
+    b.addEventListener("click", () => { const p = $H("menuPanel"); if (p) p.hidden = true; const mb = $H("menuBtn"); if (mb) mb.setAttribute("aria-expanded", "false"); spec.go(); });
+    if (afterKey) {
+      const anchor = list.querySelector('[data-key="' + afterKey + '"]');
+      if (anchor) { anchor.parentNode.insertBefore(b, anchor.nextSibling); return true; }
+    }
+    let sib = null, inGroup = false;
+    Array.prototype.slice.call(list.children).forEach(el => {
+      if (el.classList.contains("menu-group")) inGroup = (el.dataset.group || "").trim() === groupName;
+      else if (inGroup && el.classList.contains("menu-item")) sib = el;
+    });
+    if (sib) sib.parentNode.insertBefore(b, sib.nextSibling); else list.appendChild(b);
+    return true;
+  }
+  addMenuItemH("Boards, Modulation & Projects", "r2r-dac", {
+    key: "sar-adc", label: "Successive-approximation ADC lab — bits from a voltage",
+    hint: "An 8-bit SAR hunts an analog input bit by bit against the DAC and a comparator: keep or clear each trial bit, land within 1 LSB — verified exhaustively against the floor rule",
+    search: "sar adc successive approximation analog to digital converter comparator dac trial bit binary search quantisation quantization lsb vref conversion register simulator lab",
+    level: "intermediate", go: () => { setTopArea("advanced"); syncRail("advanced"); const pb = document.querySelector('#advPicker [data-adv="tools"]'); if (pb) pb.click(); jumpH("sarCard"); }
+  });
+  addMenuItemH("Boards, Modulation & Projects", "sar-adc", {
+    key: "quad-encoder", label: "Quadrature rotary-encoder lab — direction from phase",
+    hint: "Turn a knob detent by detent: channels A and B in quadrature, direction from which leads, position counted per 4-state cycle — and a both-bits glitch flagged illegal, never counted",
+    search: "quadrature rotary encoder knob detent channel a b phase 90 degrees direction position counter gray code bounce glitch illegal transition shaft simulator lab",
+    level: "intermediate", go: () => { setTopArea("advanced"); syncRail("advanced"); const pb = document.querySelector('#advPicker [data-adv="tools"]'); if (pb) pb.click(); jumpH("quadCard"); }
+  });
+  addMenuItemH("Operating Systems", "sys-sched", {
+    key: "interval-timer", label: "Programmable interval timer lab — where the OS tick comes from",
+    hint: "Set clock rate, prescaler and compare count; the counter fires an interrupt flag every period (or once, one-shot) — tick period and frequency computed from your numbers",
+    search: "programmable interval timer pit interrupt tick prescaler compare target counter auto reload one shot periodic clock scheduler quantum operating system os simulator lab",
+    level: "intermediate", go: () => { setTopArea("systems"); syncRail("systems"); const pb = document.querySelector('#sysPicker [data-sys="os"]'); if (pb) pb.click(); jumpH("timerCard"); }
+  });
+  (function rebuildCountsH() {
+    const RJ = window.__uxRoundJ; if (!RJ) return;
+    const groups = RJ.menuGroups(); const counts = {}; let total = 0;
+    groups.forEach(g => {
+      counts[g.name] = g.items.length; total += g.items.length;
+      const c = g.header.querySelector(".mi-count"); if (c) c.textContent = g.items.length;
+    });
+    window.LAB_MENU = { groups: groups.map(g => ({ name: g.name, items: g.items.map(b => { const l = b.querySelector(".mi-label"); return l ? l.textContent : ""; }) })), count: total };
+    window.LAB_MODULES = { modules: groups.map(g => ({ name: g.name, count: g.items.length })), total };
+    RJ.buildRailAndList(counts);
+    RJ.buildGallery();
+    ["boards", "arch", "os", "org"].forEach(id => {
+      const h = document.querySelector("#module-" + id + " .mh-count");
+      if (!h) return;
+      const name = { boards: "Boards, Modulation & Projects", arch: "Computer Architecture", os: "Operating Systems", org: "Computer Organization" }[id];
+      if (counts[name]) h.textContent = counts[name] + " items";
+    });
+    window.__countsAH = { total, counts };
+  })();
+})();
+</script>
