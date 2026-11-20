@@ -10531,7 +10531,9 @@ const CHIPS74 = {
   "7490": { fn: "DECADE COUNTER", special: true, pinsTotal: 14, vcc: 5, gnd: 10, gates: [],
     pins: { 1: "INB in (clock B)", 2: "R0(1) reset in", 3: "R0(2) reset in", 4: "NC — no connection", 5: "Vcc +5V", 6: "R9(1) set-9 in", 7: "R9(2) set-9 in", 8: "QC out", 9: "QB out", 10: "GND", 11: "QD out", 12: "QA out", 13: "NC — no connection", 14: "INA in (clock A)" } },
   "7447": { fn: "BCD TO 7-SEGMENT DECODER", special: true, pinsTotal: 16, vcc: 16, gnd: 8, gates: [],
-    pins: { 1: "B in", 2: "C in", 3: "LT̅ lamp test in", 4: "BI̅/RBO̅ blanking", 5: "RBI̅ ripple blanking in", 6: "D in", 7: "A in", 8: "GND", 9: "e out", 10: "d out", 11: "c out", 12: "b out", 13: "a out", 14: "g out", 15: "f out", 16: "Vcc +5V" } }
+    pins: { 1: "B in", 2: "C in", 3: "LT̅ lamp test in", 4: "BI̅/RBO̅ blanking", 5: "RBI̅ ripple blanking in", 6: "D in", 7: "A in", 8: "GND", 9: "e out", 10: "d out", 11: "c out", 12: "b out", 13: "a out", 14: "g out", 15: "f out", 16: "Vcc +5V" } },
+  "7476": { fn: "DUAL J-K FLIP-FLOP", special: true, pinsTotal: 16, vcc: 5, gnd: 13, gates: [],
+    pins: { 1: "1CLK in", 2: "1PRE̅ in", 3: "1CLR̅ in", 4: "1J in", 5: "Vcc +5V", 6: "2CLK in", 7: "2PRE̅ in", 8: "2CLR̅ in", 9: "2J in", 10: "2Q̅ out", 11: "2Q out", 12: "2K in", 13: "GND", 14: "1Q̅ out", 15: "1Q out", 16: "1K in" } }
 };
 const chipX = { part: "7400", gate: 0, vals: {} };
 function chipGateVals() {
@@ -14747,7 +14749,14 @@ const BBP_PROJECTS = [
     expr: "count: 0 → 1 → … → 9 → 0 · QD QC QB QA is the count in binary", words: "Inside, the 7490 is a divide-by-2 stage followed by a divide-by-5 stage; wiring QA into the second stage's clock chains them into divide-by-10. The count lives in the chip's flip-flops — it changes only on clock edges, never while you watch the switches.",
     inputs: [], outputs: ["QD", "QC", "QB", "QA"], defaults: {}, build: ["7490"],
     kind: "decade",
-    search: "decade counter 7490 bcd counter mod-10 modulo ten counting clock qa qb qc qd ripple counter 74ls90 divide by ten sequential" }
+    search: "decade counter 7490 bcd counter mod-10 modulo ten counting clock qa qb qc qd ripple counter 74ls90 divide by ten sequential" },
+  { id: "jkff", level: "advanced", name: "J-K flip-flop", chipsLabel: "7476 · one flip-flop, clocked by hand",
+    what: "One flip-flop of a 7476 dual J-K: the J and K switches present the command, the Clock pushbutton applies it on its rising edge — hold, reset, set, or, with J = K = 1, toggle. Preset and clear are tied inactive, and the unused second flip-flop's inputs are tied off, never floating. Power is not on the corner pins on this chip: Vcc is pin 5 and GND is pin 13.",
+    expr: "Q+ = J·¬Q + ¬K·Q at the rising clock edge · J = K = 1 toggles · no edge, no change",
+    words: "The D flip-flop's generalising sibling: where D says 'become this', J and K say 'set, reset, hold — or flip'. Toggle is the mode no D flip-flop has, and it is what makes a lone J-K a divide-by-2 counter.",
+    inputs: ["J", "K"], outputs: ["Q", "Qn"], defaults: { J: 1, K: 1 }, build: ["7476"],
+    kind: "jkff",
+    search: "j-k flip-flop jk 7476 sequential clock edge triggered toggle hold set reset preset clear characteristic equation qbar memory register divide by two counter" }
 ];
 /*BBP-DATA-END*/
 const BBP_LEVELS = [
@@ -14766,7 +14775,7 @@ BBP_PROJECTS.forEach(p => {
 
 /* ---------- generic breadboard renderer (full adder's board is NOT
    routed through this — it keeps its own hand-drawn renderer) ---------- */
-const BBP_FN_LABEL = { "7408": "QUAD AND", "7432": "QUAD OR", "7486": "QUAD XOR", "7404": "HEX NOT", "7400": "QUAD NAND", "7474": "DUAL D FLIP-FLOP", "7490": "DECADE COUNTER", "7447": "BCD TO 7-SEG DECODER" };
+const BBP_FN_LABEL = { "7408": "QUAD AND", "7432": "QUAD OR", "7486": "QUAD XOR", "7404": "HEX NOT", "7400": "QUAD NAND", "7474": "DUAL D FLIP-FLOP", "7490": "DECADE COUNTER", "7447": "BCD TO 7-SEG DECODER", "7476": "DUAL J-K FLIP-FLOP" };
 const BBP_PALETTE = ["#d9480f", "#1971c2", "#862e9c", "#e67700", "#1098ad", "#a61e4d", "#2f9e44", "#e03131", "#0c8599", "#5f3dc4", "#d6336c", "#66a80f", "#1c7ed6", "#f08c00"];
 function drawBBProject(P, st) {
   const rows = Math.ceil(P.build.length / 3);
@@ -15277,13 +15286,18 @@ window.BBKind = (function () {
      applied (the rising edge), capturing the D at that moment.
      Preset and clear are tied inactive in the build. */
   function dffNext(Q, D, clockPulse) { return clockPulse ? (D ? 1 : 0) : (Q ? 1 : 0); }
+  /* 7476, one flip-flop: on a clock pulse Q takes the value the
+     characteristic equation gives, Q+ = J·¬Q + ¬K·Q (hold, reset,
+     set, toggle for J,K = 00, 01, 10, 11); without a pulse Q holds.
+     Preset and clear are tied inactive in the build. */
+  function jkNext(Q, J, K, clockPulse) { if (!clockPulse) return Q ? 1 : 0; return ((J ? 1 : 0) & (Q ? 0 : 1)) | ((K ? 0 : 1) & (Q ? 1 : 0)); }
   /* 7490 in its BCD connection: the count advances by one per
      clock press, 0…9 then wraps to 0. */
   function decNext(count) { return (count + 1) % 10; }
   function decOuts(count) {
     return { QD: (count >> 3) & 1, QC: (count >> 2) & 1, QB: (count >> 1) & 1, QA: count & 1 };
   }
-  return { SEG7447, SEG_NAMES, evalSeg, dffNext, decNext, decOuts };
+  return { SEG7447, SEG_NAMES, evalSeg, dffNext, jkNext, decNext, decOuts };
 })();
 </script>
 <style>
@@ -25146,12 +25160,13 @@ html.text-large .bb-panel-note{font-size:15.5px}
   function jumpD(id) { const el = id && $D(id); if (el) setTimeout(() => el.scrollIntoView({ behavior: "smooth", block: "start" }), 60); }
 
   /* ---------------- sequential state (exploration state) ---------------- */
-  const BBSEQ = { dff: { Q: 0 }, decade: { count: 0 } };
+  const BBSEQ = { dff: { Q: 0 }, decade: { count: 0 }, jkff: { Q: 0 } };
   window.__bbSeq = BBSEQ;
   function bbKindOutputs(P) {
     if (!P || !P.kind) return {};
     if (P.kind === "seg7447") return BBKind.evalSeg(curInputs());
     if (P.kind === "dff") { const q = BBSEQ.dff.Q; return { Q: q, Qn: q ^ 1 }; }
+    if (P.kind === "jkff") { const q = BBSEQ.jkff.Q; return { Q: q, Qn: q ^ 1 }; }
     if (P.kind === "decade") return BBKind.decOuts(BBSEQ.decade.count);
     return {};
   }
@@ -25338,10 +25353,56 @@ html.text-large .bb-panel-note{font-size:15.5px}
     return { viewBox: "0 0 920 " + H, svg: s };
   }
 
+  function drawJkProject(P, st) {
+    const H = 600, y = 283, xs0 = 366, swY = H - 144;
+    const chip = bbChipDraw("7476", xs0, y, 16), pinPos = chip.pinPos;
+    let s = bbChrome(H);
+    s += '<text class="bb-txt" x="460" y="' + (y + 25) + '" text-anchor="middle" style="font-size:11px">centre gap — the DIP-16 straddles it, pin 1 at the dot</text>';
+    /* power on THIS chip's pins: Vcc pin 5 (bottom row) down to the + rail, GND pin 13 (top row) up to the − rail */
+    s += bbJumper("ONE", "#e03131", -1, "M " + pinPos(5).x + " " + pinPos(5).y + " V " + (y + 150) + " H " + (pinPos(5).x + 30) + " V " + (H - 91));
+    s += bbJumper("ZERO", "#343a40", -1, "M " + pinPos(13).x + " " + pinPos(13).y + " V 150 H " + (pinPos(13).x + 40) + " V 91");
+    s += bbBadge("ONE", pinPos(5).x, y + 81);
+    /* preset pin 2 and clear pin 3: tied to +5 V (inactive) */
+    s += bbBadge("ONE", pinPos(2).x, y + 81);
+    s += bbBadge("ONE", pinPos(3).x, y + 81);
+    s += '<text class="bb-txt" x="' + ((pinPos(2).x + pinPos(3).x) / 2) + '" y="' + (y + 104) + '" text-anchor="middle">PRE̅ pin 2 · CLR̅ pin 3 tied to +5 V</text>';
+    /* unused flip-flop 2 tied off: CLK pin 6, PRE pin 7, CLR pin 8 (bottom); J pin 9, K pin 12 (top) */
+    s += bbBadge("ZERO", pinPos(6).x, y + 81);
+    s += bbBadge("ONE", pinPos(7).x, y + 81);
+    s += bbBadge("ONE", pinPos(8).x, y + 81);
+    s += '<text class="bb-txt" x="' + ((pinPos(6).x + pinPos(8).x) / 2) + '" y="' + (y + 122) + '" text-anchor="middle">FF2 unused: CLK pin 6 to GND · PRE̅ pin 7 · CLR̅ pin 8 to +5 V</text>';
+    s += bbBadge("ZERO", pinPos(9).x, y - 31);
+    s += bbBadge("ZERO", pinPos(12).x, y - 31);
+    s += '<text class="bb-txt" x="' + ((pinPos(9).x + pinPos(12).x) / 2) + '" y="' + (y - 40) + '" text-anchor="middle">FF2: J pin 9 · K pin 12 to GND · Q pins 10 · 11 unconnected</text>';
+    /* J switch to pin 4, K switch to pin 16 */
+    s += bbJumper("J", BBP_PAL[0], 0, wireD2({ x: 110, y: swY, side: -1 }, pinPos(4)));
+    s += bbBadge("J", pinPos(4).x, y + 81);
+    s += bbJumper("K", BBP_PAL[1], 0, wireD2({ x: 240, y: swY, side: -1 }, pinPos(16)));
+    s += bbBadge("K", pinPos(16).x, y - 31);
+    /* clock pushbutton: pin 1 wire down to a press button (10 kΩ pull-down holds it LOW) */
+    s += '<path d="M ' + pinPos(1).x + " " + pinPos(1).y + ' V 428 H 316" fill="none" stroke="#862e9c" stroke-width="5" stroke-linecap="round"/>';
+    s += '<g data-seqclock="1" style="cursor:pointer"><rect x="240" y="406" width="76" height="44" rx="9" style="fill:var(--panel);stroke:var(--amber);stroke-width:2"/><text class="bb-txt" x="278" y="424" text-anchor="middle" style="font-weight:700;fill:var(--ink)">CLOCK</text><text class="bb-txt" x="278" y="439" text-anchor="middle">press ▸</text></g>';
+    s += '<text class="bb-txt" x="278" y="466" text-anchor="middle">10 kΩ pull-down holds CLK LOW</text>';
+    s += bbBadge("Q", pinPos(15).x, y - 31);
+    s += bbBadge("Qn", pinPos(14).x, y - 31);
+    /* Q (pin 15) and Q-bar (pin 14) to their LEDs */
+    s += bbJumper("Q", "#2f9e44", 1, wireD2(pinPos(15), { x: 708, y: swY + 14, side: -1 }));
+    s += bbJumper("Qn", "#e03131", 1, wireD2(pinPos(14), { x: 798, y: swY + 14, side: -1 }));
+    s += chip.svg;
+    s += bbSwitchDraw("J", 110, swY, st.inputs.J ? 1 : 0);
+    s += bbSwitchDraw("K", 240, swY, st.inputs.K ? 1 : 0);
+    s += '<text class="bb-txt" x="76" y="' + (swY - 6) + '">switches — click to flip</text>';
+    s += bbLedDraw("Q", 740, swY, H, "#22c55e", "Q · green");
+    s += bbLedDraw("Qn", 830, swY, H, "#ef4444", "Q̅ · red");
+    s += '<text class="bb-txt" x="460" y="' + (H - 20) + '" text-anchor="middle">Q obeys the J/K command only on the rising clock edge (press CLOCK) and holds between presses. Vcc is pin 5 and GND is pin 13 on this chip — not the corner pins.</text>';
+    return { viewBox: "0 0 920 " + H, svg: s };
+  }
+
   const _drawBBAD = drawBBProject;
   drawBBProject = function (P, st) {
     if (P.kind === "seg7447") return drawSeg7Project(P, st);
     if (P.kind === "dff") return drawDffProject(P, st);
+    if (P.kind === "jkff") return drawJkProject(P, st);
     if (P.kind === "decade") return drawDecadeProject(P, st);
     return _drawBBAD(P, st);
   };
@@ -25359,6 +25420,13 @@ html.text-large .bb-panel-note{font-size:15.5px}
       '<li><b>Switch ×1, pushbutton ×1, LEDs ×2, 330 Ω ×2</b><span class="contrib">The switch drives D. The pushbutton drives CLK (a 10 kΩ pull-down holds it LOW between presses, so each press is one clean rising edge). One LED per output: Q green, Q̅ red, each through its own 330 Ω resistor to the anode (+), cathodes (−) to ground.</span></li></ul>' +
       '<div class="share-row"><button type="button" class="btn primary" id="bbSeqClock">Press Clock ▸</button><span class="mono" id="bbSeqState" style="font-size:12.5px"></span></div>' +
       '<p class="bench-note">Set D, press Clock, and Q becomes D. Change D without pressing and Q holds — that refusal to follow its input is the whole point of a flip-flop.</p>';
+    if (P.kind === "jkff") return '<ul class="parts-list">' +
+      '<li><b>7476</b> — dual J-K flip-flop (one half used)<span class="contrib">Flip-flop 1: J pin 4 · K pin 16 · CLK pin 1 · Q pin 15 · Q̅ pin 14. Preset pin 2 and clear pin 3 are tied to +5 V — both are active-low, so +5 V holds them inactive. Pin 5 = +5 V (Vcc), pin 13 = GND — on this 16-pin package the power pins are NOT the corner pins. The second flip-flop is unused and tied off, never floating: clock pin 6, J pin 9 and K pin 12 to GND, preset pin 7 and clear pin 8 to +5 V; its outputs (pins 10, 11) stay unconnected, as outputs may.</span></li>' +
+      '<li><b>Switches ×2, pushbutton ×1, LEDs ×2, 330 Ω ×2, 10 kΩ ×1</b><span class="contrib">The switches drive J and K. The pushbutton drives CLK (a 10 kΩ pull-down holds it LOW between presses, so each press is one clean rising edge). One LED per output: Q green, Q̅ red, each output pin through its own 330 Ω resistor to the LED anode (+), cathodes (−) to ground.</span></li></ul>' +
+      '<div class="share-row"><button type="button" class="btn primary" id="bbSeqClock">Press Clock ▸</button><button type="button" class="btn" id="bbJkReset">Reset Q to 0</button><span class="mono" id="bbSeqState" style="font-size:12.5px"></span></div>' +
+      '<p class="bench-note">Set J and K, press Clock, and Q obeys the command: hold, reset, set — or toggle when J = K = 1. Change the switches without pressing and Q holds.</p>' +
+      '<p class="bench-note">Wiring it for real? <a href="' + (window.__JK_PDF || "data:application/octet-stream;base64,JVBERi0xLjMKJZOMi54gUmVwb3J0TGFiIEdlbmVyYXRlZCBQREYgZG9jdW1lbnQgKG9wZW5zb3VyY2UpCjEgMCBvYmoKPDwKL0YxIDIgMCBSIC9GMiAzIDAgUgo+PgplbmRvYmoKMiAwIG9iago8PAovQmFzZUZvbnQgL0hlbHZldGljYSAvRW5jb2RpbmcgL1dpbkFuc2lFbmNvZGluZyAvTmFtZSAvRjEgL1N1YnR5cGUgL1R5cGUxIC9UeXBlIC9Gb250Cj4+CmVuZG9iagozIDAgb2JqCjw8Ci9CYXNlRm9udCAvSGVsdmV0aWNhLUJvbGQgL0VuY29kaW5nIC9XaW5BbnNpRW5jb2RpbmcgL05hbWUgL0YyIC9TdWJ0eXBlIC9UeXBlMSAvVHlwZSAvRm9udAo+PgplbmRvYmoKNCAwIG9iago8PAovQ29udGVudHMgMjYgMCBSIC9NZWRpYUJveCBbIDAgMCA1OTUuMjc1NiA4NDEuODg5OCBdIC9QYXJlbnQgMjUgMCBSIC9SZXNvdXJjZXMgPDwKL0ZvbnQgMSAwIFIgL1Byb2NTZXQgWyAvUERGIC9UZXh0IC9JbWFnZUIgL0ltYWdlQyAvSW1hZ2VJIF0KPj4gL1JvdGF0ZSAwIC9UcmFucyA8PAoKPj4gCiAgL1R5cGUgL1BhZ2UKPj4KZW5kb2JqCjUgMCBvYmoKPDwKL0NvbnRlbnRzIDI3IDAgUiAvTWVkaWFCb3ggWyAwIDAgNTk1LjI3NTYgODQxLjg4OTggXSAvUGFyZW50IDI1IDAgUiAvUmVzb3VyY2VzIDw8Ci9Gb250IDEgMCBSIC9Qcm9jU2V0IFsgL1BERiAvVGV4dCAvSW1hZ2VCIC9JbWFnZUMgL0ltYWdlSSBdCj4+IC9Sb3RhdGUgMCAvVHJhbnMgPDwKCj4+IAogIC9UeXBlIC9QYWdlCj4+CmVuZG9iago2IDAgb2JqCjw8Ci9Db250ZW50cyAyOCAwIFIgL01lZGlhQm94IFsgMCAwIDU5NS4yNzU2IDg0MS44ODk4IF0gL1BhcmVudCAyNSAwIFIgL1Jlc291cmNlcyA8PAovRm9udCAxIDAgUiAvUHJvY1NldCBbIC9QREYgL1RleHQgL0ltYWdlQiAvSW1hZ2VDIC9JbWFnZUkgXQo+PiAvUm90YXRlIDAgL1RyYW5zIDw8Cgo+PiAKICAvVHlwZSAvUGFnZQo+PgplbmRvYmoKNyAwIG9iago8PAovQ29udGVudHMgMjkgMCBSIC9NZWRpYUJveCBbIDAgMCA1OTUuMjc1NiA4NDEuODg5OCBdIC9QYXJlbnQgMjUgMCBSIC9SZXNvdXJjZXMgPDwKL0ZvbnQgMSAwIFIgL1Byb2NTZXQgWyAvUERGIC9UZXh0IC9JbWFnZUIgL0ltYWdlQyAvSW1hZ2VJIF0KPj4gL1JvdGF0ZSAwIC9UcmFucyA8PAoKPj4gCiAgL1R5cGUgL1BhZ2UKPj4KZW5kb2JqCjggMCBvYmoKPDwKL0NvbnRlbnRzIDMwIDAgUiAvTWVkaWFCb3ggWyAwIDAgNTk1LjI3NTYgODQxLjg4OTggXSAvUGFyZW50IDI1IDAgUiAvUmVzb3VyY2VzIDw8Ci9Gb250IDEgMCBSIC9Qcm9jU2V0IFsgL1BERiAvVGV4dCAvSW1hZ2VCIC9JbWFnZUMgL0ltYWdlSSBdCj4+IC9Sb3RhdGUgMCAvVHJhbnMgPDwKCj4+IAogIC9UeXBlIC9QYWdlCj4+CmVuZG9iago5IDAgb2JqCjw8Ci9Db250ZW50cyAzMSAwIFIgL01lZGlhQm94IFsgMCAwIDU5NS4yNzU2IDg0MS44ODk4IF0gL1BhcmVudCAyNSAwIFIgL1Jlc291cmNlcyA8PAovRm9udCAxIDAgUiAvUHJvY1NldCBbIC9QREYgL1RleHQgL0ltYWdlQiAvSW1hZ2VDIC9JbWFnZUkgXQo+PiAvUm90YXRlIDAgL1RyYW5zIDw8Cgo+PiAKICAvVHlwZSAvUGFnZQo+PgplbmRvYmoKMTAgMCBvYmoKPDwKL0NvbnRlbnRzIDMyIDAgUiAvTWVkaWFCb3ggWyAwIDAgNTk1LjI3NTYgODQxLjg4OTggXSAvUGFyZW50IDI1IDAgUiAvUmVzb3VyY2VzIDw8Ci9Gb250IDEgMCBSIC9Qcm9jU2V0IFsgL1BERiAvVGV4dCAvSW1hZ2VCIC9JbWFnZUMgL0ltYWdlSSBdCj4+IC9Sb3RhdGUgMCAvVHJhbnMgPDwKCj4+IAogIC9UeXBlIC9QYWdlCj4+CmVuZG9iagoxMSAwIG9iago8PAovQ29udGVudHMgMzMgMCBSIC9NZWRpYUJveCBbIDAgMCA1OTUuMjc1NiA4NDEuODg5OCBdIC9QYXJlbnQgMjUgMCBSIC9SZXNvdXJjZXMgPDwKL0ZvbnQgMSAwIFIgL1Byb2NTZXQgWyAvUERGIC9UZXh0IC9JbWFnZUIgL0ltYWdlQyAvSW1hZ2VJIF0KPj4gL1JvdGF0ZSAwIC9UcmFucyA8PAoKPj4gCiAgL1R5cGUgL1BhZ2UKPj4KZW5kb2JqCjEyIDAgb2JqCjw8Ci9Db250ZW50cyAzNCAwIFIgL01lZGlhQm94IFsgMCAwIDU5NS4yNzU2IDg0MS44ODk4IF0gL1BhcmVudCAyNSAwIFIgL1Jlc291cmNlcyA8PAovRm9udCAxIDAgUiAvUHJvY1NldCBbIC9QREYgL1RleHQgL0ltYWdlQiAvSW1hZ2VDIC9JbWFnZUkgXQo+PiAvUm90YXRlIDAgL1RyYW5zIDw8Cgo+PiAKICAvVHlwZSAvUGFnZQo+PgplbmRvYmoKMTMgMCBvYmoKPDwKL0NvbnRlbnRzIDM1IDAgUiAvTWVkaWFCb3ggWyAwIDAgNTk1LjI3NTYgODQxLjg4OTggXSAvUGFyZW50IDI1IDAgUiAvUmVzb3VyY2VzIDw8Ci9Gb250IDEgMCBSIC9Qcm9jU2V0IFsgL1BERiAvVGV4dCAvSW1hZ2VCIC9JbWFnZUMgL0ltYWdlSSBdCj4+IC9Sb3RhdGUgMCAvVHJhbnMgPDwKCj4+IAogIC9UeXBlIC9QYWdlCj4+CmVuZG9iagoxNCAwIG9iago8PAovQ29udGVudHMgMzYgMCBSIC9NZWRpYUJveCBbIDAgMCA1OTUuMjc1NiA4NDEuODg5OCBdIC9QYXJlbnQgMjUgMCBSIC9SZXNvdXJjZXMgPDwKL0ZvbnQgMSAwIFIgL1Byb2NTZXQgWyAvUERGIC9UZXh0IC9JbWFnZUIgL0ltYWdlQyAvSW1hZ2VJIF0KPj4gL1JvdGF0ZSAwIC9UcmFucyA8PAoKPj4gCiAgL1R5cGUgL1BhZ2UKPj4KZW5kb2JqCjE1IDAgb2JqCjw8Ci9Db250ZW50cyAzNyAwIFIgL01lZGlhQm94IFsgMCAwIDU5NS4yNzU2IDg0MS44ODk4IF0gL1BhcmVudCAyNSAwIFIgL1Jlc291cmNlcyA8PAovRm9udCAxIDAgUiAvUHJvY1NldCBbIC9QREYgL1RleHQgL0ltYWdlQiAvSW1hZ2VDIC9JbWFnZUkgXQo+PiAvUm90YXRlIDAgL1RyYW5zIDw8Cgo+PiAKICAvVHlwZSAvUGFnZQo+PgplbmRvYmoKMTYgMCBvYmoKPDwKL0NvbnRlbnRzIDM4IDAgUiAvTWVkaWFCb3ggWyAwIDAgNTk1LjI3NTYgODQxLjg4OTggXSAvUGFyZW50IDI1IDAgUiAvUmVzb3VyY2VzIDw8Ci9Gb250IDEgMCBSIC9Qcm9jU2V0IFsgL1BERiAvVGV4dCAvSW1hZ2VCIC9JbWFnZUMgL0ltYWdlSSBdCj4+IC9Sb3RhdGUgMCAvVHJhbnMgPDwKCj4+IAogIC9UeXBlIC9QYWdlCj4+CmVuZG9iagoxNyAwIG9iago8PAovQ29udGVudHMgMzkgMCBSIC9NZWRpYUJveCBbIDAgMCA1OTUuMjc1NiA4NDEuODg5OCBdIC9QYXJlbnQgMjUgMCBSIC9SZXNvdXJjZXMgPDwKL0ZvbnQgMSAwIFIgL1Byb2NTZXQgWyAvUERGIC9UZXh0IC9JbWFnZUIgL0ltYWdlQyAvSW1hZ2VJIF0KPj4gL1JvdGF0ZSAwIC9UcmFucyA8PAoKPj4gCiAgL1R5cGUgL1BhZ2UKPj4KZW5kb2JqCjE4IDAgb2JqCjw8Ci9Db250ZW50cyA0MCAwIFIgL01lZGlhQm94IFsgMCAwIDU5NS4yNzU2IDg0MS44ODk4IF0gL1BhcmVudCAyNSAwIFIgL1Jlc291cmNlcyA8PAovRm9udCAxIDAgUiAvUHJvY1NldCBbIC9QREYgL1RleHQgL0ltYWdlQiAvSW1hZ2VDIC9JbWFnZUkgXQo+PiAvUm90YXRlIDAgL1RyYW5zIDw8Cgo+PiAKICAvVHlwZSAvUGFnZQo+PgplbmRvYmoKMTkgMCBvYmoKPDwKL0NvbnRlbnRzIDQxIDAgUiAvTWVkaWFCb3ggWyAwIDAgNTk1LjI3NTYgODQxLjg4OTggXSAvUGFyZW50IDI1IDAgUiAvUmVzb3VyY2VzIDw8Ci9Gb250IDEgMCBSIC9Qcm9jU2V0IFsgL1BERiAvVGV4dCAvSW1hZ2VCIC9JbWFnZUMgL0ltYWdlSSBdCj4+IC9Sb3RhdGUgMCAvVHJhbnMgPDwKCj4+IAogIC9UeXBlIC9QYWdlCj4+CmVuZG9iagoyMCAwIG9iago8PAovQ29udGVudHMgNDIgMCBSIC9NZWRpYUJveCBbIDAgMCA1OTUuMjc1NiA4NDEuODg5OCBdIC9QYXJlbnQgMjUgMCBSIC9SZXNvdXJjZXMgPDwKL0ZvbnQgMSAwIFIgL1Byb2NTZXQgWyAvUERGIC9UZXh0IC9JbWFnZUIgL0ltYWdlQyAvSW1hZ2VJIF0KPj4gL1JvdGF0ZSAwIC9UcmFucyA8PAoKPj4gCiAgL1R5cGUgL1BhZ2UKPj4KZW5kb2JqCjIxIDAgb2JqCjw8Ci9Db250ZW50cyA0MyAwIFIgL01lZGlhQm94IFsgMCAwIDU5NS4yNzU2IDg0MS44ODk4IF0gL1BhcmVudCAyNSAwIFIgL1Jlc291cmNlcyA8PAovRm9udCAxIDAgUiAvUHJvY1NldCBbIC9QREYgL1RleHQgL0ltYWdlQiAvSW1hZ2VDIC9JbWFnZUkgXQo+PiAvUm90YXRlIDAgL1RyYW5zIDw8Cgo+PiAKICAvVHlwZSAvUGFnZQo+PgplbmRvYmoKMjIgMCBvYmoKPDwKL0NvbnRlbnRzIDQ0IDAgUiAvTWVkaWFCb3ggWyAwIDAgNTk1LjI3NTYgODQxLjg4OTggXSAvUGFyZW50IDI1IDAgUiAvUmVzb3VyY2VzIDw8Ci9Gb250IDEgMCBSIC9Qcm9jU2V0IFsgL1BERiAvVGV4dCAvSW1hZ2VCIC9JbWFnZUMgL0ltYWdlSSBdCj4+IC9Sb3RhdGUgMCAvVHJhbnMgPDwKCj4+IAogIC9UeXBlIC9QYWdlCj4+CmVuZG9iagoyMyAwIG9iago8PAovUGFnZU1vZGUgL1VzZU5vbmUgL1BhZ2VzIDI1IDAgUiAvVHlwZSAvQ2F0YWxvZwo+PgplbmRvYmoKMjQgMCBvYmoKPDwKL0F1dGhvciAoYW5vbnltb3VzKSAvQ3JlYXRpb25EYXRlIChEOjIwMjYxMTIwMTQyNjAxKzAwJzAwJykgL0NyZWF0b3IgKGFub255bW91cykgL0tleXdvcmRzICgpIC9Nb2REYXRlIChEOjIwMjYxMTIwMTQyNjAxKzAwJzAwJykgL1Byb2R1Y2VyIChSZXBvcnRMYWIgUERGIExpYnJhcnkgLSBcKG9wZW5zb3VyY2VcKSkgCiAgL1N1YmplY3QgKHVuc3BlY2lmaWVkKSAvVGl0bGUgKHVudGl0bGVkKSAvVHJhcHBlZCAvRmFsc2UKPj4KZW5kb2JqCjI1IDAgb2JqCjw8Ci9Db3VudCAxOSAvS2lkcyBbIDQgMCBSIDUgMCBSIDYgMCBSIDcgMCBSIDggMCBSIDkgMCBSIDEwIDAgUiAxMSAwIFIgMTIgMCBSIDEzIDAgUiAKICAxNCAwIFIgMTUgMCBSIDE2IDAgUiAxNyAwIFIgMTggMCBSIDE5IDAgUiAyMCAwIFIgMjEgMCBSIDIyIDAgUiBdIC9UeXBlIC9QYWdlcwo+PgplbmRvYmoKMjYgMCBvYmoKPDwKL0ZpbHRlciBbIC9BU0NJSTg1RGVjb2RlIC9GbGF0ZURlY29kZSBdIC9MZW5ndGggMTE3NAo+PgpzdHJlYW0KR2F0PSpnTVolMCY6TWwrYmJOWUBYPTNUX1YqSC1WaCRvR0tma2hzTT9pMzVgRktBUlsiZCl0NUopO0RgQjpWIjEhbDlDPkByXWVeMURjM0BKajEwVmVJTE5gJnE5XkVKWWw4SEpNUCo4XVMiUGw3QmlbVEgqSEhyWG46UCU7aipyRTgzbiFwYV5kYDNncWk+aEU9OypAa25pWzpvTydfISlcJmk2WCpTQCw6cj4lXyx0S0IlLSdWMiVycGcrWlRjYXIqXjJQMjRMV0ItRG85QS9yJUBAWiRwUFtTbl9WdVUwYy1VUW5MYSsxXkNUJ3FZbCxra1NWOlBoQWw7Pm0kTTdoJi9VV0ZDZzg6L1BKS04zV043KUpVY0c2MDlOUDRMZWcqSDkiaGIia1xfNE02SzlLZzdVMHMhSmFZTTMnS0lpIl5ncGcnKzw4YjhBVkg2P29Rb0UnSUViZFhbYUpvTSNERVooSCkvRVp0V3RKXWgrb20zSUMkOmEnN0RPL2RXUUU9UHVhV2lgRWVYYztVXG5oRkhgcG5GRUxFNkw2IjpLXTpmJldGbXVeSTYyQkpBMTghVlJFVShZPGIlLClnQCFOMkFSZzlnMHRYWkQ3IyNvWTljMDllXjBkS1FHVD4lLmwyOl08bVxmZzZtI0ItRShOR0VvMERQZTxJbVpbWkp1KGptbHFpTWNqQlVoQ1g2K3FtTD83ZV8pYWg1VSJcXkYpbGFQTkJJWi9KPmE+cWAoPCc2bWR1NTgubUU4Lio6YGkkZm1CTEJrLyJlZ0UrPnNJTilhYjs2cHQrP1wiZVlnVDpZXC9lPGJkR29DZCdfVjZrSEhQYUQ5XEMlSjU6XWc7LmdsKk4uKigtdDk0aC5iWlliXEhdK0JrbkhtRysuQyFrSjVSSzlmU3JwQTFsXGdUQyU4aFk4MWI0VlJdW2EnIm0kRWFFUXJmWConTEZAL0dpMk4/ayUyXjksIjM9MS9ZUChbIW1pUyM3JWpRNU9TLlM0XFRFNTtvNEdUcEBlcEFwIkRoZzclSUxfUzkmZUBMbCQ4blpeZ01JTkQ5OkUlRi86NkphSSpwNExCXlpac2pdQSpqXz50YmhNN0A0RkdWPUctYCpYX2dZbjpfQDYjOHBiZDhmNU08Il5gRF1DPUE/ZmRcWlJlYmJDaig+X2VRP0dnJFlxUE9vRUNVSUtkTyNlclQ2V1YzT1w9TDJaIXVgOWRRI1hfTSY4ZDQqcWxpSUtUMUdlYk4yQFRMNSM8X0tlRXBWTXJWIlFkYVQucyw9JmlITUcoIXA1NmZZTS88czhISGJPOFleQWcxMEUqcEVlKGFkRWVYOVU5QzsyQVNKIklWcGNObi9kQ2NfJGs7RS5MKmYqMWsxIXI4N0JdMEskSWhVQEgnXj9QY05qOEslWSlOOyk+aVZQXzUoNGV0Qk5bR3U0VXFEMTZhVltTdFFUUGMlXzxnKWAzVVFQYkdeLjVnaF07UmpjIytWYCEoY2hFWE9JZEMkJy1eQlxLKC1BSlhZTF9pdF4/Ll5UZ1lOQkBHa2I7JEpaUCIqKSw6N0t+PgplbmRzdHJlYW0KZW5kb2JqCjI3IDAgb2JqCjw8Ci9GaWx0ZXIgWyAvQVNDSUk4NURlY29kZSAvRmxhdGVEZWNvZGUgXSAvTGVuZ3RoIDUzNwo+PgpzdHJlYW0KR2FzSWM5bEhkXCdZTlUxYmQiOi0oWWFLIVxsKWIzXTgmcjlRalg0VDprPVVCR0dHMDcyNVxXIk9YYSIrUlYxTCRIU1pBQDU7W2NeIjdXcUBZQGUzYjpjPXNROFBvRSo7bjM1cCImL2xoVDJHSTwrSmc+cTRDXHBrNitEXyJhb1FeaWQydDJuMmIkTkY3cWAnTU9PdEZSZU43JykpSSgyYTZtQXBgUF0lcmw6L2hvMlJDVk5RIjV0XV9BXjZlWEokWnIkRUg6XD9tSmtGQ0pyUWo6QChwJyxJNi9ZQlo7TUxAIj1KSmBFc3RVJ0tXdChNbEVVLl83cWlPVCQrakhoMUIoUTNWaEZZKCRaYWtmcDJDWSI6LSFhNyxjZjxRPUQrWUZtXExCU11pPDlKWys0ci1BKjt0YUEjQ04uPiEndCI/OCh1YCUuPms0WW08Ky5nLFY7YV1rZVwpXGwwQSRiJGotQVdhO2BMZWVIdVZraTpeQUFQa2pFYFRPaSgqckAudGRtJVAxVkMtJlJaVGxPUCQ6LVhdSCckRTYkW2wiJ1ssIV5SazcyczBjSmoqREZSX0tqIj81JXJMJUdLZUBlLGRgKy83bFxuOlxfOidrcScqMkxgPCpiIllPW2ZSLWRLIzxTdXI6QGUqckViZyNPQyIkYmZTKHRYO0JwNkQoSyg8XWdGaycqZ09PVzg6UTw9KGojVnRkZn4+ZW5kc3RyZWFtCmVuZG9iagoyOCAwIG9iago8PAovRmlsdGVyIFsgL0FTQ0lJODVEZWNvZGUgL0ZsYXRlRGVjb2RlIF0gL0xlbmd0aCA1NTQKPj4Kc3RyZWFtCkdhc2JWP1oyRGYnWkp1JC5GKUcvMkQyRT1fXUM6RWRUVUBTZWpyKVRpbCopPVdyT0JiO3EsX01nVSddJ24xXURJXjspbHJjOTJrbTRmSCsyNG4oVlBoI2RnbGE9PlB1S1pKVyY4JS5vMCJyZDtgRWlSUXMicWAtXmoiWjBXO28xc2dPbkRpVT5sUi5AW0giamBlLUlxSTFhUj1WUGwlIzdIQjRSTiE+MTM2TCRTdXJRT2JPJlBZPjlRSzdXTHRvdDRuUkxnP0cjZ21XNmRLPGpDU1BKQlguOTBNKXAoV0B1R0chTC9IKHRjOGJpLExLQVsxbyxWOzhVXiokOkRcKVpWbFNHNCFnXkVPcVtRMlcxIUs+MlEpNiIsa2ZrMCNETWg2REJfMjFiSTBkUGdhUWA0bXMiU2I+YXRBODEzU1xKI0siWXA5bV9DUmgmbTNRLkg6YihkdUxTN2FeNHFSTXBlT3NBKG1Xcjs2LURpbEFUZDtHakI3cGFLQFNIPTMvWk5TOy08IzArImdRaWAkSzc9UTJvWjNfaEwsbzlCJ2JHJEsoP1Q9LG9aMl1RJS1VPS5WR1A2dTFTSXVKXk4lO2s+S2VhNEJcLV8uRmtvaEdcTzRoRVVRbzNwVyUkInRTLiYsRy5KKy9MQ3M6MlRsQy9hRW9ccDE6XShWMks/LTNgI0xLZU9zJjRHdU1UMDo2Imc7XFcqW2BFMWJ0WTthQFZfI0FKU1E0VH4+ZW5kc3RyZWFtCmVuZG9iagoyOSAwIG9iago8PAovRmlsdGVyIFsgL0FTQ0lJODVEZWNvZGUgL0ZsYXRlRGVjb2RlIF0gL0xlbmd0aCA1NTIKPj4Kc3RyZWFtCkdhc2JWOy9iL0InU1lIPygkQkYxSkpbJzRTPmFsMzlqOSxiO2k9Jj5ePnBSZCMkYEhvako1MEFwVGttNTsiQEYrNitCdEBxMF9WKCNqZD9DbXJdKjthUkprX0poZ2pVZCNgcSVyby4hO25UK21RcTBETnBWJERSLVAoPChpNik1c2csLCEibDlSZV9wP3JPJUpaKU1nUWg0V1hzNDwlRmZjYWtlVkVsSjVNLixsLE0oTSNIUC51S1EiP00pMCRHX0dJb0I+VEsnQV9xTFliOCkpT14pSVJlOT4tWyhHZUFQJDNDZytnOmshIW89QyNBSC1kQSdWaSQ9LWxOWihiMyZmLiR0Ll1lWXRQXjVxc2ZTPzdsazFBQ1knJGNdbkYiXVprKD5nKVc5VkVyc2UpJissKnFMOFtOcChPKkcpTWpxX0wiN1JlSyJeWSp1RXAyb1I5P3BpQSdyZSQmWVRCcj1dPWtZdWFEKEBzISwxcHNQbCVOR0EiOz1xKWolYWB0YztWaC9tLSckb1FCTyNKQTA7WjRuQGFnTTxDYzVgWnVqUDBqP0dMal1QXTEnbTUoQG4oU0R1RUVnPktFaC5tXTlAQVZQcShnUXI5UFM1YFZ0U0tjNy0sJW5UIzImVUQjTkdMLS9cUV50YkNsSFFXYmglN3RGWDdOO0BFJz9BUEZfZ1ctPmtkOHVLVzNkcGg9UUVXWkloZCZeOiEzXEFuKDxRUWx0VVt+PmVuZHN0cmVhbQplbmRvYmoKMzAgMCBvYmoKPDwKL0ZpbHRlciBbIC9BU0NJSTg1RGVjb2RlIC9GbGF0ZURlY29kZSBdIC9MZW5ndGggNTYxCj4+CnN0cmVhbQpHYXNiVmNZcThkKjYlQ0YvKUg4Ry9MSXB0UDYyRmdnRV0lX1g6X0A6Z3NnMShPdVJLYDpBYUwiQ2NcalojOEFWbFNlWmFIaHRMIWRtXDBWY1wlbj07Kzc6Tyo2YVsubjg6cCtnRFFBS0MpLy89LmloJmpDKmZzODQxUy0+XkFQJStmO2NHPzc/X19QbDJsX3I0TlVFSyVmVj9DOTg/cG9hQDxVOVdRNlQycmxqRDhmV3FTLnBNTlMpWElJVFJJTVNoUV9AKVJKXUI8SkInT1stTy5aTispRjNDays/XiQ8Q0BRLyJaSlU6MD40LWddSWQ4PDNSOTJgWCJgVWR0bFIoMjhwQ1E7NDRbbGEncWpdajRDYzFwVkUqbmNHPG9jQVRuUkAtJnRYUT87ZT0pZjo7Xj5UcnJzbFAuKkFLUEpTPjxyXjNaajVgPkoiIV40LiMpIURaN1IpPT47KV5TZSpNPXM6JUUpKl43Y0JsZyUwbDQ/PT8haGpOUFVLYlwpM2xDJD9NOz1scCdBZV1QcyUhM1Q1bzNoVDlDPTdyOWZLUGBhVDtoMWNOVClyL2gxb3JzIlVlXmg9RmxPWClHYUhKR29VYz9LRFM/JiFcY006LWxWMmxyTWtLXlkiYydPNTYsYzU6SUg8NTxjT2FDTnUwSCslWCVwJCwrQltIJz9EakZtXWgyIURbbVl1W1tbQEwpOi5HXkA+SXVSWT0oTD87Zj5KQCddKDRRPEZkLUtpfj5lbmRzdHJlYW0KZW5kb2JqCjMxIDAgb2JqCjw8Ci9GaWx0ZXIgWyAvQVNDSUk4NURlY29kZSAvRmxhdGVEZWNvZGUgXSAvTGVuZ3RoIDUxMAo+PgpzdHJlYW0KR2FzYlY1dTZNcCY7QlRPKCU4U0IrbDprM2o1ZE1vL209Pz0lWiFURUg/IS9VKUM5Tjo+RHI0NGojVSI3PXNPZyg4T2k5YERyKlU2ND9iVG1iNz09J2k1WlE5QVNCWWYiWSVnUmlfTUAlRlRzPG5dbT9tMWYqNmhpU0ZNYi5laHVEQVZlQStiRG1JLFtcIy5MJlhtS1ErI1RKYldkcVo6cGIsbUAxOUw5TiM0QEFebms1L0pCVSpiTC5oKG9UcG45QS1DQE8vWmpkW1VLczZicF5SaldKTnFDPzoycmhKQyI/TiphPjplTTxNQUg2Ziclcl4+YWxaNXJWKFM1YzZCa1RHYjcwSlAmYlIoX0hWUlY0XWlBJmg/ck84MWReUzYnOl1eSXNDUy5EPEMtY1BGW0pjXUorRFxcSjw7MStiTXBsPiU7WFMiL1hzQmFnIj0mKFB1YV8yIywiY1BNRFA4U1ZiaVElb1ptUmc9SlpEbGE9azJHUmNMQ2NBbSJjLDBkIUgzQ2lhbWlnTyI3VGlDJCk2NENpX00vV1ZTOjxHIVNgXCk6Pk1gZyc6J1o6YyxjPHRkZUZkUjNHLS1BaTQvQ1BaKyo/XCRvY049OTUyQVhccUUlO1tuKkg2RUw9OSc4Rm5EJ2w2Yiw7T1cpOUcpZUs7KU1hVT9wKGUkb34+ZW5kc3RyZWFtCmVuZG9iagozMiAwIG9iago8PAovRmlsdGVyIFsgL0FTQ0lJODVEZWNvZGUgL0ZsYXRlRGVjb2RlIF0gL0xlbmd0aCA1MTUKPj4Kc3RyZWFtCkdhc2JWNiclS2gnU1ByTidtJi0qQzpsWUowVzxEQC5XbmZiSGAuWD0+aEh0ZF1GI0puN3FyIU8qS3M9SkUyXGpgKU4tUEhrNyZVKiV1J2JUIy8xanRJTyxPcVlsaHJyN2UkVDxNSFM6ZC1qYjRuPS9HNTVLTlEvXWFzJEFII29PPjQpWTtNTTQqRi1NL3BCaDdfREgzOkttMFN0bUNUQGEoKyYsVjE3JS8rYDxWOHJLLCNQQl1iXytkOUkvN2RIWS9mRDArWFhpVmNvbE1ybmsoQT1KN2ZsW2xJamxKbFhnZDdyRkcyYVgjX1RjIk5VXS81JWFMKUcobylTckJIaWVpLHBpISU4WytMR1ordCtxJWpIQTgqLjclRkNWTUhaQjM5YXVRVEgiYWByK3MjZzJcS25zOi8uIihUPDpUJUonaDY1aWc9YGFRREhZUkxbM2J0ZVM5UmxLM0RLLkFOWGAhaHFmQjZTLWBdNnVUaiNwZUdcUl48YC83PF1BMiFVRj45bEo5WmcjMG41VCdoNCplMSgtRk5OKTZEZm02RGNhWz8+WUxgZzA5MllzLkFmMGRKLVUtcD0vaTc0ODdEaj04VyJfJUFBRi9uWjI0aDU/RDNQUTk3PmBBUjY+NFxGR0RZaDRpbWFqYmFoWDUkYT0tMCw4cSoyOilsanBgNGkwRn4+ZW5kc3RyZWFtCmVuZG9iagozMyAwIG9iago8PAovRmlsdGVyIFsgL0FTQ0lJODVEZWNvZGUgL0ZsYXRlRGVjb2RlIF0gL0xlbmd0aCA1MjAKPj4Kc3RyZWFtCkdhc2JWNXU0T0gnU1o7WydrXy9wZysrcl0kdUIxOVcvNVkqO08yLDFWTFNfOEAjWFg1NC5VLF9ZOk8hTkw/J1YkXjJyYF8jMSViQlNUdFV1LStKNS4/bFs5MGJVNExTMVteSFxkbENPZ29dVCheNTZfLTVPLEspZWBcQGVhMGRKPzo6UmBzMDojMGFdTlVFSyVRcUg9WzpnKj1nWl85WSxcVjBUZFwzZmJAalNGTz1NITt1aVZbT2dQUGszK1RQUG9SQ2dfblgwNkpLLTImWzk3TD1lIShAanFgQyQ9YWJublg9JFMlMCJRbjMnR0xfNTVgPEdQTSRGXW5fPHM2K0BrT0d0NTJGWiJJW089bSZnQFpnayM0VkZASlVOKyhEUStzRDo5NSptY1hUbXAnSEhCVWs/PCIqVUQrZEskak8vVzY8PSc4N1pyOlVMK0lGPDk9T3VEVk02QzpqNGYvaUQsZTpWN1E3PChWREdmLFdMaSljYXBOIjRRNTUoNzonW2suVEV1LmVvNlIqbGlCOSUtdFYnW0EtT05pNDMvQTNeSSZhNFJNZTIxO2dcLkA2Ly5GcTonZElTKDxGOVtHbzFYXWEzNXFuVVcyXzsxb19SV2paJ0dXXGlkPlM+dG11RyYsSyNeQXEiaGRbUCxHNzNVUzFEJ2Q/X3FwbitRcG5JPVtqZzkxfj4KZW5kc3RyZWFtCmVuZG9iagozNCAwIG9iago8PAovRmlsdGVyIFsgL0FTQ0lJODVEZWNvZGUgL0ZsYXRlRGVjb2RlIF0gL0xlbmd0aCA1ODIKPj4Kc3RyZWFtCkdhc2JXP1o0Q0knWkp1LC5GJmthOl9WVVoualExJ1tMUT5QVExTRjZRU2BeMk41VV9yKFlINDtFT00hSFI2WmxTbCxMSSNHRTVOSjRTcXNhKCtvIzFgT2NLYmIpZFowSUd1TC1pXUxNVjNXZmdyNG9TWl5HNz1VRzROOWFDLXFPXSo0R3BNYm8oMlxiTFNqTGpMSVFEXycnOlVIZi0ybUIuYj50JWBaZGciJ1ghUFMrRlgyMjc/TlsvTWByZysqaFx0Uk4jQW09anRxOU9GR1FYV2ZsLldiQ0swZytoNU5YLDpXP0xvb2BvVEgiSilLO1tQYG9HPWlhMWhMbSdmUzNFY1IiOktUOyIyOyRgSztYLU0tQDhqTXBsZCpzPS0oTiNMNltvW15mb2hxRFlIZW1nRFVlXi5mWHA1Ik1rJiMhJ140alwkbSNpbzEoZ1VQa1s+MV4iU2hdQUk4a0M7NmNqbmxsSHBQVkc2SSlTRUM/XW5oa1NdbzpPREgtVi9tVmImZVdEa2xvNlVeRChhXjVNYWxjVS9NIzxUTkExO087cSVnQG9oNCNkVj4rby9YUVpzVGgvLG5qJVU2RW9oWy4ja2E8Y15SL2g7aTBTKGZaLlxiUiUzbGspRldmamExIVdKZSVwMVxOMEA/JyFjUmhTc1AhS1xScHIlQUwsaktpVGNgXEphNVloLTBaYCs0TCNbVD8qPGNyOVttVV5TOTNCN01JTTdpJFw1cS49V29DLStEbl4wKFsySzpoMCMjJXNuMUx+PmVuZHN0cmVhbQplbmRvYmoKMzUgMCBvYmoKPDwKL0ZpbHRlciBbIC9BU0NJSTg1RGVjb2RlIC9GbGF0ZURlY29kZSBdIC9MZW5ndGggNTc2Cj4+CnN0cmVhbQpHYXNiVmMmUzhJJ1NaOixNUjJWQmVbWDdkISpzXW9xMipVWGcuRloiOWY+YWMmZ2ghMmdbMCs+XjtlQUJVZ1l0WkBIa3Fpb0ErSHU3SD5PL143LD8lPG9FUjQiX0IqalRKOzojLzkiWmE2Q2laU1RxN2dUb1gtdE84XTpDXytqRylGZHRqYDNFOm5ZVUo4SlQiZHF1M2tCRWJsMz07cl4zWzIsWFhNUW1rMFNCZTk3NEpET3BQYlE1alk9NEtcS0k+RTNDTSZQI1A2SzQtUDpeZmdzNm0kKlw+Zi9gSkcrMW06SjpZZnFJM1lYaG5qKk9KKHRPYCw7Mj5cYlU3L1A1MzQlXzE2KVExKiMiVkg4aTtvUWAwOkk2Oj4hcSNuYlY+UVMuYSxSPVZ1XVozOVlibSxBaCJfMklDZGElaTNgYVdsPVVHN2gkXUNSVHFvSjUhP1ljY0QqNVsnbi5ZXEhoUCQnL1QpPTc9VCFRYj4uUz5xJ2o7LFhWJ2pWdU0maFxASiMpVzNlXFlHcDxWY21CcloydHRPUzBbXSFiJUNtS0pTbnQiU2wsOD5sPjo9UiomSEUjP2dJP181ZUJFVFg5PiE3Vj5FSVRcRU5gclk2Z1NyZyRBX2d0YSUtKW1MZSUlUm9HMWE/RitvYWw1JTNCVGFdbm5fV0k2RjVhYj40dV5ZJGxYWExQUUxnY1FZLkA8MVkob2ttTklJJDAyc3M4LUFWPE1KXF9KakNQTVEiPlA0U1x0TVRKKWNfWGp1fj5lbmRzdHJlYW0KZW5kb2JqCjM2IDAgb2JqCjw8Ci9GaWx0ZXIgWyAvQVNDSUk4NURlY29kZSAvRmxhdGVEZWNvZGUgXSAvTGVuZ3RoIDU3Mgo+PgpzdHJlYW0KR2FzYlZfL0okXShyYnRBKCU0JzVMKThUOVM+XTxyO2Q2JyJSVGJndShJSlYsOSZkcSM3L1BsZkU8WmRxTEMiOig7c2E4VWhZL0VCcy5TQ3VmKVhcOUkhX1RcJSlqOEUtOENCajQ7UDhyMVhJRTJmakMkRFxLSVJrQFFcMzVHdHRsKi4jSjYjKzNVOy9mMl08OGY9SFRQaUpuN0xVTF5wY2RaaUI8LTZRY1svbDkzU3BqQj9AYU48QC8wKzxMXTMpIlsyTjstYHE0UCo+TlRGbk9xUy42JTRHXmIjVyprU0hGO2lMJmVJalloMWMuXlFuSnMuYi0zI1gmXjlOWCc1Qzk1YTtQUWpITGZKb15Bcktgak1fS2hGT2sqSj5lYygpTGMoMEtGR0YkSUlGSlBpa106N0dRL1ZOQG80USUvREtBb1NXP1NUTW48PXE1MUheRS1jbjxLbDA2cyxZQ21oPjwqYj1fNiFcRzZiJSQiT2xydFNfcEtxLVxCNThcXjknUT1fcz9iLjVlZCMldDFhZmM7XkAsVF45KCVcZjZNYChQRlQxImM/YVA9cms9RF11dXRJNTlNT00sPlteJzxJTFFzJiNsXU8pQzhULGo7cGdWZlF0cms1VVM+LzZSMzcoUWVNMU5cbip1TiZQWVkrTG45UUNZYF9jNzUqUFlwRmZNXTZgTkRrS1JKNltSUmkwYmoxXHNpNWdpTlU7UTRYbm9mNi9oPFRfZSdLVjldKlQwNHFzIiJOJ19afj4KZW5kc3RyZWFtCmVuZG9iagozNyAwIG9iago8PAovRmlsdGVyIFsgL0FTQ0lJODVEZWNvZGUgL0ZsYXRlRGVjb2RlIF0gL0xlbmd0aCA1NjQKPj4Kc3RyZWFtCkdhc2JXNiNXNUgqNiVDQidecUUqX28iQ05ZWHBvTUQnTm10ZUxEUUwzOGMmXUo8QCskamtKK0tWQmxWKi44YHA1cCVTPkhxYHRoKiYsIVwrIjhwQzRvbXFdTUE6KVtaNyokRWhULlJfJDVcJHVGKyJEXW4rSnBEcEkqRWVeUF0uNDRBLj1qPksmPjU0PD5ZIjtoKkpOUzd0bUwyWko5Ly45JnRwO0xlK1VLYUJrIVdIRktWPmFsbDFOKSRsOkNSLmo4a0VEUF5bW29SV2glLCkvbzd1KkY9LU9oLWNuJkUrSmVbZlExYkwjV0wiPykwXVpEWlYrTSVibVJFPjAhIzpTXG9gJGA1XXUtb2tfYlBGQypBXE4odCstWXEnLG0mPygiV1EzN2IjXyU8cSZHayVwVzRxUSEyTTpeYzdeZm0tRFc1YE9xWDAmKGc+YVJiajhBJyglUnNKVlxOU21OLEJPckYkdDtoMm9wOy9UbVNdJC5JNmslRGgzUVw0aD1xLlAqS0NvOC9dZXM2UyEhQThTcFM1Ul0yJipjPFBvaWpJKE1rWzYhMSU6RTVpTk9UYDMkTGVuNTZHTEhXUkkmKSRpclVUUS9EcW1MLG9cbCNUI2FkcjpcK2g8aWlva1Y5QTQ8YnIuN0k2IVVMMWhOP1B0UmRUNG5odTdyRSx1YFAzOiNeY2dMRVEyPUhLUTxKP3RTKUM1XHVAPHVlYi8uWks/JFxvQG1zImtJS15ZLWZzcT5+PgplbmRzdHJlYW0KZW5kb2JqCjM4IDAgb2JqCjw8Ci9GaWx0ZXIgWyAvQVNDSUk4NURlY29kZSAvRmxhdGVEZWNvZGUgXSAvTGVuZ3RoIDU2Nwo+PgpzdHJlYW0KR2FzYlZjIzI4aSY7OU0kTUUqXmBjJi87QjhzXk9HMj89X2slOkJwYXBuQWthQDNVaGM4QFFbcFFfTCRNWSZ1LHE4RG8qUnEwJHAwLDYtJFpYdWtSTV5ySk1EYiMlRmlAaFBQPWolSFdfRlUiOmZITTRnPzpDUnEvLDAhT2NPbHFDVUxuYSs7cjQ3M2lZI1lGOGY6IWFNX2BeUmpLLk5NN1BYQydUQGZkaGlrblQoZydcRGVPJ0tKMGdkPD5mMydDPW0+MUloOy8iak4kanJBXT50NUdxIyorOFRBVks9V3I1YkhdSkdOPjBbcnJuSFVtRzJyZ19fIzZTcVJMO2xyLGllKk1gJWJdQlVzcmxGYF8xJF1qYi0+W1MkLTAvXmFcNSk5Pl5hakpTaSMwVEBPUC0vJCpWWDguOz4wYWVfYDNmQTpHL28xNFEuS2pUQ3JbRio2MDI5SjYpTFhEdDBXIic8W2Zvb2M4cFxycWdYOiYsLXAhT0VkOHRKXl1KLF9NSWtyM3JhRzxxQVJKb0pgODVaJkVeOUddJkE5REBNZjIrJ29pby8sTC9XKlc+cTIwcG5ccilTSUI8YG5DbTptVykocnBvL1dIK2xaN1xXaUFAYyFLKkFNdDVlJjcsQ2ktIiNWL0YqZztDLCtwaWREX2hfQVRCdWZIcllMXmhAKmxFJmpsS3JVI1ljIXVPXGZdLyZYUExONEVMJTFQamxeWkZqXi5kQEw9R0FjLFNIIyJIS3NqRH4+ZW5kc3RyZWFtCmVuZG9iagozOSAwIG9iago8PAovRmlsdGVyIFsgL0FTQ0lJODVEZWNvZGUgL0ZsYXRlRGVjb2RlIF0gL0xlbmd0aCA0NjUKPj4Kc3RyZWFtCkdhc2JWNXUzK2UhLzluPSglOjpeO0pBY1E+WUkhLVFEZlNYVGRNSS9GO2tUYSFfaFhoUVBHcTRFQS9aIl1WS3FZbWxfI2lIKVEibDFaMSInaDJIcUAiPDEwbTMhYGhFJTdXZyJUWWZwTFk9YTpuKz1PSzRHOFs0RicvIi1aK04qdXJISCU6KyQ+WWpqIV1paWI7Y287N01IO2hnQHRdZTQ4NFU2KSJGQzonLVBWODE9cic4SCtDJjs5YmspYGRePEE5dFs0NEYlRkU/KU8kI2ZYNTtERiYsPE45cjUsMDshKkNZVDMucFpRZFErOzQ5Q2hZWSJJYCJPMV4jMnFPcE00VHJAZmY+cVopITZNRTZRPVQwWUo7VUdnaUxeVCg8MFQ9QXJHOT9bPk4rRyFwZV0mNzJbQyNcUDI9PU4yQkZzRC5zZ3RsVDRpPDxpU0ImOzcvLGRWcGkuMio/RWtQOj5LMlU/JF0nYFI/SV8iSSxpJGloKXEuZ0xBVHM/WilOaSUobiRYTV9gWHIhRmZdKks8UmlTImc2MGJFJzk4LEhCc1FxM1ckcT1GWG06JF0qUkY3PF9KSzVsW3RxSm09Z2pgUnMvMSsjXiZlJkxeK2Z+PmVuZHN0cmVhbQplbmRvYmoKNDAgMCBvYmoKPDwKL0ZpbHRlciBbIC9BU0NJSTg1RGVjb2RlIC9GbGF0ZURlY29kZSBdIC9MZW5ndGggNTQ2Cj4+CnN0cmVhbQpHYXNiV18vR2VzKHJidD4vKUcuLTxdazEjTCloVVhkb3BKT1RpdFBvXE4mTShGRl1LbilZTGs7MGhrK1ElTV1VSTpVNUs9SUddWiRGOlwnNVUmaSFqcGlvLmwpPWZAbTZtQ105cG1zLk9jOVBtQ1Z1S2BtSDlrNHJhRVlRRVpBYGA3O1dKOlE1RCNOW2VsPE4mQ1lfOmNZV0lQdTs2bnRqQmhHSEUnK2c5c1kpa2prSXQnZF5BN1Q1dVA2XHM3NE8sYF03Ymo+VWsvc15MPWJoMFVQRUdASGg9bXA7OyhIP01WNW1kcVlTblRtNEE9XCwsN29GXDc2QSVjRTBBM2k3dFdkWSNgQycuTlJjRTFWOzxqUUNjXG5KckEiRE9LXyUlaiQxPkw7b29hYThxXDxxQz1eTj9JbSUpIzdXWz0oTUg1amNoUE9oVXFgZz1QQ2NSUG1kaT5WWVMjNC1HO3Azb0ktRUY+XXBeJEIkXD0xLUh1LF1HKVcsaEVUaEQ8XkQpWDElOztfcyk1aChILkZNJkMrRENELz9TZVxxLzdhOkpmQltdSnI2ZVwmWUxqWk01WGQncmk9VzUral9CaDlQKi1JL0snR01zMzhZaFw3LG9PTiZMPG4vTEU3XCdoOipCWXMmMlwjU101SVtoM3VdYzkpdWVoRihAQkNxQjttIVJHNjlhTTM2RjU2X1VgO010aDBzZ21ATFcqVWEmYEtTfj5lbmRzdHJlYW0KZW5kb2JqCjQxIDAgb2JqCjw8Ci9GaWx0ZXIgWyAvQVNDSUk4NURlY29kZSAvRmxhdGVEZWNvZGUgXSAvTGVuZ3RoIDQ2MAo+PgpzdHJlYW0KR2FzYlZjVk1EMyo2JUNFKCUzSzo6dEtrclt1MUtkTzxAQzVCIltJY1RTJkMqYiNXJE1uKk4wUCtabCY7PzJCXzVoXkA9VS1saGhVSFohb18raU4ycUpoaHVjVyhVQks5MEBuUVgjIVJcRm9QTz41NkQkNyVjXFVfJGorO0I2UDhHdDA7ZCZkWkYkJkk9XXFGTFRGVkMhPi9lKkopOnByPE4oSFFBSDR0cyVLWFlTRU1MXWVUb1pUUzFeamFxYkI+al85b2l1OTRbQGpAQWx1YGVWYENIXEg9RU0jJS9KKDE2UihrY1dIbFkjNThCYVJtRG04PEAoSHQ+IWlPWF0hU3MzWjNAXHFTS0VsLlw9KVYyK04zQDEzbVNxVU5TW1YzbCNkMC5xcSgoa1xaQiZuOChydTVpMmpQNW0yaUZ1ZSM4Q0cpc0ZyK2FmWGU4QlRGbnA9MytCKy06K2pMXlAwTkNZJFFFVGBaIkckX3FhSmZYcldTcjY3OSxvRldZUz1GVGJWPjBkQz4nKkk/XUEqM2RqOSc8UVk+LzRfc0YndVImVmQiQzknIWo6NEJBNydCVEZhRyxva2tnKjNuSCNsX2MlZDVNL3FcI11+PmVuZHN0cmVhbQplbmRvYmoKNDIgMCBvYmoKPDwKL0ZpbHRlciBbIC9BU0NJSTg1RGVjb2RlIC9GbGF0ZURlY29kZSBdIC9MZW5ndGggNTgxCj4+CnN0cmVhbQpHYXNiVzYnJUtoJjtCVEsoJTlfTGc6NWM+JSclZkVlU18wcGVTWiwlP0ZWdTJDZnBkLkAnbihrWTsnMFApUGdEKSMyV2VGMnJjaDJTcGRQITpETkBSXzdQJSRiKWtcVzU0T2F0aSxjMkUzV2ZoXSpyU3QjVipJOyZhKj5aSmlnPV1EOydabi0/YWI9QkFeUD5jO0UpcltiVitaW1goNkQnWkhcSWQtNlJbSkROSHQqR3JvLytgKzhNNycqSTFvU3NETWE3ZFFVKWNcIygoQkYoLj5WZlZXMXBSVEkyKzkuZSgqWj9qUl08QGk9YGgnOy0iRXBobDxgc0FTIlZGN1lfIlMtQ0FsPUsnLmtJTldQblEnSmY8VGl1Y1JJZzgkNkIqKiNhX15JNTJCV0RAOjJKUk1pdWtVa2w3Wzs+TkZRUW9CS1VpM1pPRTE7NXRcWDVtUEkhZWt0I09XLFNlPm1yVXBZJ0ZLUTFfbWM5M2dLbjhQTmNWZWEyXVshWVJiaS4xZjhxcEZANFZbcy85M0dxVj8/TF1vQ2FUZU11MUc1I01DU2suUT5yS1YhRDNUTjROUV5pZUwtdC9WZllTNGM0UGBDMkZzVF5NImdQbjAtM3FCJD1jNCtuKlZGTjBnOD1mdHRnPzJmWG5rRExgMlpFWzgxazQ7cyRccGpLMW5tJWRNN09MaT8/MVRLYFs3XW5acT5uPitkIztPdHFWVWEjJG9BczxWLW1IbG5ZTypDbVA2KUo6IjYuJnNObiYmQFlQVyx+PmVuZHN0cmVhbQplbmRvYmoKNDMgMCBvYmoKPDwKL0ZpbHRlciBbIC9BU0NJSTg1RGVjb2RlIC9GbGF0ZURlY29kZSBdIC9MZW5ndGggODE2Cj4+CnN0cmVhbQpHYXRVMT51MDMvJ1JmLkdTNEQ0aChZZWJlWm9zQDZWJWpGZFUtOCUwLT5qYm5pWz9OTXI7MGJdJ08nNEcuOSEjZltNIzJDVDZuaUFkRGFwKVlDWi1rXjBHWXNKVE00ZDFFWWo9MCUxSW0wPklaSysyPy5tZiopNiQ0PFsoQy1xVGViNEg/ZWdsLUpyXVE7dVYwMC5ZakYyX10kJDdBbUcjVHNMbztdYXRjIjU3NV91NHM5Z3IjL3VfLyFLNF40P28jT18zK2FdWTRiXmVkQmlVTGZaPDdXRSgyJTkmTy1YL2NBZ2JqS211Xy4jJjUxTFlJJVE3J0I8JmkpUTRgOz9PQ1tAJy43YE0yLjglbV1OJ2csKjxeM1ZwcS0pbUA9SSo2MlZKJlVIS1pyQHFKM09dK2pPMCckXk9GUDY7blhzLVJLQGMyWkFySWBwJUUwRUJccEwkVUFeQSpNXyhcOl5QPkQhVV8nZTBGQFlcSDNlJFtXb3Q+QDBIWCdPPTIhUURoJSk1QVJldVZoSGo2QzNGIzU/cXFVa0NHcVInYFA0JDZUQ1dpQ3UjOCYpZEApWWd1Zi8iVU9zJVdPPjwySD5LblA4V0NbcyxwVUoqK1dxaixoKitPYmknUVA6LUVaLSwtcE01ZDhdMilRaHBYSWBtNl4/SjphLiYyTVZBMF1YL2JmKDJTNlxuJnNQITEqXypjRGRxdS9fZF0hMlBQUkFnSSkycTZ0TzlBNkZfLCsyXk9ZVjZqV1k+ZT9sUkFjNTJUYz1FZUNdPCosUmdaWTRpLkJQQWkkS0hsQyxxcUlcYCZKTU89X3A9JixbUypzS1I9XyYrLWZTOFFoTzFHJFtDPV90XUxtYEspMSFxV0syL21PZVVEO0FWYVE7LEgiT1gzQTs1Km9sYFQ/T29ebFUrI2tgNGppTFVcWkRLVG8sLChmVSY6LE83XF5VK2FcJFAhKVJTdGhOPVlcNDw/bVhBUjlNamBscVYlUEI2S0gpY2NXYi1pNC5lck1fcGZtYSQnO0xwa2JDLlFANjBbV202cFNwU1JDZ2hmT0NkMkFkO0NAXChrajVfbEcjSS8ufj5lbmRzdHJlYW0KZW5kb2JqCjQ0IDAgb2JqCjw8Ci9GaWx0ZXIgWyAvQVNDSUk4NURlY29kZSAvRmxhdGVEZWNvZGUgXSAvTGVuZ3RoIDg0Ngo+PgpzdHJlYW0KR2F1MS1fL2MjISY7S1khTVo3P0taJT01ZEUrZmNROE5hQzpkc0FtWShFKENOI3A6JUtVajtoRTNPbSI5T3EqbzxPWSwuP24pJUVYJFxgNFhlOiI0dW4zK1ZgLG1Aak4yUDw4KE9eLWloM0g5M0gpRTwqOWNVc2dKJjVfQEAqXHJPMi08dGQwOFYsOSoxPDFgZkcqPlknR0wuWVs8YWV1V1xSJnVRWGcpRDE1a2xOQyxJcDg2amFhKF1hZHRwMylALWptZSdFc2laK25MOyczLHRnXF1ScThWT2gnYiJLIVBYQjloQyMkNmtLM0phWDZmRkErXXQ+OVQ0bCpMc0AvPVMxNlEvKXVrNSplZCwscDVbPFk3dGFoWFgvcU80ZHEnISVfNi1cRC5MZyw7TklpXzVSJTtSTEQiJi5lPmMyZjZKZjc3WT5Pamdrcy80Ik9RPyxoWVdXayFiQG1OKGFPYExrM1RbXSMmQXAyRGNSIWFOQldeIUFLOU5KSDY6Qz1kOSIjWWpyN3NPWSczTXFUMWlCN15sQ2xOVUBrTGYnSTRkNmgpQGAoVFxUXyopN1A9JS1qbEEoJjMwZnUsWFksX2VwZjszcUhhXldHaF1TQik5QWdUYT9lI1NEIz1OVW8tR2FoXmUhUElJWCNJNThkIUZbL1hIX0AhdWVOY05VS2dIYlY1O2ZLLTg4VkxmVUU4UFpTcGkpZ0QpRT43PmxsPllvRFNXYl02STAmJy5SM25aSiUwc0Y9U2wwKUhDQFZhXG8ocHBUQU9HRUpncmVPbGBPayMpaFJbVnFCPlliOyEtLkZiRyhaOWM+Skc2MDhyW2YhWjlqTVZ1TVpkT0FDNVtDaUsnV1hmUDZRMEoiZDhsYDwnMmhtbFA8IydSWj1VdTUrYTdiInA7NE5hMC11YSRTRXBNajdYKSheU21EUkNoUiEoNnVQO2dYVThDTjwxLE9dXSsxOiddbkE7LTs7Zm8ma2BkbS5AaWEhNUdeXCpeWj5sI05EQDFfQlB0SFdmUzc7XT9hOGUkc2ssTkBPNSxYSSZBVWI+SGFWWG1qVj9eb2wrcC5RcishPkZscWlJSC86IkVQRUZsQlxdc2YpQlpBNFNHV09gcnFAVH4+ZW5kc3RyZWFtCmVuZG9iagp4cmVmCjAgNDUKMDAwMDAwMDAwMCA2NTUzNSBmIAowMDAwMDAwMDYxIDAwMDAwIG4gCjAwMDAwMDAxMDIgMDAwMDAgbiAKMDAwMDAwMDIwOSAwMDAwMCBuIAowMDAwMDAwMzIxIDAwMDAwIG4gCjAwMDAwMDA1MjYgMDAwMDAgbiAKMDAwMDAwMDczMSAwMDAwMCBuIAowMDAwMDAwOTM2IDAwMDAwIG4gCjAwMDAwMDExNDEgMDAwMDAgbiAKMDAwMDAwMTM0NiAwMDAwMCBuIAowMDAwMDAxNTUxIDAwMDAwIG4gCjAwMDAwMDE3NTcgMDAwMDAgbiAKMDAwMDAwMTk2MyAwMDAwMCBuIAowMDAwMDAyMTY5IDAwMDAwIG4gCjAwMDAwMDIzNzUgMDAwMDAgbiAKMDAwMDAwMjU4MSAwMDAwMCBuIAowMDAwMDAyNzg3IDAwMDAwIG4gCjAwMDAwMDI5OTMgMDAwMDAgbiAKMDAwMDAwMzE5OSAwMDAwMCBuIAowMDAwMDAzNDA1IDAwMDAwIG4gCjAwMDAwMDM2MTEgMDAwMDAgbiAKMDAwMDAwMzgxNyAwMDAwMCBuIAowMDAwMDA0MDIzIDAwMDAwIG4gCjAwMDAwMDQyMjkgMDAwMDAgbiAKMDAwMDAwNDI5OSAwMDAwMCBuIAowMDAwMDA0NTYxIDAwMDAwIG4gCjAwMDAwMDQ3NDYgMDAwMDAgbiAKMDAwMDAwNjAxMyAwMDAwMCBuIAowMDAwMDA2NjQxIDAwMDAwIG4gCjAwMDAwMDcyODYgMDAwMDAgbiAKMDAwMDAwNzkyOSAwMDAwMCBuIAowMDAwMDA4NTgxIDAwMDAwIG4gCjAwMDAwMDkxODIgMDAwMDAgbiAKMDAwMDAwOTc4OCAwMDAwMCBuIAowMDAwMDEwNDAwIDAwMDAwIG4gCjAwMDAwMTEwNzMgMDAwMDAgbiAKMDAwMDAxMTc0MCAwMDAwMCBuIAowMDAwMDEyNDA0IDAwMDAwIG4gCjAwMDAwMTMwNjAgMDAwMDAgbiAKMDAwMDAxMzcxOCAwMDAwMCBuIAowMDAwMDE0Mjc0IDAwMDAwIG4gCjAwMDAwMTQ5MTEgMDAwMDAgbiAKMDAwMDAxNTQ2MiAwMDAwMCBuIAowMDAwMDE2MTM0IDAwMDAwIG4gCjAwMDAwMTcwNDEgMDAwMDAgbiAKdHJhaWxlcgo8PAovSUQgCls8YjExM2I3YmQ3Mjc1YWExOWFhZjA5ZDcyODBiODlhYWY+PGIxMTNiN2JkNzI3NWFhMTlhYWYwOWQ3MjgwYjg5YWFmPl0KJSBSZXBvcnRMYWIgZ2VuZXJhdGVkIFBERiBkb2N1bWVudCAtLSBkaWdlc3QgKG9wZW5zb3VyY2UpCgovSW5mbyAyNCAwIFIKL1Jvb3QgMjMgMCBSCi9TaXplIDQ1Cj4+CnN0YXJ0eHJlZgoxNzk3OAolJUVPRgo=") + '" download="jkff-wiring-steps.pdf">Download the step-by-step wiring PDF</a> — one connection per page, in the order to wire them, pin for pin as drawn above, closing with the operating sequence and the full 8-row test table.</p>' +
+      '<div class="share-row"><button type="button" class="btn" id="bbJkToLab">The J-K flip-flop lab — the characteristic table, stepped →</button><button type="button" class="btn" id="bbJkToDff">The 7474 D flip-flop project — the sibling build →</button></div>';
     return '<ul class="parts-list">' +
       '<li><b>7490</b> — decade counter<span class="contrib">Clock A pin 14 · QA pin 12 jumpered to clock B pin 1 (the BCD connection). Outputs: QD pin 11 · QC pin 8 · QB pin 9 · QA pin 12. Reset pins R0(1) pin 2 and R0(2) pin 3 are grounded, and set-9 pins R9(1) pin 6 and R9(2) pin 7 are grounded — counting needs all four inactive. Pin 5 = +5 V, pin 10 = GND — this chip\u2019s power pins are not 14 and 7.</span></li>' +
       '<li><b>Pushbutton ×1, LEDs ×4, 330 Ω ×4</b><span class="contrib">The pushbutton clocks INA. One LED per count bit (QD QC QB QA), each output pin through its own 330 Ω resistor to the LED anode (+), cathodes (−) to ground. Reset below pulses the R0 pins HIGH, the way a wire from +5 V touched to pins 2 and 3 would on a real bench.</span></li></ul>' +
@@ -25383,6 +25451,19 @@ html.text-large .bb-panel-note{font-size:15.5px}
         tbl.innerHTML = "<thead><tr><th>D at press</th><th>Q before</th><th>Clock press?</th><th>Q after</th><th>Q̅ after</th></tr></thead><tbody>" +
           [[1, 0, "press", 1, 0], [0, 0, "press", 0, 1], [1, 1, "press", 1, 0], [0, 1, "press", 0, 1], [0, 1, "no press", 1, 0], [1, 0, "no press", 0, 1]].map(r => "<tr>" + r.map((c, i) => '<td' + (i >= 3 ? ' class="out"' : "") + ">" + c + "</td>").join("") + "</tr>").join("") + "</tbody>";
         $D("ttNote").textContent = "A flip-flop has no combinational truth table — this is its capture table. Without a clock press, Q holds whatever it already was.";
+      } else if (P.kind === "jkff") {
+        const ci = curInputs(), cq = BBSEQ.jkff.Q;
+        let html = "<thead><tr><th>J</th><th>K</th><th>Q now</th><th>Clock press?</th><th>Q next</th><th>Q̅ next</th><th>Mode</th></tr></thead><tbody>";
+        [[0,0],[0,1],[1,0],[1,1]].forEach(([j, k]) => {
+          [0, 1].forEach(q => {
+            const qn = BBKind.jkNext(q, j, k, true), mode = j && k ? "TOGGLE" : j ? "set" : k ? "reset" : "hold";
+            const cur = (j === (ci.J ? 1 : 0) && k === (ci.K ? 1 : 0) && q === cq);
+            html += '<tr' + (cur ? ' class="active"' : "") + "><td>" + j + "</td><td>" + k + "</td><td>" + q + '</td><td>press</td><td class="out">' + qn + '</td><td class="out">' + (qn ^ 1) + "</td><td>" + mode + "</td></tr>";
+          });
+        });
+        html += '<tr><td colspan="3">any</td><td>no press</td><td class="out">Q (unchanged)</td><td class="out">Q̅</td><td>hold</td></tr>';
+        tbl.innerHTML = html + "</tbody>";
+        $D("ttNote").textContent = "The J-K characteristic table — all 8 present-state × J × K rows, computed from Q+ = J·¬Q + ¬K·Q. The highlighted row is your switch setting and stored state; the last row is the other half of the contract: no press, no change.";
       } else {
         let html = "<thead><tr><th>Count</th><th>QD</th><th>QC</th><th>QB</th><th>QA</th><th>Next</th></tr></thead><tbody>";
         for (let v = 0; v < 10; v++) { const o = BBKind.decOuts(v); html += '<tr' + (v === BBSEQ.decade.count ? ' class="active"' : "") + "><td>" + v + "</td>" + [o.QD, o.QC, o.QB, o.QA].map(x => '<td class="out">' + x + "</td>").join("") + "<td>" + ((v + 1) % 10) + "</td></tr>"; }
@@ -25407,6 +25488,7 @@ html.text-large .bb-panel-note{font-size:15.5px}
       const cl = $D("checkLine");
       if (cl) cl.textContent = P.kind === "seg7447" ? "✓ Segment patterns are the real 7447 table — all 16 input values asserted at load (10–15 blank)."
         : P.kind === "dff" ? "✓ Capture/hold behaviour asserted at load over a scripted D/clock sequence."
+        : P.kind === "jkff" ? "✓ J-K behaviour asserted at load over all 8 present-state × J × K combinations through the clock-press cycle (window.__roundAMSelfTest)."
         : "✓ Count sequence 0–9 and the wrap to 0 asserted at load.";
       return;
     }
@@ -25418,6 +25500,7 @@ html.text-large .bb-panel-note{font-size:15.5px}
     if (!bbPinAcked(BBH.active)) { bbFlashPinPanel(); return; }
     const P = BBH.projects[BBH.active]; if (!P || !P.kind) return;
     if (P.kind === "dff") BBSEQ.dff.Q = BBKind.dffNext(BBSEQ.dff.Q, curInputs().D ? 1 : 0, true);
+    else if (P.kind === "jkff") BBSEQ.jkff.Q = BBKind.jkNext(BBSEQ.jkff.Q, curInputs().J ? 1 : 0, curInputs().K ? 1 : 0, true);
     else if (P.kind === "decade") BBSEQ.decade.count = BBKind.decNext(BBSEQ.decade.count);
     else return;
     bbSeqRefresh();
@@ -25469,6 +25552,12 @@ html.text-large .bb-panel-note{font-size:15.5px}
     } else if (P.kind === "decade") {
       out.push("QA (pin 12) feeds the second clock input (pin 1) and its LED through 330 Ω — the one output allowed to drive an input. QD (pin 11), QC (pin 8) and QB (pin 9) feed only their LEDs, each through 330 Ω.");
       out.push("Reset pins R0(1) pin 2 and R0(2) pin 3 are grounded, and set-9 pins R9(1) pin 6 and R9(2) pin 7 are grounded — counting needs all four inactive.");
+      out.push("Each LED: anode (+) through its 330 Ω resistor to the output pin, cathode (−) to the GND rail.");
+    } else if (P.kind === "jkff") {
+      out.push("7476 power: pin 5 → +5 V (Vcc), pin 13 → GND — NOT the corner pins. On this package, wiring pin 16 or pin 14 as Vcc is the classic fault; check these two first.");
+      out.push("Q (pin 15) and Q̅ (pin 14) each feed only their own LED through its 330 Ω resistor.");
+      out.push("Preset (pin 2) and clear (pin 3) are tied to +5 V — inactive. Never leave them floating.");
+      out.push("The unused second flip-flop is tied off, not floating: clock (pin 6), J (pin 9) and K (pin 12) to GND, preset (pin 7) and clear (pin 8) to +5 V; its outputs (pins 10, 11) stay unconnected, as outputs may.");
       out.push("Each LED: anode (+) through its 330 Ω resistor to the output pin, cathode (−) to the GND rail.");
     } else if (P.kind === "multseq") {
       out.push("Every 7474 preset (pins 4 and 10) and clear (pins 1 and 13) is driven by the Reset steering or held HIGH (inactive) \u2014 never left floating.");
@@ -25535,6 +25624,7 @@ html.text-large .bb-panel-note{font-size:15.5px}
   }
   function bbCaseText(id) {
     if (id === "dff") return "Q is 0. D is set to 1, then Clock is pressed once. Predict Q and Q̅ after the press.";
+    if (id === "jkff") return "Q is 1. J is set to 1 and K is set to 1, then Clock is pressed once. Predict Q and Q̅ after the press — this is the toggle case.";
     if (id === "decade") return "The count is 7 (QD QC QB QA = 0111). Clock is pressed once. Predict the four LEDs after the press.";
     if (id === "multseq") return "13 \u00d7 15: the switches are set to A3 A2 A1 A0 = 1 1 0 1, B3 B2 B1 B0 = 1 1 1 1; the board is Reset, then Clock is pressed until Done. Predict P7 P6 P5 P4 P3 P2 P1 P0 \u2014 and the number of presses.";
     if (id === "divseq") return "13 \u00f7 3: the switches are set to A3 A2 A1 A0 = 1 1 0 1, D1 D0 = 1 1; the board is Reset, then Clock is pressed until Done. Predict Q3 Q2 Q1 Q0, R1 R0 \u2014 and the number of presses.";
@@ -25544,6 +25634,7 @@ html.text-large .bb-panel-note{font-size:15.5px}
   }
   function bbCaseActual(id) {
     if (id === "dff") { const q = BBKind.dffNext(0, 1, true); return { Q: q, Qn: q ^ 1 }; }
+    if (id === "jkff") { const q = BBKind.jkNext(1, 1, 1, true); return { Q: q, Qn: q ^ 1 }; }
     if (id === "decade") return BBKind.decOuts(8);
     if (id === "divseq") return window.BBDivSeq ? BBDivSeq.caseActual() : {};
     if (id === "multseq") return window.BBMultSeq ? BBMultSeq.caseActual() : {};
@@ -25623,6 +25714,10 @@ html.text-large .bb-panel-note{font-size:15.5px}
       setInputs({ D: 1 });
       BBSEQ.dff.Q = BBKind.dffNext(0, 1, true);
       bbSeqRefresh();
+    } else if (id === "jkff") {
+      setInputs({ J: 1, K: 1 });
+      BBSEQ.jkff.Q = BBKind.jkNext(1, 1, 1, true);
+      bbSeqRefresh();
     } else if (id === "decade") {
       BBSEQ.decade.count = 8;
       bbSeqRefresh();
@@ -25659,6 +25754,7 @@ html.text-large .bb-panel-note{font-size:15.5px}
     if (ss) {
       const P = BBH.projects[id];
       if (P && P.kind === "dff") ss.textContent = "Q = " + BBSEQ.dff.Q + " · D = " + (curInputs().D ? 1 : 0) + " — Q holds until the next press.";
+      if (P && P.kind === "jkff") ss.textContent = "Q = " + BBSEQ.jkff.Q + " · J = " + (curInputs().J ? 1 : 0) + " · K = " + (curInputs().K ? 1 : 0) + " — Q obeys J/K only on the next press.";
       if (P && P.kind === "decade") { const o = BBKind.decOuts(BBSEQ.decade.count); ss.textContent = "Count = " + BBSEQ.decade.count + " · QD QC QB QA = " + o.QD + o.QC + o.QB + o.QA; }
     }
   }
@@ -30533,3 +30629,616 @@ window.__MS_PDF = "data:application/pdf;base64,JVBERi0xLjQKJZOMi54gUmVwb3J0TGFiI
 })();
 </script>
 
+<script>
+"use strict";
+/* Round AM — the 7476 J-K flip-flop project's step-by-step wiring PDF
+   (19 pages, generated from the shipped board netlist: cover, 16
+   one-connection steps in wiring order, operating sequence, and the
+   8-row test table), embedded as a data URI. The same bytes are
+   served from data:application/octet-stream;base64,JVBERi0xLjMKJZOMi54gUmVwb3J0TGFiIEdlbmVyYXRlZCBQREYgZG9jdW1lbnQgKG9wZW5zb3VyY2UpCjEgMCBvYmoKPDwKL0YxIDIgMCBSIC9GMiAzIDAgUgo+PgplbmRvYmoKMiAwIG9iago8PAovQmFzZUZvbnQgL0hlbHZldGljYSAvRW5jb2RpbmcgL1dpbkFuc2lFbmNvZGluZyAvTmFtZSAvRjEgL1N1YnR5cGUgL1R5cGUxIC9UeXBlIC9Gb250Cj4+CmVuZG9iagozIDAgb2JqCjw8Ci9CYXNlRm9udCAvSGVsdmV0aWNhLUJvbGQgL0VuY29kaW5nIC9XaW5BbnNpRW5jb2RpbmcgL05hbWUgL0YyIC9TdWJ0eXBlIC9UeXBlMSAvVHlwZSAvRm9udAo+PgplbmRvYmoKNCAwIG9iago8PAovQ29udGVudHMgMjYgMCBSIC9NZWRpYUJveCBbIDAgMCA1OTUuMjc1NiA4NDEuODg5OCBdIC9QYXJlbnQgMjUgMCBSIC9SZXNvdXJjZXMgPDwKL0ZvbnQgMSAwIFIgL1Byb2NTZXQgWyAvUERGIC9UZXh0IC9JbWFnZUIgL0ltYWdlQyAvSW1hZ2VJIF0KPj4gL1JvdGF0ZSAwIC9UcmFucyA8PAoKPj4gCiAgL1R5cGUgL1BhZ2UKPj4KZW5kb2JqCjUgMCBvYmoKPDwKL0NvbnRlbnRzIDI3IDAgUiAvTWVkaWFCb3ggWyAwIDAgNTk1LjI3NTYgODQxLjg4OTggXSAvUGFyZW50IDI1IDAgUiAvUmVzb3VyY2VzIDw8Ci9Gb250IDEgMCBSIC9Qcm9jU2V0IFsgL1BERiAvVGV4dCAvSW1hZ2VCIC9JbWFnZUMgL0ltYWdlSSBdCj4+IC9Sb3RhdGUgMCAvVHJhbnMgPDwKCj4+IAogIC9UeXBlIC9QYWdlCj4+CmVuZG9iago2IDAgb2JqCjw8Ci9Db250ZW50cyAyOCAwIFIgL01lZGlhQm94IFsgMCAwIDU5NS4yNzU2IDg0MS44ODk4IF0gL1BhcmVudCAyNSAwIFIgL1Jlc291cmNlcyA8PAovRm9udCAxIDAgUiAvUHJvY1NldCBbIC9QREYgL1RleHQgL0ltYWdlQiAvSW1hZ2VDIC9JbWFnZUkgXQo+PiAvUm90YXRlIDAgL1RyYW5zIDw8Cgo+PiAKICAvVHlwZSAvUGFnZQo+PgplbmRvYmoKNyAwIG9iago8PAovQ29udGVudHMgMjkgMCBSIC9NZWRpYUJveCBbIDAgMCA1OTUuMjc1NiA4NDEuODg5OCBdIC9QYXJlbnQgMjUgMCBSIC9SZXNvdXJjZXMgPDwKL0ZvbnQgMSAwIFIgL1Byb2NTZXQgWyAvUERGIC9UZXh0IC9JbWFnZUIgL0ltYWdlQyAvSW1hZ2VJIF0KPj4gL1JvdGF0ZSAwIC9UcmFucyA8PAoKPj4gCiAgL1R5cGUgL1BhZ2UKPj4KZW5kb2JqCjggMCBvYmoKPDwKL0NvbnRlbnRzIDMwIDAgUiAvTWVkaWFCb3ggWyAwIDAgNTk1LjI3NTYgODQxLjg4OTggXSAvUGFyZW50IDI1IDAgUiAvUmVzb3VyY2VzIDw8Ci9Gb250IDEgMCBSIC9Qcm9jU2V0IFsgL1BERiAvVGV4dCAvSW1hZ2VCIC9JbWFnZUMgL0ltYWdlSSBdCj4+IC9Sb3RhdGUgMCAvVHJhbnMgPDwKCj4+IAogIC9UeXBlIC9QYWdlCj4+CmVuZG9iago5IDAgb2JqCjw8Ci9Db250ZW50cyAzMSAwIFIgL01lZGlhQm94IFsgMCAwIDU5NS4yNzU2IDg0MS44ODk4IF0gL1BhcmVudCAyNSAwIFIgL1Jlc291cmNlcyA8PAovRm9udCAxIDAgUiAvUHJvY1NldCBbIC9QREYgL1RleHQgL0ltYWdlQiAvSW1hZ2VDIC9JbWFnZUkgXQo+PiAvUm90YXRlIDAgL1RyYW5zIDw8Cgo+PiAKICAvVHlwZSAvUGFnZQo+PgplbmRvYmoKMTAgMCBvYmoKPDwKL0NvbnRlbnRzIDMyIDAgUiAvTWVkaWFCb3ggWyAwIDAgNTk1LjI3NTYgODQxLjg4OTggXSAvUGFyZW50IDI1IDAgUiAvUmVzb3VyY2VzIDw8Ci9Gb250IDEgMCBSIC9Qcm9jU2V0IFsgL1BERiAvVGV4dCAvSW1hZ2VCIC9JbWFnZUMgL0ltYWdlSSBdCj4+IC9Sb3RhdGUgMCAvVHJhbnMgPDwKCj4+IAogIC9UeXBlIC9QYWdlCj4+CmVuZG9iagoxMSAwIG9iago8PAovQ29udGVudHMgMzMgMCBSIC9NZWRpYUJveCBbIDAgMCA1OTUuMjc1NiA4NDEuODg5OCBdIC9QYXJlbnQgMjUgMCBSIC9SZXNvdXJjZXMgPDwKL0ZvbnQgMSAwIFIgL1Byb2NTZXQgWyAvUERGIC9UZXh0IC9JbWFnZUIgL0ltYWdlQyAvSW1hZ2VJIF0KPj4gL1JvdGF0ZSAwIC9UcmFucyA8PAoKPj4gCiAgL1R5cGUgL1BhZ2UKPj4KZW5kb2JqCjEyIDAgb2JqCjw8Ci9Db250ZW50cyAzNCAwIFIgL01lZGlhQm94IFsgMCAwIDU5NS4yNzU2IDg0MS44ODk4IF0gL1BhcmVudCAyNSAwIFIgL1Jlc291cmNlcyA8PAovRm9udCAxIDAgUiAvUHJvY1NldCBbIC9QREYgL1RleHQgL0ltYWdlQiAvSW1hZ2VDIC9JbWFnZUkgXQo+PiAvUm90YXRlIDAgL1RyYW5zIDw8Cgo+PiAKICAvVHlwZSAvUGFnZQo+PgplbmRvYmoKMTMgMCBvYmoKPDwKL0NvbnRlbnRzIDM1IDAgUiAvTWVkaWFCb3ggWyAwIDAgNTk1LjI3NTYgODQxLjg4OTggXSAvUGFyZW50IDI1IDAgUiAvUmVzb3VyY2VzIDw8Ci9Gb250IDEgMCBSIC9Qcm9jU2V0IFsgL1BERiAvVGV4dCAvSW1hZ2VCIC9JbWFnZUMgL0ltYWdlSSBdCj4+IC9Sb3RhdGUgMCAvVHJhbnMgPDwKCj4+IAogIC9UeXBlIC9QYWdlCj4+CmVuZG9iagoxNCAwIG9iago8PAovQ29udGVudHMgMzYgMCBSIC9NZWRpYUJveCBbIDAgMCA1OTUuMjc1NiA4NDEuODg5OCBdIC9QYXJlbnQgMjUgMCBSIC9SZXNvdXJjZXMgPDwKL0ZvbnQgMSAwIFIgL1Byb2NTZXQgWyAvUERGIC9UZXh0IC9JbWFnZUIgL0ltYWdlQyAvSW1hZ2VJIF0KPj4gL1JvdGF0ZSAwIC9UcmFucyA8PAoKPj4gCiAgL1R5cGUgL1BhZ2UKPj4KZW5kb2JqCjE1IDAgb2JqCjw8Ci9Db250ZW50cyAzNyAwIFIgL01lZGlhQm94IFsgMCAwIDU5NS4yNzU2IDg0MS44ODk4IF0gL1BhcmVudCAyNSAwIFIgL1Jlc291cmNlcyA8PAovRm9udCAxIDAgUiAvUHJvY1NldCBbIC9QREYgL1RleHQgL0ltYWdlQiAvSW1hZ2VDIC9JbWFnZUkgXQo+PiAvUm90YXRlIDAgL1RyYW5zIDw8Cgo+PiAKICAvVHlwZSAvUGFnZQo+PgplbmRvYmoKMTYgMCBvYmoKPDwKL0NvbnRlbnRzIDM4IDAgUiAvTWVkaWFCb3ggWyAwIDAgNTk1LjI3NTYgODQxLjg4OTggXSAvUGFyZW50IDI1IDAgUiAvUmVzb3VyY2VzIDw8Ci9Gb250IDEgMCBSIC9Qcm9jU2V0IFsgL1BERiAvVGV4dCAvSW1hZ2VCIC9JbWFnZUMgL0ltYWdlSSBdCj4+IC9Sb3RhdGUgMCAvVHJhbnMgPDwKCj4+IAogIC9UeXBlIC9QYWdlCj4+CmVuZG9iagoxNyAwIG9iago8PAovQ29udGVudHMgMzkgMCBSIC9NZWRpYUJveCBbIDAgMCA1OTUuMjc1NiA4NDEuODg5OCBdIC9QYXJlbnQgMjUgMCBSIC9SZXNvdXJjZXMgPDwKL0ZvbnQgMSAwIFIgL1Byb2NTZXQgWyAvUERGIC9UZXh0IC9JbWFnZUIgL0ltYWdlQyAvSW1hZ2VJIF0KPj4gL1JvdGF0ZSAwIC9UcmFucyA8PAoKPj4gCiAgL1R5cGUgL1BhZ2UKPj4KZW5kb2JqCjE4IDAgb2JqCjw8Ci9Db250ZW50cyA0MCAwIFIgL01lZGlhQm94IFsgMCAwIDU5NS4yNzU2IDg0MS44ODk4IF0gL1BhcmVudCAyNSAwIFIgL1Jlc291cmNlcyA8PAovRm9udCAxIDAgUiAvUHJvY1NldCBbIC9QREYgL1RleHQgL0ltYWdlQiAvSW1hZ2VDIC9JbWFnZUkgXQo+PiAvUm90YXRlIDAgL1RyYW5zIDw8Cgo+PiAKICAvVHlwZSAvUGFnZQo+PgplbmRvYmoKMTkgMCBvYmoKPDwKL0NvbnRlbnRzIDQxIDAgUiAvTWVkaWFCb3ggWyAwIDAgNTk1LjI3NTYgODQxLjg4OTggXSAvUGFyZW50IDI1IDAgUiAvUmVzb3VyY2VzIDw8Ci9Gb250IDEgMCBSIC9Qcm9jU2V0IFsgL1BERiAvVGV4dCAvSW1hZ2VCIC9JbWFnZUMgL0ltYWdlSSBdCj4+IC9Sb3RhdGUgMCAvVHJhbnMgPDwKCj4+IAogIC9UeXBlIC9QYWdlCj4+CmVuZG9iagoyMCAwIG9iago8PAovQ29udGVudHMgNDIgMCBSIC9NZWRpYUJveCBbIDAgMCA1OTUuMjc1NiA4NDEuODg5OCBdIC9QYXJlbnQgMjUgMCBSIC9SZXNvdXJjZXMgPDwKL0ZvbnQgMSAwIFIgL1Byb2NTZXQgWyAvUERGIC9UZXh0IC9JbWFnZUIgL0ltYWdlQyAvSW1hZ2VJIF0KPj4gL1JvdGF0ZSAwIC9UcmFucyA8PAoKPj4gCiAgL1R5cGUgL1BhZ2UKPj4KZW5kb2JqCjIxIDAgb2JqCjw8Ci9Db250ZW50cyA0MyAwIFIgL01lZGlhQm94IFsgMCAwIDU5NS4yNzU2IDg0MS44ODk4IF0gL1BhcmVudCAyNSAwIFIgL1Jlc291cmNlcyA8PAovRm9udCAxIDAgUiAvUHJvY1NldCBbIC9QREYgL1RleHQgL0ltYWdlQiAvSW1hZ2VDIC9JbWFnZUkgXQo+PiAvUm90YXRlIDAgL1RyYW5zIDw8Cgo+PiAKICAvVHlwZSAvUGFnZQo+PgplbmRvYmoKMjIgMCBvYmoKPDwKL0NvbnRlbnRzIDQ0IDAgUiAvTWVkaWFCb3ggWyAwIDAgNTk1LjI3NTYgODQxLjg4OTggXSAvUGFyZW50IDI1IDAgUiAvUmVzb3VyY2VzIDw8Ci9Gb250IDEgMCBSIC9Qcm9jU2V0IFsgL1BERiAvVGV4dCAvSW1hZ2VCIC9JbWFnZUMgL0ltYWdlSSBdCj4+IC9Sb3RhdGUgMCAvVHJhbnMgPDwKCj4+IAogIC9UeXBlIC9QYWdlCj4+CmVuZG9iagoyMyAwIG9iago8PAovUGFnZU1vZGUgL1VzZU5vbmUgL1BhZ2VzIDI1IDAgUiAvVHlwZSAvQ2F0YWxvZwo+PgplbmRvYmoKMjQgMCBvYmoKPDwKL0F1dGhvciAoYW5vbnltb3VzKSAvQ3JlYXRpb25EYXRlIChEOjIwMjYxMTIwMTQyNjAxKzAwJzAwJykgL0NyZWF0b3IgKGFub255bW91cykgL0tleXdvcmRzICgpIC9Nb2REYXRlIChEOjIwMjYxMTIwMTQyNjAxKzAwJzAwJykgL1Byb2R1Y2VyIChSZXBvcnRMYWIgUERGIExpYnJhcnkgLSBcKG9wZW5zb3VyY2VcKSkgCiAgL1N1YmplY3QgKHVuc3BlY2lmaWVkKSAvVGl0bGUgKHVudGl0bGVkKSAvVHJhcHBlZCAvRmFsc2UKPj4KZW5kb2JqCjI1IDAgb2JqCjw8Ci9Db3VudCAxOSAvS2lkcyBbIDQgMCBSIDUgMCBSIDYgMCBSIDcgMCBSIDggMCBSIDkgMCBSIDEwIDAgUiAxMSAwIFIgMTIgMCBSIDEzIDAgUiAKICAxNCAwIFIgMTUgMCBSIDE2IDAgUiAxNyAwIFIgMTggMCBSIDE5IDAgUiAyMCAwIFIgMjEgMCBSIDIyIDAgUiBdIC9UeXBlIC9QYWdlcwo+PgplbmRvYmoKMjYgMCBvYmoKPDwKL0ZpbHRlciBbIC9BU0NJSTg1RGVjb2RlIC9GbGF0ZURlY29kZSBdIC9MZW5ndGggMTE3NAo+PgpzdHJlYW0KR2F0PSpnTVolMCY6TWwrYmJOWUBYPTNUX1YqSC1WaCRvR0tma2hzTT9pMzVgRktBUlsiZCl0NUopO0RgQjpWIjEhbDlDPkByXWVeMURjM0BKajEwVmVJTE5gJnE5XkVKWWw4SEpNUCo4XVMiUGw3QmlbVEgqSEhyWG46UCU7aipyRTgzbiFwYV5kYDNncWk+aEU9OypAa25pWzpvTydfISlcJmk2WCpTQCw6cj4lXyx0S0IlLSdWMiVycGcrWlRjYXIqXjJQMjRMV0ItRG85QS9yJUBAWiRwUFtTbl9WdVUwYy1VUW5MYSsxXkNUJ3FZbCxra1NWOlBoQWw7Pm0kTTdoJi9VV0ZDZzg6L1BKS04zV043KUpVY0c2MDlOUDRMZWcqSDkiaGIia1xfNE02SzlLZzdVMHMhSmFZTTMnS0lpIl5ncGcnKzw4YjhBVkg2P29Rb0UnSUViZFhbYUpvTSNERVooSCkvRVp0V3RKXWgrb20zSUMkOmEnN0RPL2RXUUU9UHVhV2lgRWVYYztVXG5oRkhgcG5GRUxFNkw2IjpLXTpmJldGbXVeSTYyQkpBMTghVlJFVShZPGIlLClnQCFOMkFSZzlnMHRYWkQ3IyNvWTljMDllXjBkS1FHVD4lLmwyOl08bVxmZzZtI0ItRShOR0VvMERQZTxJbVpbWkp1KGptbHFpTWNqQlVoQ1g2K3FtTD83ZV8pYWg1VSJcXkYpbGFQTkJJWi9KPmE+cWAoPCc2bWR1NTgubUU4Lio6YGkkZm1CTEJrLyJlZ0UrPnNJTilhYjs2cHQrP1wiZVlnVDpZXC9lPGJkR29DZCdfVjZrSEhQYUQ5XEMlSjU6XWc7LmdsKk4uKigtdDk0aC5iWlliXEhdK0JrbkhtRysuQyFrSjVSSzlmU3JwQTFsXGdUQyU4aFk4MWI0VlJdW2EnIm0kRWFFUXJmWConTEZAL0dpMk4/ayUyXjksIjM9MS9ZUChbIW1pUyM3JWpRNU9TLlM0XFRFNTtvNEdUcEBlcEFwIkRoZzclSUxfUzkmZUBMbCQ4blpeZ01JTkQ5OkUlRi86NkphSSpwNExCXlpac2pdQSpqXz50YmhNN0A0RkdWPUctYCpYX2dZbjpfQDYjOHBiZDhmNU08Il5gRF1DPUE/ZmRcWlJlYmJDaig+X2VRP0dnJFlxUE9vRUNVSUtkTyNlclQ2V1YzT1w9TDJaIXVgOWRRI1hfTSY4ZDQqcWxpSUtUMUdlYk4yQFRMNSM8X0tlRXBWTXJWIlFkYVQucyw9JmlITUcoIXA1NmZZTS88czhISGJPOFleQWcxMEUqcEVlKGFkRWVYOVU5QzsyQVNKIklWcGNObi9kQ2NfJGs7RS5MKmYqMWsxIXI4N0JdMEskSWhVQEgnXj9QY05qOEslWSlOOyk+aVZQXzUoNGV0Qk5bR3U0VXFEMTZhVltTdFFUUGMlXzxnKWAzVVFQYkdeLjVnaF07UmpjIytWYCEoY2hFWE9JZEMkJy1eQlxLKC1BSlhZTF9pdF4/Ll5UZ1lOQkBHa2I7JEpaUCIqKSw6N0t+PgplbmRzdHJlYW0KZW5kb2JqCjI3IDAgb2JqCjw8Ci9GaWx0ZXIgWyAvQVNDSUk4NURlY29kZSAvRmxhdGVEZWNvZGUgXSAvTGVuZ3RoIDUzNwo+PgpzdHJlYW0KR2FzSWM5bEhkXCdZTlUxYmQiOi0oWWFLIVxsKWIzXTgmcjlRalg0VDprPVVCR0dHMDcyNVxXIk9YYSIrUlYxTCRIU1pBQDU7W2NeIjdXcUBZQGUzYjpjPXNROFBvRSo7bjM1cCImL2xoVDJHSTwrSmc+cTRDXHBrNitEXyJhb1FeaWQydDJuMmIkTkY3cWAnTU9PdEZSZU43JykpSSgyYTZtQXBgUF0lcmw6L2hvMlJDVk5RIjV0XV9BXjZlWEokWnIkRUg6XD9tSmtGQ0pyUWo6QChwJyxJNi9ZQlo7TUxAIj1KSmBFc3RVJ0tXdChNbEVVLl83cWlPVCQrakhoMUIoUTNWaEZZKCRaYWtmcDJDWSI6LSFhNyxjZjxRPUQrWUZtXExCU11pPDlKWys0ci1BKjt0YUEjQ04uPiEndCI/OCh1YCUuPms0WW08Ky5nLFY7YV1rZVwpXGwwQSRiJGotQVdhO2BMZWVIdVZraTpeQUFQa2pFYFRPaSgqckAudGRtJVAxVkMtJlJaVGxPUCQ6LVhdSCckRTYkW2wiJ1ssIV5SazcyczBjSmoqREZSX0tqIj81JXJMJUdLZUBlLGRgKy83bFxuOlxfOidrcScqMkxgPCpiIllPW2ZSLWRLIzxTdXI6QGUqckViZyNPQyIkYmZTKHRYO0JwNkQoSyg8XWdGaycqZ09PVzg6UTw9KGojVnRkZn4+ZW5kc3RyZWFtCmVuZG9iagoyOCAwIG9iago8PAovRmlsdGVyIFsgL0FTQ0lJODVEZWNvZGUgL0ZsYXRlRGVjb2RlIF0gL0xlbmd0aCA1NTQKPj4Kc3RyZWFtCkdhc2JWP1oyRGYnWkp1JC5GKUcvMkQyRT1fXUM6RWRUVUBTZWpyKVRpbCopPVdyT0JiO3EsX01nVSddJ24xXURJXjspbHJjOTJrbTRmSCsyNG4oVlBoI2RnbGE9PlB1S1pKVyY4JS5vMCJyZDtgRWlSUXMicWAtXmoiWjBXO28xc2dPbkRpVT5sUi5AW0giamBlLUlxSTFhUj1WUGwlIzdIQjRSTiE+MTM2TCRTdXJRT2JPJlBZPjlRSzdXTHRvdDRuUkxnP0cjZ21XNmRLPGpDU1BKQlguOTBNKXAoV0B1R0chTC9IKHRjOGJpLExLQVsxbyxWOzhVXiokOkRcKVpWbFNHNCFnXkVPcVtRMlcxIUs+MlEpNiIsa2ZrMCNETWg2REJfMjFiSTBkUGdhUWA0bXMiU2I+YXRBODEzU1xKI0siWXA5bV9DUmgmbTNRLkg6YihkdUxTN2FeNHFSTXBlT3NBKG1Xcjs2LURpbEFUZDtHakI3cGFLQFNIPTMvWk5TOy08IzArImdRaWAkSzc9UTJvWjNfaEwsbzlCJ2JHJEsoP1Q9LG9aMl1RJS1VPS5WR1A2dTFTSXVKXk4lO2s+S2VhNEJcLV8uRmtvaEdcTzRoRVVRbzNwVyUkInRTLiYsRy5KKy9MQ3M6MlRsQy9hRW9ccDE6XShWMks/LTNgI0xLZU9zJjRHdU1UMDo2Imc7XFcqW2BFMWJ0WTthQFZfI0FKU1E0VH4+ZW5kc3RyZWFtCmVuZG9iagoyOSAwIG9iago8PAovRmlsdGVyIFsgL0FTQ0lJODVEZWNvZGUgL0ZsYXRlRGVjb2RlIF0gL0xlbmd0aCA1NTIKPj4Kc3RyZWFtCkdhc2JWOy9iL0InU1lIPygkQkYxSkpbJzRTPmFsMzlqOSxiO2k9Jj5ePnBSZCMkYEhvako1MEFwVGttNTsiQEYrNitCdEBxMF9WKCNqZD9DbXJdKjthUkprX0poZ2pVZCNgcSVyby4hO25UK21RcTBETnBWJERSLVAoPChpNik1c2csLCEibDlSZV9wP3JPJUpaKU1nUWg0V1hzNDwlRmZjYWtlVkVsSjVNLixsLE0oTSNIUC51S1EiP00pMCRHX0dJb0I+VEsnQV9xTFliOCkpT14pSVJlOT4tWyhHZUFQJDNDZytnOmshIW89QyNBSC1kQSdWaSQ9LWxOWihiMyZmLiR0Ll1lWXRQXjVxc2ZTPzdsazFBQ1knJGNdbkYiXVprKD5nKVc5VkVyc2UpJissKnFMOFtOcChPKkcpTWpxX0wiN1JlSyJeWSp1RXAyb1I5P3BpQSdyZSQmWVRCcj1dPWtZdWFEKEBzISwxcHNQbCVOR0EiOz1xKWolYWB0YztWaC9tLSckb1FCTyNKQTA7WjRuQGFnTTxDYzVgWnVqUDBqP0dMal1QXTEnbTUoQG4oU0R1RUVnPktFaC5tXTlAQVZQcShnUXI5UFM1YFZ0U0tjNy0sJW5UIzImVUQjTkdMLS9cUV50YkNsSFFXYmglN3RGWDdOO0BFJz9BUEZfZ1ctPmtkOHVLVzNkcGg9UUVXWkloZCZeOiEzXEFuKDxRUWx0VVt+PmVuZHN0cmVhbQplbmRvYmoKMzAgMCBvYmoKPDwKL0ZpbHRlciBbIC9BU0NJSTg1RGVjb2RlIC9GbGF0ZURlY29kZSBdIC9MZW5ndGggNTYxCj4+CnN0cmVhbQpHYXNiVmNZcThkKjYlQ0YvKUg4Ry9MSXB0UDYyRmdnRV0lX1g6X0A6Z3NnMShPdVJLYDpBYUwiQ2NcalojOEFWbFNlWmFIaHRMIWRtXDBWY1wlbj07Kzc6Tyo2YVsubjg6cCtnRFFBS0MpLy89LmloJmpDKmZzODQxUy0+XkFQJStmO2NHPzc/X19QbDJsX3I0TlVFSyVmVj9DOTg/cG9hQDxVOVdRNlQycmxqRDhmV3FTLnBNTlMpWElJVFJJTVNoUV9AKVJKXUI8SkInT1stTy5aTispRjNDays/XiQ8Q0BRLyJaSlU6MD40LWddSWQ4PDNSOTJgWCJgVWR0bFIoMjhwQ1E7NDRbbGEncWpdajRDYzFwVkUqbmNHPG9jQVRuUkAtJnRYUT87ZT0pZjo7Xj5UcnJzbFAuKkFLUEpTPjxyXjNaajVgPkoiIV40LiMpIURaN1IpPT47KV5TZSpNPXM6JUUpKl43Y0JsZyUwbDQ/PT8haGpOUFVLYlwpM2xDJD9NOz1scCdBZV1QcyUhM1Q1bzNoVDlDPTdyOWZLUGBhVDtoMWNOVClyL2gxb3JzIlVlXmg9RmxPWClHYUhKR29VYz9LRFM/JiFcY006LWxWMmxyTWtLXlkiYydPNTYsYzU6SUg8NTxjT2FDTnUwSCslWCVwJCwrQltIJz9EakZtXWgyIURbbVl1W1tbQEwpOi5HXkA+SXVSWT0oTD87Zj5KQCddKDRRPEZkLUtpfj5lbmRzdHJlYW0KZW5kb2JqCjMxIDAgb2JqCjw8Ci9GaWx0ZXIgWyAvQVNDSUk4NURlY29kZSAvRmxhdGVEZWNvZGUgXSAvTGVuZ3RoIDUxMAo+PgpzdHJlYW0KR2FzYlY1dTZNcCY7QlRPKCU4U0IrbDprM2o1ZE1vL209Pz0lWiFURUg/IS9VKUM5Tjo+RHI0NGojVSI3PXNPZyg4T2k5YERyKlU2ND9iVG1iNz09J2k1WlE5QVNCWWYiWSVnUmlfTUAlRlRzPG5dbT9tMWYqNmhpU0ZNYi5laHVEQVZlQStiRG1JLFtcIy5MJlhtS1ErI1RKYldkcVo6cGIsbUAxOUw5TiM0QEFebms1L0pCVSpiTC5oKG9UcG45QS1DQE8vWmpkW1VLczZicF5SaldKTnFDPzoycmhKQyI/TiphPjplTTxNQUg2Ziclcl4+YWxaNXJWKFM1YzZCa1RHYjcwSlAmYlIoX0hWUlY0XWlBJmg/ck84MWReUzYnOl1eSXNDUy5EPEMtY1BGW0pjXUorRFxcSjw7MStiTXBsPiU7WFMiL1hzQmFnIj0mKFB1YV8yIywiY1BNRFA4U1ZiaVElb1ptUmc9SlpEbGE9azJHUmNMQ2NBbSJjLDBkIUgzQ2lhbWlnTyI3VGlDJCk2NENpX00vV1ZTOjxHIVNgXCk6Pk1gZyc6J1o6YyxjPHRkZUZkUjNHLS1BaTQvQ1BaKyo/XCRvY049OTUyQVhccUUlO1tuKkg2RUw9OSc4Rm5EJ2w2Yiw7T1cpOUcpZUs7KU1hVT9wKGUkb34+ZW5kc3RyZWFtCmVuZG9iagozMiAwIG9iago8PAovRmlsdGVyIFsgL0FTQ0lJODVEZWNvZGUgL0ZsYXRlRGVjb2RlIF0gL0xlbmd0aCA1MTUKPj4Kc3RyZWFtCkdhc2JWNiclS2gnU1ByTidtJi0qQzpsWUowVzxEQC5XbmZiSGAuWD0+aEh0ZF1GI0puN3FyIU8qS3M9SkUyXGpgKU4tUEhrNyZVKiV1J2JUIy8xanRJTyxPcVlsaHJyN2UkVDxNSFM6ZC1qYjRuPS9HNTVLTlEvXWFzJEFII29PPjQpWTtNTTQqRi1NL3BCaDdfREgzOkttMFN0bUNUQGEoKyYsVjE3JS8rYDxWOHJLLCNQQl1iXytkOUkvN2RIWS9mRDArWFhpVmNvbE1ybmsoQT1KN2ZsW2xJamxKbFhnZDdyRkcyYVgjX1RjIk5VXS81JWFMKUcobylTckJIaWVpLHBpISU4WytMR1ordCtxJWpIQTgqLjclRkNWTUhaQjM5YXVRVEgiYWByK3MjZzJcS25zOi8uIihUPDpUJUonaDY1aWc9YGFRREhZUkxbM2J0ZVM5UmxLM0RLLkFOWGAhaHFmQjZTLWBdNnVUaiNwZUdcUl48YC83PF1BMiFVRj45bEo5WmcjMG41VCdoNCplMSgtRk5OKTZEZm02RGNhWz8+WUxgZzA5MllzLkFmMGRKLVUtcD0vaTc0ODdEaj04VyJfJUFBRi9uWjI0aDU/RDNQUTk3PmBBUjY+NFxGR0RZaDRpbWFqYmFoWDUkYT0tMCw4cSoyOilsanBgNGkwRn4+ZW5kc3RyZWFtCmVuZG9iagozMyAwIG9iago8PAovRmlsdGVyIFsgL0FTQ0lJODVEZWNvZGUgL0ZsYXRlRGVjb2RlIF0gL0xlbmd0aCA1MjAKPj4Kc3RyZWFtCkdhc2JWNXU0T0gnU1o7WydrXy9wZysrcl0kdUIxOVcvNVkqO08yLDFWTFNfOEAjWFg1NC5VLF9ZOk8hTkw/J1YkXjJyYF8jMSViQlNUdFV1LStKNS4/bFs5MGJVNExTMVteSFxkbENPZ29dVCheNTZfLTVPLEspZWBcQGVhMGRKPzo6UmBzMDojMGFdTlVFSyVRcUg9WzpnKj1nWl85WSxcVjBUZFwzZmJAalNGTz1NITt1aVZbT2dQUGszK1RQUG9SQ2dfblgwNkpLLTImWzk3TD1lIShAanFgQyQ9YWJublg9JFMlMCJRbjMnR0xfNTVgPEdQTSRGXW5fPHM2K0BrT0d0NTJGWiJJW089bSZnQFpnayM0VkZASlVOKyhEUStzRDo5NSptY1hUbXAnSEhCVWs/PCIqVUQrZEskak8vVzY8PSc4N1pyOlVMK0lGPDk9T3VEVk02QzpqNGYvaUQsZTpWN1E3PChWREdmLFdMaSljYXBOIjRRNTUoNzonW2suVEV1LmVvNlIqbGlCOSUtdFYnW0EtT05pNDMvQTNeSSZhNFJNZTIxO2dcLkA2Ly5GcTonZElTKDxGOVtHbzFYXWEzNXFuVVcyXzsxb19SV2paJ0dXXGlkPlM+dG11RyYsSyNeQXEiaGRbUCxHNzNVUzFEJ2Q/X3FwbitRcG5JPVtqZzkxfj4KZW5kc3RyZWFtCmVuZG9iagozNCAwIG9iago8PAovRmlsdGVyIFsgL0FTQ0lJODVEZWNvZGUgL0ZsYXRlRGVjb2RlIF0gL0xlbmd0aCA1ODIKPj4Kc3RyZWFtCkdhc2JXP1o0Q0knWkp1LC5GJmthOl9WVVoualExJ1tMUT5QVExTRjZRU2BeMk41VV9yKFlINDtFT00hSFI2WmxTbCxMSSNHRTVOSjRTcXNhKCtvIzFgT2NLYmIpZFowSUd1TC1pXUxNVjNXZmdyNG9TWl5HNz1VRzROOWFDLXFPXSo0R3BNYm8oMlxiTFNqTGpMSVFEXycnOlVIZi0ybUIuYj50JWBaZGciJ1ghUFMrRlgyMjc/TlsvTWByZysqaFx0Uk4jQW09anRxOU9GR1FYV2ZsLldiQ0swZytoNU5YLDpXP0xvb2BvVEgiSilLO1tQYG9HPWlhMWhMbSdmUzNFY1IiOktUOyIyOyRgSztYLU0tQDhqTXBsZCpzPS0oTiNMNltvW15mb2hxRFlIZW1nRFVlXi5mWHA1Ik1rJiMhJ140alwkbSNpbzEoZ1VQa1s+MV4iU2hdQUk4a0M7NmNqbmxsSHBQVkc2SSlTRUM/XW5oa1NdbzpPREgtVi9tVmImZVdEa2xvNlVeRChhXjVNYWxjVS9NIzxUTkExO087cSVnQG9oNCNkVj4rby9YUVpzVGgvLG5qJVU2RW9oWy4ja2E8Y15SL2g7aTBTKGZaLlxiUiUzbGspRldmamExIVdKZSVwMVxOMEA/JyFjUmhTc1AhS1xScHIlQUwsaktpVGNgXEphNVloLTBaYCs0TCNbVD8qPGNyOVttVV5TOTNCN01JTTdpJFw1cS49V29DLStEbl4wKFsySzpoMCMjJXNuMUx+PmVuZHN0cmVhbQplbmRvYmoKMzUgMCBvYmoKPDwKL0ZpbHRlciBbIC9BU0NJSTg1RGVjb2RlIC9GbGF0ZURlY29kZSBdIC9MZW5ndGggNTc2Cj4+CnN0cmVhbQpHYXNiVmMmUzhJJ1NaOixNUjJWQmVbWDdkISpzXW9xMipVWGcuRloiOWY+YWMmZ2ghMmdbMCs+XjtlQUJVZ1l0WkBIa3Fpb0ErSHU3SD5PL143LD8lPG9FUjQiX0IqalRKOzojLzkiWmE2Q2laU1RxN2dUb1gtdE84XTpDXytqRylGZHRqYDNFOm5ZVUo4SlQiZHF1M2tCRWJsMz07cl4zWzIsWFhNUW1rMFNCZTk3NEpET3BQYlE1alk9NEtcS0k+RTNDTSZQI1A2SzQtUDpeZmdzNm0kKlw+Zi9gSkcrMW06SjpZZnFJM1lYaG5qKk9KKHRPYCw7Mj5cYlU3L1A1MzQlXzE2KVExKiMiVkg4aTtvUWAwOkk2Oj4hcSNuYlY+UVMuYSxSPVZ1XVozOVlibSxBaCJfMklDZGElaTNgYVdsPVVHN2gkXUNSVHFvSjUhP1ljY0QqNVsnbi5ZXEhoUCQnL1QpPTc9VCFRYj4uUz5xJ2o7LFhWJ2pWdU0maFxASiMpVzNlXFlHcDxWY21CcloydHRPUzBbXSFiJUNtS0pTbnQiU2wsOD5sPjo9UiomSEUjP2dJP181ZUJFVFg5PiE3Vj5FSVRcRU5gclk2Z1NyZyRBX2d0YSUtKW1MZSUlUm9HMWE/RitvYWw1JTNCVGFdbm5fV0k2RjVhYj40dV5ZJGxYWExQUUxnY1FZLkA8MVkob2ttTklJJDAyc3M4LUFWPE1KXF9KakNQTVEiPlA0U1x0TVRKKWNfWGp1fj5lbmRzdHJlYW0KZW5kb2JqCjM2IDAgb2JqCjw8Ci9GaWx0ZXIgWyAvQVNDSUk4NURlY29kZSAvRmxhdGVEZWNvZGUgXSAvTGVuZ3RoIDU3Mgo+PgpzdHJlYW0KR2FzYlZfL0okXShyYnRBKCU0JzVMKThUOVM+XTxyO2Q2JyJSVGJndShJSlYsOSZkcSM3L1BsZkU8WmRxTEMiOig7c2E4VWhZL0VCcy5TQ3VmKVhcOUkhX1RcJSlqOEUtOENCajQ7UDhyMVhJRTJmakMkRFxLSVJrQFFcMzVHdHRsKi4jSjYjKzNVOy9mMl08OGY9SFRQaUpuN0xVTF5wY2RaaUI8LTZRY1svbDkzU3BqQj9AYU48QC8wKzxMXTMpIlsyTjstYHE0UCo+TlRGbk9xUy42JTRHXmIjVyprU0hGO2lMJmVJalloMWMuXlFuSnMuYi0zI1gmXjlOWCc1Qzk1YTtQUWpITGZKb15Bcktgak1fS2hGT2sqSj5lYygpTGMoMEtGR0YkSUlGSlBpa106N0dRL1ZOQG80USUvREtBb1NXP1NUTW48PXE1MUheRS1jbjxLbDA2cyxZQ21oPjwqYj1fNiFcRzZiJSQiT2xydFNfcEtxLVxCNThcXjknUT1fcz9iLjVlZCMldDFhZmM7XkAsVF45KCVcZjZNYChQRlQxImM/YVA9cms9RF11dXRJNTlNT00sPlteJzxJTFFzJiNsXU8pQzhULGo7cGdWZlF0cms1VVM+LzZSMzcoUWVNMU5cbip1TiZQWVkrTG45UUNZYF9jNzUqUFlwRmZNXTZgTkRrS1JKNltSUmkwYmoxXHNpNWdpTlU7UTRYbm9mNi9oPFRfZSdLVjldKlQwNHFzIiJOJ19afj4KZW5kc3RyZWFtCmVuZG9iagozNyAwIG9iago8PAovRmlsdGVyIFsgL0FTQ0lJODVEZWNvZGUgL0ZsYXRlRGVjb2RlIF0gL0xlbmd0aCA1NjQKPj4Kc3RyZWFtCkdhc2JXNiNXNUgqNiVDQidecUUqX28iQ05ZWHBvTUQnTm10ZUxEUUwzOGMmXUo8QCskamtKK0tWQmxWKi44YHA1cCVTPkhxYHRoKiYsIVwrIjhwQzRvbXFdTUE6KVtaNyokRWhULlJfJDVcJHVGKyJEXW4rSnBEcEkqRWVeUF0uNDRBLj1qPksmPjU0PD5ZIjtoKkpOUzd0bUwyWko5Ly45JnRwO0xlK1VLYUJrIVdIRktWPmFsbDFOKSRsOkNSLmo4a0VEUF5bW29SV2glLCkvbzd1KkY9LU9oLWNuJkUrSmVbZlExYkwjV0wiPykwXVpEWlYrTSVibVJFPjAhIzpTXG9gJGA1XXUtb2tfYlBGQypBXE4odCstWXEnLG0mPygiV1EzN2IjXyU8cSZHayVwVzRxUSEyTTpeYzdeZm0tRFc1YE9xWDAmKGc+YVJiajhBJyglUnNKVlxOU21OLEJPckYkdDtoMm9wOy9UbVNdJC5JNmslRGgzUVw0aD1xLlAqS0NvOC9dZXM2UyEhQThTcFM1Ul0yJipjPFBvaWpJKE1rWzYhMSU6RTVpTk9UYDMkTGVuNTZHTEhXUkkmKSRpclVUUS9EcW1MLG9cbCNUI2FkcjpcK2g8aWlva1Y5QTQ8YnIuN0k2IVVMMWhOP1B0UmRUNG5odTdyRSx1YFAzOiNeY2dMRVEyPUhLUTxKP3RTKUM1XHVAPHVlYi8uWks/JFxvQG1zImtJS15ZLWZzcT5+PgplbmRzdHJlYW0KZW5kb2JqCjM4IDAgb2JqCjw8Ci9GaWx0ZXIgWyAvQVNDSUk4NURlY29kZSAvRmxhdGVEZWNvZGUgXSAvTGVuZ3RoIDU2Nwo+PgpzdHJlYW0KR2FzYlZjIzI4aSY7OU0kTUUqXmBjJi87QjhzXk9HMj89X2slOkJwYXBuQWthQDNVaGM4QFFbcFFfTCRNWSZ1LHE4RG8qUnEwJHAwLDYtJFpYdWtSTV5ySk1EYiMlRmlAaFBQPWolSFdfRlUiOmZITTRnPzpDUnEvLDAhT2NPbHFDVUxuYSs7cjQ3M2lZI1lGOGY6IWFNX2BeUmpLLk5NN1BYQydUQGZkaGlrblQoZydcRGVPJ0tKMGdkPD5mMydDPW0+MUloOy8iak4kanJBXT50NUdxIyorOFRBVks9V3I1YkhdSkdOPjBbcnJuSFVtRzJyZ19fIzZTcVJMO2xyLGllKk1gJWJdQlVzcmxGYF8xJF1qYi0+W1MkLTAvXmFcNSk5Pl5hakpTaSMwVEBPUC0vJCpWWDguOz4wYWVfYDNmQTpHL28xNFEuS2pUQ3JbRio2MDI5SjYpTFhEdDBXIic8W2Zvb2M4cFxycWdYOiYsLXAhT0VkOHRKXl1KLF9NSWtyM3JhRzxxQVJKb0pgODVaJkVeOUddJkE5REBNZjIrJ29pby8sTC9XKlc+cTIwcG5ccilTSUI8YG5DbTptVykocnBvL1dIK2xaN1xXaUFAYyFLKkFNdDVlJjcsQ2ktIiNWL0YqZztDLCtwaWREX2hfQVRCdWZIcllMXmhAKmxFJmpsS3JVI1ljIXVPXGZdLyZYUExONEVMJTFQamxeWkZqXi5kQEw9R0FjLFNIIyJIS3NqRH4+ZW5kc3RyZWFtCmVuZG9iagozOSAwIG9iago8PAovRmlsdGVyIFsgL0FTQ0lJODVEZWNvZGUgL0ZsYXRlRGVjb2RlIF0gL0xlbmd0aCA0NjUKPj4Kc3RyZWFtCkdhc2JWNXUzK2UhLzluPSglOjpeO0pBY1E+WUkhLVFEZlNYVGRNSS9GO2tUYSFfaFhoUVBHcTRFQS9aIl1WS3FZbWxfI2lIKVEibDFaMSInaDJIcUAiPDEwbTMhYGhFJTdXZyJUWWZwTFk9YTpuKz1PSzRHOFs0RicvIi1aK04qdXJISCU6KyQ+WWpqIV1paWI7Y287N01IO2hnQHRdZTQ4NFU2KSJGQzonLVBWODE9cic4SCtDJjs5YmspYGRePEE5dFs0NEYlRkU/KU8kI2ZYNTtERiYsPE45cjUsMDshKkNZVDMucFpRZFErOzQ5Q2hZWSJJYCJPMV4jMnFPcE00VHJAZmY+cVopITZNRTZRPVQwWUo7VUdnaUxeVCg8MFQ9QXJHOT9bPk4rRyFwZV0mNzJbQyNcUDI9PU4yQkZzRC5zZ3RsVDRpPDxpU0ImOzcvLGRWcGkuMio/RWtQOj5LMlU/JF0nYFI/SV8iSSxpJGloKXEuZ0xBVHM/WilOaSUobiRYTV9gWHIhRmZdKks8UmlTImc2MGJFJzk4LEhCc1FxM1ckcT1GWG06JF0qUkY3PF9KSzVsW3RxSm09Z2pgUnMvMSsjXiZlJkxeK2Z+PmVuZHN0cmVhbQplbmRvYmoKNDAgMCBvYmoKPDwKL0ZpbHRlciBbIC9BU0NJSTg1RGVjb2RlIC9GbGF0ZURlY29kZSBdIC9MZW5ndGggNTQ2Cj4+CnN0cmVhbQpHYXNiV18vR2VzKHJidD4vKUcuLTxdazEjTCloVVhkb3BKT1RpdFBvXE4mTShGRl1LbilZTGs7MGhrK1ElTV1VSTpVNUs9SUddWiRGOlwnNVUmaSFqcGlvLmwpPWZAbTZtQ105cG1zLk9jOVBtQ1Z1S2BtSDlrNHJhRVlRRVpBYGA3O1dKOlE1RCNOW2VsPE4mQ1lfOmNZV0lQdTs2bnRqQmhHSEUnK2c5c1kpa2prSXQnZF5BN1Q1dVA2XHM3NE8sYF03Ymo+VWsvc15MPWJoMFVQRUdASGg9bXA7OyhIP01WNW1kcVlTblRtNEE9XCwsN29GXDc2QSVjRTBBM2k3dFdkWSNgQycuTlJjRTFWOzxqUUNjXG5KckEiRE9LXyUlaiQxPkw7b29hYThxXDxxQz1eTj9JbSUpIzdXWz0oTUg1amNoUE9oVXFgZz1QQ2NSUG1kaT5WWVMjNC1HO3Azb0ktRUY+XXBeJEIkXD0xLUh1LF1HKVcsaEVUaEQ8XkQpWDElOztfcyk1aChILkZNJkMrRENELz9TZVxxLzdhOkpmQltdSnI2ZVwmWUxqWk01WGQncmk9VzUral9CaDlQKi1JL0snR01zMzhZaFw3LG9PTiZMPG4vTEU3XCdoOipCWXMmMlwjU101SVtoM3VdYzkpdWVoRihAQkNxQjttIVJHNjlhTTM2RjU2X1VgO010aDBzZ21ATFcqVWEmYEtTfj5lbmRzdHJlYW0KZW5kb2JqCjQxIDAgb2JqCjw8Ci9GaWx0ZXIgWyAvQVNDSUk4NURlY29kZSAvRmxhdGVEZWNvZGUgXSAvTGVuZ3RoIDQ2MAo+PgpzdHJlYW0KR2FzYlZjVk1EMyo2JUNFKCUzSzo6dEtrclt1MUtkTzxAQzVCIltJY1RTJkMqYiNXJE1uKk4wUCtabCY7PzJCXzVoXkA9VS1saGhVSFohb18raU4ycUpoaHVjVyhVQks5MEBuUVgjIVJcRm9QTz41NkQkNyVjXFVfJGorO0I2UDhHdDA7ZCZkWkYkJkk9XXFGTFRGVkMhPi9lKkopOnByPE4oSFFBSDR0cyVLWFlTRU1MXWVUb1pUUzFeamFxYkI+al85b2l1OTRbQGpAQWx1YGVWYENIXEg9RU0jJS9KKDE2UihrY1dIbFkjNThCYVJtRG04PEAoSHQ+IWlPWF0hU3MzWjNAXHFTS0VsLlw9KVYyK04zQDEzbVNxVU5TW1YzbCNkMC5xcSgoa1xaQiZuOChydTVpMmpQNW0yaUZ1ZSM4Q0cpc0ZyK2FmWGU4QlRGbnA9MytCKy06K2pMXlAwTkNZJFFFVGBaIkckX3FhSmZYcldTcjY3OSxvRldZUz1GVGJWPjBkQz4nKkk/XUEqM2RqOSc8UVk+LzRfc0YndVImVmQiQzknIWo6NEJBNydCVEZhRyxva2tnKjNuSCNsX2MlZDVNL3FcI11+PmVuZHN0cmVhbQplbmRvYmoKNDIgMCBvYmoKPDwKL0ZpbHRlciBbIC9BU0NJSTg1RGVjb2RlIC9GbGF0ZURlY29kZSBdIC9MZW5ndGggNTgxCj4+CnN0cmVhbQpHYXNiVzYnJUtoJjtCVEsoJTlfTGc6NWM+JSclZkVlU18wcGVTWiwlP0ZWdTJDZnBkLkAnbihrWTsnMFApUGdEKSMyV2VGMnJjaDJTcGRQITpETkBSXzdQJSRiKWtcVzU0T2F0aSxjMkUzV2ZoXSpyU3QjVipJOyZhKj5aSmlnPV1EOydabi0/YWI9QkFeUD5jO0UpcltiVitaW1goNkQnWkhcSWQtNlJbSkROSHQqR3JvLytgKzhNNycqSTFvU3NETWE3ZFFVKWNcIygoQkYoLj5WZlZXMXBSVEkyKzkuZSgqWj9qUl08QGk9YGgnOy0iRXBobDxgc0FTIlZGN1lfIlMtQ0FsPUsnLmtJTldQblEnSmY8VGl1Y1JJZzgkNkIqKiNhX15JNTJCV0RAOjJKUk1pdWtVa2w3Wzs+TkZRUW9CS1VpM1pPRTE7NXRcWDVtUEkhZWt0I09XLFNlPm1yVXBZJ0ZLUTFfbWM5M2dLbjhQTmNWZWEyXVshWVJiaS4xZjhxcEZANFZbcy85M0dxVj8/TF1vQ2FUZU11MUc1I01DU2suUT5yS1YhRDNUTjROUV5pZUwtdC9WZllTNGM0UGBDMkZzVF5NImdQbjAtM3FCJD1jNCtuKlZGTjBnOD1mdHRnPzJmWG5rRExgMlpFWzgxazQ7cyRccGpLMW5tJWRNN09MaT8/MVRLYFs3XW5acT5uPitkIztPdHFWVWEjJG9BczxWLW1IbG5ZTypDbVA2KUo6IjYuJnNObiYmQFlQVyx+PmVuZHN0cmVhbQplbmRvYmoKNDMgMCBvYmoKPDwKL0ZpbHRlciBbIC9BU0NJSTg1RGVjb2RlIC9GbGF0ZURlY29kZSBdIC9MZW5ndGggODE2Cj4+CnN0cmVhbQpHYXRVMT51MDMvJ1JmLkdTNEQ0aChZZWJlWm9zQDZWJWpGZFUtOCUwLT5qYm5pWz9OTXI7MGJdJ08nNEcuOSEjZltNIzJDVDZuaUFkRGFwKVlDWi1rXjBHWXNKVE00ZDFFWWo9MCUxSW0wPklaSysyPy5tZiopNiQ0PFsoQy1xVGViNEg/ZWdsLUpyXVE7dVYwMC5ZakYyX10kJDdBbUcjVHNMbztdYXRjIjU3NV91NHM5Z3IjL3VfLyFLNF40P28jT18zK2FdWTRiXmVkQmlVTGZaPDdXRSgyJTkmTy1YL2NBZ2JqS211Xy4jJjUxTFlJJVE3J0I8JmkpUTRgOz9PQ1tAJy43YE0yLjglbV1OJ2csKjxeM1ZwcS0pbUA9SSo2MlZKJlVIS1pyQHFKM09dK2pPMCckXk9GUDY7blhzLVJLQGMyWkFySWBwJUUwRUJccEwkVUFeQSpNXyhcOl5QPkQhVV8nZTBGQFlcSDNlJFtXb3Q+QDBIWCdPPTIhUURoJSk1QVJldVZoSGo2QzNGIzU/cXFVa0NHcVInYFA0JDZUQ1dpQ3UjOCYpZEApWWd1Zi8iVU9zJVdPPjwySD5LblA4V0NbcyxwVUoqK1dxaixoKitPYmknUVA6LUVaLSwtcE01ZDhdMilRaHBYSWBtNl4/SjphLiYyTVZBMF1YL2JmKDJTNlxuJnNQITEqXypjRGRxdS9fZF0hMlBQUkFnSSkycTZ0TzlBNkZfLCsyXk9ZVjZqV1k+ZT9sUkFjNTJUYz1FZUNdPCosUmdaWTRpLkJQQWkkS0hsQyxxcUlcYCZKTU89X3A9JixbUypzS1I9XyYrLWZTOFFoTzFHJFtDPV90XUxtYEspMSFxV0syL21PZVVEO0FWYVE7LEgiT1gzQTs1Km9sYFQ/T29ebFUrI2tgNGppTFVcWkRLVG8sLChmVSY6LE83XF5VK2FcJFAhKVJTdGhOPVlcNDw/bVhBUjlNamBscVYlUEI2S0gpY2NXYi1pNC5lck1fcGZtYSQnO0xwa2JDLlFANjBbV202cFNwU1JDZ2hmT0NkMkFkO0NAXChrajVfbEcjSS8ufj5lbmRzdHJlYW0KZW5kb2JqCjQ0IDAgb2JqCjw8Ci9GaWx0ZXIgWyAvQVNDSUk4NURlY29kZSAvRmxhdGVEZWNvZGUgXSAvTGVuZ3RoIDg0Ngo+PgpzdHJlYW0KR2F1MS1fL2MjISY7S1khTVo3P0taJT01ZEUrZmNROE5hQzpkc0FtWShFKENOI3A6JUtVajtoRTNPbSI5T3EqbzxPWSwuP24pJUVYJFxgNFhlOiI0dW4zK1ZgLG1Aak4yUDw4KE9eLWloM0g5M0gpRTwqOWNVc2dKJjVfQEAqXHJPMi08dGQwOFYsOSoxPDFgZkcqPlknR0wuWVs8YWV1V1xSJnVRWGcpRDE1a2xOQyxJcDg2amFhKF1hZHRwMylALWptZSdFc2laK25MOyczLHRnXF1ScThWT2gnYiJLIVBYQjloQyMkNmtLM0phWDZmRkErXXQ+OVQ0bCpMc0AvPVMxNlEvKXVrNSplZCwscDVbPFk3dGFoWFgvcU80ZHEnISVfNi1cRC5MZyw7TklpXzVSJTtSTEQiJi5lPmMyZjZKZjc3WT5Pamdrcy80Ik9RPyxoWVdXayFiQG1OKGFPYExrM1RbXSMmQXAyRGNSIWFOQldeIUFLOU5KSDY6Qz1kOSIjWWpyN3NPWSczTXFUMWlCN15sQ2xOVUBrTGYnSTRkNmgpQGAoVFxUXyopN1A9JS1qbEEoJjMwZnUsWFksX2VwZjszcUhhXldHaF1TQik5QWdUYT9lI1NEIz1OVW8tR2FoXmUhUElJWCNJNThkIUZbL1hIX0AhdWVOY05VS2dIYlY1O2ZLLTg4VkxmVUU4UFpTcGkpZ0QpRT43PmxsPllvRFNXYl02STAmJy5SM25aSiUwc0Y9U2wwKUhDQFZhXG8ocHBUQU9HRUpncmVPbGBPayMpaFJbVnFCPlliOyEtLkZiRyhaOWM+Skc2MDhyW2YhWjlqTVZ1TVpkT0FDNVtDaUsnV1hmUDZRMEoiZDhsYDwnMmhtbFA8IydSWj1VdTUrYTdiInA7NE5hMC11YSRTRXBNajdYKSheU21EUkNoUiEoNnVQO2dYVThDTjwxLE9dXSsxOiddbkE7LTs7Zm8ma2BkbS5AaWEhNUdeXCpeWj5sI05EQDFfQlB0SFdmUzc7XT9hOGUkc2ssTkBPNSxYSSZBVWI+SGFWWG1qVj9eb2wrcC5RcishPkZscWlJSC86IkVQRUZsQlxdc2YpQlpBNFNHV09gcnFAVH4+ZW5kc3RyZWFtCmVuZG9iagp4cmVmCjAgNDUKMDAwMDAwMDAwMCA2NTUzNSBmIAowMDAwMDAwMDYxIDAwMDAwIG4gCjAwMDAwMDAxMDIgMDAwMDAgbiAKMDAwMDAwMDIwOSAwMDAwMCBuIAowMDAwMDAwMzIxIDAwMDAwIG4gCjAwMDAwMDA1MjYgMDAwMDAgbiAKMDAwMDAwMDczMSAwMDAwMCBuIAowMDAwMDAwOTM2IDAwMDAwIG4gCjAwMDAwMDExNDEgMDAwMDAgbiAKMDAwMDAwMTM0NiAwMDAwMCBuIAowMDAwMDAxNTUxIDAwMDAwIG4gCjAwMDAwMDE3NTcgMDAwMDAgbiAKMDAwMDAwMTk2MyAwMDAwMCBuIAowMDAwMDAyMTY5IDAwMDAwIG4gCjAwMDAwMDIzNzUgMDAwMDAgbiAKMDAwMDAwMjU4MSAwMDAwMCBuIAowMDAwMDAyNzg3IDAwMDAwIG4gCjAwMDAwMDI5OTMgMDAwMDAgbiAKMDAwMDAwMzE5OSAwMDAwMCBuIAowMDAwMDAzNDA1IDAwMDAwIG4gCjAwMDAwMDM2MTEgMDAwMDAgbiAKMDAwMDAwMzgxNyAwMDAwMCBuIAowMDAwMDA0MDIzIDAwMDAwIG4gCjAwMDAwMDQyMjkgMDAwMDAgbiAKMDAwMDAwNDI5OSAwMDAwMCBuIAowMDAwMDA0NTYxIDAwMDAwIG4gCjAwMDAwMDQ3NDYgMDAwMDAgbiAKMDAwMDAwNjAxMyAwMDAwMCBuIAowMDAwMDA2NjQxIDAwMDAwIG4gCjAwMDAwMDcyODYgMDAwMDAgbiAKMDAwMDAwNzkyOSAwMDAwMCBuIAowMDAwMDA4NTgxIDAwMDAwIG4gCjAwMDAwMDkxODIgMDAwMDAgbiAKMDAwMDAwOTc4OCAwMDAwMCBuIAowMDAwMDEwNDAwIDAwMDAwIG4gCjAwMDAwMTEwNzMgMDAwMDAgbiAKMDAwMDAxMTc0MCAwMDAwMCBuIAowMDAwMDEyNDA0IDAwMDAwIG4gCjAwMDAwMTMwNjAgMDAwMDAgbiAKMDAwMDAxMzcxOCAwMDAwMCBuIAowMDAwMDE0Mjc0IDAwMDAwIG4gCjAwMDAwMTQ5MTEgMDAwMDAgbiAKMDAwMDAxNTQ2MiAwMDAwMCBuIAowMDAwMDE2MTM0IDAwMDAwIG4gCjAwMDAwMTcwNDEgMDAwMDAgbiAKdHJhaWxlcgo8PAovSUQgCls8YjExM2I3YmQ3Mjc1YWExOWFhZjA5ZDcyODBiODlhYWY+PGIxMTNiN2JkNzI3NWFhMTlhYWYwOWQ3MjgwYjg5YWFmPl0KJSBSZXBvcnRMYWIgZ2VuZXJhdGVkIFBERiBkb2N1bWVudCAtLSBkaWdlc3QgKG9wZW5zb3VyY2UpCgovSW5mbyAyNCAwIFIKL1Jvb3QgMjMgMCBSCi9TaXplIDQ1Cj4+CnN0YXJ0eHJlZgoxNzk3OAolJUVPRgo= as a fallback. */
+window.__JK_PDF = "data:application/pdf;base64,JVBERi0xLjMKJZOMi54gUmVwb3J0TGFiIEdlbmVyYXRlZCBQREYgZG9jdW1lbnQgKG9wZW5zb3VyY2UpCjEgMCBvYmoKPDwKL0YxIDIgMCBSIC9GMiAzIDAgUgo+PgplbmRvYmoKMiAwIG9iago8PAovQmFzZUZvbnQgL0hlbHZldGljYSAvRW5jb2RpbmcgL1dpbkFuc2lFbmNvZGluZyAvTmFtZSAvRjEgL1N1YnR5cGUgL1R5cGUxIC9UeXBlIC9Gb250Cj4+CmVuZG9iagozIDAgb2JqCjw8Ci9CYXNlRm9udCAvSGVsdmV0aWNhLUJvbGQgL0VuY29kaW5nIC9XaW5BbnNpRW5jb2RpbmcgL05hbWUgL0YyIC9TdWJ0eXBlIC9UeXBlMSAvVHlwZSAvRm9udAo+PgplbmRvYmoKNCAwIG9iago8PAovQ29udGVudHMgMjYgMCBSIC9NZWRpYUJveCBbIDAgMCA1OTUuMjc1NiA4NDEuODg5OCBdIC9QYXJlbnQgMjUgMCBSIC9SZXNvdXJjZXMgPDwKL0ZvbnQgMSAwIFIgL1Byb2NTZXQgWyAvUERGIC9UZXh0IC9JbWFnZUIgL0ltYWdlQyAvSW1hZ2VJIF0KPj4gL1JvdGF0ZSAwIC9UcmFucyA8PAoKPj4gCiAgL1R5cGUgL1BhZ2UKPj4KZW5kb2JqCjUgMCBvYmoKPDwKL0NvbnRlbnRzIDI3IDAgUiAvTWVkaWFCb3ggWyAwIDAgNTk1LjI3NTYgODQxLjg4OTggXSAvUGFyZW50IDI1IDAgUiAvUmVzb3VyY2VzIDw8Ci9Gb250IDEgMCBSIC9Qcm9jU2V0IFsgL1BERiAvVGV4dCAvSW1hZ2VCIC9JbWFnZUMgL0ltYWdlSSBdCj4+IC9Sb3RhdGUgMCAvVHJhbnMgPDwKCj4+IAogIC9UeXBlIC9QYWdlCj4+CmVuZG9iago2IDAgb2JqCjw8Ci9Db250ZW50cyAyOCAwIFIgL01lZGlhQm94IFsgMCAwIDU5NS4yNzU2IDg0MS44ODk4IF0gL1BhcmVudCAyNSAwIFIgL1Jlc291cmNlcyA8PAovRm9udCAxIDAgUiAvUHJvY1NldCBbIC9QREYgL1RleHQgL0ltYWdlQiAvSW1hZ2VDIC9JbWFnZUkgXQo+PiAvUm90YXRlIDAgL1RyYW5zIDw8Cgo+PiAKICAvVHlwZSAvUGFnZQo+PgplbmRvYmoKNyAwIG9iago8PAovQ29udGVudHMgMjkgMCBSIC9NZWRpYUJveCBbIDAgMCA1OTUuMjc1NiA4NDEuODg5OCBdIC9QYXJlbnQgMjUgMCBSIC9SZXNvdXJjZXMgPDwKL0ZvbnQgMSAwIFIgL1Byb2NTZXQgWyAvUERGIC9UZXh0IC9JbWFnZUIgL0ltYWdlQyAvSW1hZ2VJIF0KPj4gL1JvdGF0ZSAwIC9UcmFucyA8PAoKPj4gCiAgL1R5cGUgL1BhZ2UKPj4KZW5kb2JqCjggMCBvYmoKPDwKL0NvbnRlbnRzIDMwIDAgUiAvTWVkaWFCb3ggWyAwIDAgNTk1LjI3NTYgODQxLjg4OTggXSAvUGFyZW50IDI1IDAgUiAvUmVzb3VyY2VzIDw8Ci9Gb250IDEgMCBSIC9Qcm9jU2V0IFsgL1BERiAvVGV4dCAvSW1hZ2VCIC9JbWFnZUMgL0ltYWdlSSBdCj4+IC9Sb3RhdGUgMCAvVHJhbnMgPDwKCj4+IAogIC9UeXBlIC9QYWdlCj4+CmVuZG9iago5IDAgb2JqCjw8Ci9Db250ZW50cyAzMSAwIFIgL01lZGlhQm94IFsgMCAwIDU5NS4yNzU2IDg0MS44ODk4IF0gL1BhcmVudCAyNSAwIFIgL1Jlc291cmNlcyA8PAovRm9udCAxIDAgUiAvUHJvY1NldCBbIC9QREYgL1RleHQgL0ltYWdlQiAvSW1hZ2VDIC9JbWFnZUkgXQo+PiAvUm90YXRlIDAgL1RyYW5zIDw8Cgo+PiAKICAvVHlwZSAvUGFnZQo+PgplbmRvYmoKMTAgMCBvYmoKPDwKL0NvbnRlbnRzIDMyIDAgUiAvTWVkaWFCb3ggWyAwIDAgNTk1LjI3NTYgODQxLjg4OTggXSAvUGFyZW50IDI1IDAgUiAvUmVzb3VyY2VzIDw8Ci9Gb250IDEgMCBSIC9Qcm9jU2V0IFsgL1BERiAvVGV4dCAvSW1hZ2VCIC9JbWFnZUMgL0ltYWdlSSBdCj4+IC9Sb3RhdGUgMCAvVHJhbnMgPDwKCj4+IAogIC9UeXBlIC9QYWdlCj4+CmVuZG9iagoxMSAwIG9iago8PAovQ29udGVudHMgMzMgMCBSIC9NZWRpYUJveCBbIDAgMCA1OTUuMjc1NiA4NDEuODg5OCBdIC9QYXJlbnQgMjUgMCBSIC9SZXNvdXJjZXMgPDwKL0ZvbnQgMSAwIFIgL1Byb2NTZXQgWyAvUERGIC9UZXh0IC9JbWFnZUIgL0ltYWdlQyAvSW1hZ2VJIF0KPj4gL1JvdGF0ZSAwIC9UcmFucyA8PAoKPj4gCiAgL1R5cGUgL1BhZ2UKPj4KZW5kb2JqCjEyIDAgb2JqCjw8Ci9Db250ZW50cyAzNCAwIFIgL01lZGlhQm94IFsgMCAwIDU5NS4yNzU2IDg0MS44ODk4IF0gL1BhcmVudCAyNSAwIFIgL1Jlc291cmNlcyA8PAovRm9udCAxIDAgUiAvUHJvY1NldCBbIC9QREYgL1RleHQgL0ltYWdlQiAvSW1hZ2VDIC9JbWFnZUkgXQo+PiAvUm90YXRlIDAgL1RyYW5zIDw8Cgo+PiAKICAvVHlwZSAvUGFnZQo+PgplbmRvYmoKMTMgMCBvYmoKPDwKL0NvbnRlbnRzIDM1IDAgUiAvTWVkaWFCb3ggWyAwIDAgNTk1LjI3NTYgODQxLjg4OTggXSAvUGFyZW50IDI1IDAgUiAvUmVzb3VyY2VzIDw8Ci9Gb250IDEgMCBSIC9Qcm9jU2V0IFsgL1BERiAvVGV4dCAvSW1hZ2VCIC9JbWFnZUMgL0ltYWdlSSBdCj4+IC9Sb3RhdGUgMCAvVHJhbnMgPDwKCj4+IAogIC9UeXBlIC9QYWdlCj4+CmVuZG9iagoxNCAwIG9iago8PAovQ29udGVudHMgMzYgMCBSIC9NZWRpYUJveCBbIDAgMCA1OTUuMjc1NiA4NDEuODg5OCBdIC9QYXJlbnQgMjUgMCBSIC9SZXNvdXJjZXMgPDwKL0ZvbnQgMSAwIFIgL1Byb2NTZXQgWyAvUERGIC9UZXh0IC9JbWFnZUIgL0ltYWdlQyAvSW1hZ2VJIF0KPj4gL1JvdGF0ZSAwIC9UcmFucyA8PAoKPj4gCiAgL1R5cGUgL1BhZ2UKPj4KZW5kb2JqCjE1IDAgb2JqCjw8Ci9Db250ZW50cyAzNyAwIFIgL01lZGlhQm94IFsgMCAwIDU5NS4yNzU2IDg0MS44ODk4IF0gL1BhcmVudCAyNSAwIFIgL1Jlc291cmNlcyA8PAovRm9udCAxIDAgUiAvUHJvY1NldCBbIC9QREYgL1RleHQgL0ltYWdlQiAvSW1hZ2VDIC9JbWFnZUkgXQo+PiAvUm90YXRlIDAgL1RyYW5zIDw8Cgo+PiAKICAvVHlwZSAvUGFnZQo+PgplbmRvYmoKMTYgMCBvYmoKPDwKL0NvbnRlbnRzIDM4IDAgUiAvTWVkaWFCb3ggWyAwIDAgNTk1LjI3NTYgODQxLjg4OTggXSAvUGFyZW50IDI1IDAgUiAvUmVzb3VyY2VzIDw8Ci9Gb250IDEgMCBSIC9Qcm9jU2V0IFsgL1BERiAvVGV4dCAvSW1hZ2VCIC9JbWFnZUMgL0ltYWdlSSBdCj4+IC9Sb3RhdGUgMCAvVHJhbnMgPDwKCj4+IAogIC9UeXBlIC9QYWdlCj4+CmVuZG9iagoxNyAwIG9iago8PAovQ29udGVudHMgMzkgMCBSIC9NZWRpYUJveCBbIDAgMCA1OTUuMjc1NiA4NDEuODg5OCBdIC9QYXJlbnQgMjUgMCBSIC9SZXNvdXJjZXMgPDwKL0ZvbnQgMSAwIFIgL1Byb2NTZXQgWyAvUERGIC9UZXh0IC9JbWFnZUIgL0ltYWdlQyAvSW1hZ2VJIF0KPj4gL1JvdGF0ZSAwIC9UcmFucyA8PAoKPj4gCiAgL1R5cGUgL1BhZ2UKPj4KZW5kb2JqCjE4IDAgb2JqCjw8Ci9Db250ZW50cyA0MCAwIFIgL01lZGlhQm94IFsgMCAwIDU5NS4yNzU2IDg0MS44ODk4IF0gL1BhcmVudCAyNSAwIFIgL1Jlc291cmNlcyA8PAovRm9udCAxIDAgUiAvUHJvY1NldCBbIC9QREYgL1RleHQgL0ltYWdlQiAvSW1hZ2VDIC9JbWFnZUkgXQo+PiAvUm90YXRlIDAgL1RyYW5zIDw8Cgo+PiAKICAvVHlwZSAvUGFnZQo+PgplbmRvYmoKMTkgMCBvYmoKPDwKL0NvbnRlbnRzIDQxIDAgUiAvTWVkaWFCb3ggWyAwIDAgNTk1LjI3NTYgODQxLjg4OTggXSAvUGFyZW50IDI1IDAgUiAvUmVzb3VyY2VzIDw8Ci9Gb250IDEgMCBSIC9Qcm9jU2V0IFsgL1BERiAvVGV4dCAvSW1hZ2VCIC9JbWFnZUMgL0ltYWdlSSBdCj4+IC9Sb3RhdGUgMCAvVHJhbnMgPDwKCj4+IAogIC9UeXBlIC9QYWdlCj4+CmVuZG9iagoyMCAwIG9iago8PAovQ29udGVudHMgNDIgMCBSIC9NZWRpYUJveCBbIDAgMCA1OTUuMjc1NiA4NDEuODg5OCBdIC9QYXJlbnQgMjUgMCBSIC9SZXNvdXJjZXMgPDwKL0ZvbnQgMSAwIFIgL1Byb2NTZXQgWyAvUERGIC9UZXh0IC9JbWFnZUIgL0ltYWdlQyAvSW1hZ2VJIF0KPj4gL1JvdGF0ZSAwIC9UcmFucyA8PAoKPj4gCiAgL1R5cGUgL1BhZ2UKPj4KZW5kb2JqCjIxIDAgb2JqCjw8Ci9Db250ZW50cyA0MyAwIFIgL01lZGlhQm94IFsgMCAwIDU5NS4yNzU2IDg0MS44ODk4IF0gL1BhcmVudCAyNSAwIFIgL1Jlc291cmNlcyA8PAovRm9udCAxIDAgUiAvUHJvY1NldCBbIC9QREYgL1RleHQgL0ltYWdlQiAvSW1hZ2VDIC9JbWFnZUkgXQo+PiAvUm90YXRlIDAgL1RyYW5zIDw8Cgo+PiAKICAvVHlwZSAvUGFnZQo+PgplbmRvYmoKMjIgMCBvYmoKPDwKL0NvbnRlbnRzIDQ0IDAgUiAvTWVkaWFCb3ggWyAwIDAgNTk1LjI3NTYgODQxLjg4OTggXSAvUGFyZW50IDI1IDAgUiAvUmVzb3VyY2VzIDw8Ci9Gb250IDEgMCBSIC9Qcm9jU2V0IFsgL1BERiAvVGV4dCAvSW1hZ2VCIC9JbWFnZUMgL0ltYWdlSSBdCj4+IC9Sb3RhdGUgMCAvVHJhbnMgPDwKCj4+IAogIC9UeXBlIC9QYWdlCj4+CmVuZG9iagoyMyAwIG9iago8PAovUGFnZU1vZGUgL1VzZU5vbmUgL1BhZ2VzIDI1IDAgUiAvVHlwZSAvQ2F0YWxvZwo+PgplbmRvYmoKMjQgMCBvYmoKPDwKL0F1dGhvciAoYW5vbnltb3VzKSAvQ3JlYXRpb25EYXRlIChEOjIwMjYxMTIwMTQyNjAxKzAwJzAwJykgL0NyZWF0b3IgKGFub255bW91cykgL0tleXdvcmRzICgpIC9Nb2REYXRlIChEOjIwMjYxMTIwMTQyNjAxKzAwJzAwJykgL1Byb2R1Y2VyIChSZXBvcnRMYWIgUERGIExpYnJhcnkgLSBcKG9wZW5zb3VyY2VcKSkgCiAgL1N1YmplY3QgKHVuc3BlY2lmaWVkKSAvVGl0bGUgKHVudGl0bGVkKSAvVHJhcHBlZCAvRmFsc2UKPj4KZW5kb2JqCjI1IDAgb2JqCjw8Ci9Db3VudCAxOSAvS2lkcyBbIDQgMCBSIDUgMCBSIDYgMCBSIDcgMCBSIDggMCBSIDkgMCBSIDEwIDAgUiAxMSAwIFIgMTIgMCBSIDEzIDAgUiAKICAxNCAwIFIgMTUgMCBSIDE2IDAgUiAxNyAwIFIgMTggMCBSIDE5IDAgUiAyMCAwIFIgMjEgMCBSIDIyIDAgUiBdIC9UeXBlIC9QYWdlcwo+PgplbmRvYmoKMjYgMCBvYmoKPDwKL0ZpbHRlciBbIC9BU0NJSTg1RGVjb2RlIC9GbGF0ZURlY29kZSBdIC9MZW5ndGggMTE3NAo+PgpzdHJlYW0KR2F0PSpnTVolMCY6TWwrYmJOWUBYPTNUX1YqSC1WaCRvR0tma2hzTT9pMzVgRktBUlsiZCl0NUopO0RgQjpWIjEhbDlDPkByXWVeMURjM0BKajEwVmVJTE5gJnE5XkVKWWw4SEpNUCo4XVMiUGw3QmlbVEgqSEhyWG46UCU7aipyRTgzbiFwYV5kYDNncWk+aEU9OypAa25pWzpvTydfISlcJmk2WCpTQCw6cj4lXyx0S0IlLSdWMiVycGcrWlRjYXIqXjJQMjRMV0ItRG85QS9yJUBAWiRwUFtTbl9WdVUwYy1VUW5MYSsxXkNUJ3FZbCxra1NWOlBoQWw7Pm0kTTdoJi9VV0ZDZzg6L1BKS04zV043KUpVY0c2MDlOUDRMZWcqSDkiaGIia1xfNE02SzlLZzdVMHMhSmFZTTMnS0lpIl5ncGcnKzw4YjhBVkg2P29Rb0UnSUViZFhbYUpvTSNERVooSCkvRVp0V3RKXWgrb20zSUMkOmEnN0RPL2RXUUU9UHVhV2lgRWVYYztVXG5oRkhgcG5GRUxFNkw2IjpLXTpmJldGbXVeSTYyQkpBMTghVlJFVShZPGIlLClnQCFOMkFSZzlnMHRYWkQ3IyNvWTljMDllXjBkS1FHVD4lLmwyOl08bVxmZzZtI0ItRShOR0VvMERQZTxJbVpbWkp1KGptbHFpTWNqQlVoQ1g2K3FtTD83ZV8pYWg1VSJcXkYpbGFQTkJJWi9KPmE+cWAoPCc2bWR1NTgubUU4Lio6YGkkZm1CTEJrLyJlZ0UrPnNJTilhYjs2cHQrP1wiZVlnVDpZXC9lPGJkR29DZCdfVjZrSEhQYUQ5XEMlSjU6XWc7LmdsKk4uKigtdDk0aC5iWlliXEhdK0JrbkhtRysuQyFrSjVSSzlmU3JwQTFsXGdUQyU4aFk4MWI0VlJdW2EnIm0kRWFFUXJmWConTEZAL0dpMk4/ayUyXjksIjM9MS9ZUChbIW1pUyM3JWpRNU9TLlM0XFRFNTtvNEdUcEBlcEFwIkRoZzclSUxfUzkmZUBMbCQ4blpeZ01JTkQ5OkUlRi86NkphSSpwNExCXlpac2pdQSpqXz50YmhNN0A0RkdWPUctYCpYX2dZbjpfQDYjOHBiZDhmNU08Il5gRF1DPUE/ZmRcWlJlYmJDaig+X2VRP0dnJFlxUE9vRUNVSUtkTyNlclQ2V1YzT1w9TDJaIXVgOWRRI1hfTSY4ZDQqcWxpSUtUMUdlYk4yQFRMNSM8X0tlRXBWTXJWIlFkYVQucyw9JmlITUcoIXA1NmZZTS88czhISGJPOFleQWcxMEUqcEVlKGFkRWVYOVU5QzsyQVNKIklWcGNObi9kQ2NfJGs7RS5MKmYqMWsxIXI4N0JdMEskSWhVQEgnXj9QY05qOEslWSlOOyk+aVZQXzUoNGV0Qk5bR3U0VXFEMTZhVltTdFFUUGMlXzxnKWAzVVFQYkdeLjVnaF07UmpjIytWYCEoY2hFWE9JZEMkJy1eQlxLKC1BSlhZTF9pdF4/Ll5UZ1lOQkBHa2I7JEpaUCIqKSw6N0t+PgplbmRzdHJlYW0KZW5kb2JqCjI3IDAgb2JqCjw8Ci9GaWx0ZXIgWyAvQVNDSUk4NURlY29kZSAvRmxhdGVEZWNvZGUgXSAvTGVuZ3RoIDUzNwo+PgpzdHJlYW0KR2FzSWM5bEhkXCdZTlUxYmQiOi0oWWFLIVxsKWIzXTgmcjlRalg0VDprPVVCR0dHMDcyNVxXIk9YYSIrUlYxTCRIU1pBQDU7W2NeIjdXcUBZQGUzYjpjPXNROFBvRSo7bjM1cCImL2xoVDJHSTwrSmc+cTRDXHBrNitEXyJhb1FeaWQydDJuMmIkTkY3cWAnTU9PdEZSZU43JykpSSgyYTZtQXBgUF0lcmw6L2hvMlJDVk5RIjV0XV9BXjZlWEokWnIkRUg6XD9tSmtGQ0pyUWo6QChwJyxJNi9ZQlo7TUxAIj1KSmBFc3RVJ0tXdChNbEVVLl83cWlPVCQrakhoMUIoUTNWaEZZKCRaYWtmcDJDWSI6LSFhNyxjZjxRPUQrWUZtXExCU11pPDlKWys0ci1BKjt0YUEjQ04uPiEndCI/OCh1YCUuPms0WW08Ky5nLFY7YV1rZVwpXGwwQSRiJGotQVdhO2BMZWVIdVZraTpeQUFQa2pFYFRPaSgqckAudGRtJVAxVkMtJlJaVGxPUCQ6LVhdSCckRTYkW2wiJ1ssIV5SazcyczBjSmoqREZSX0tqIj81JXJMJUdLZUBlLGRgKy83bFxuOlxfOidrcScqMkxgPCpiIllPW2ZSLWRLIzxTdXI6QGUqckViZyNPQyIkYmZTKHRYO0JwNkQoSyg8XWdGaycqZ09PVzg6UTw9KGojVnRkZn4+ZW5kc3RyZWFtCmVuZG9iagoyOCAwIG9iago8PAovRmlsdGVyIFsgL0FTQ0lJODVEZWNvZGUgL0ZsYXRlRGVjb2RlIF0gL0xlbmd0aCA1NTQKPj4Kc3RyZWFtCkdhc2JWP1oyRGYnWkp1JC5GKUcvMkQyRT1fXUM6RWRUVUBTZWpyKVRpbCopPVdyT0JiO3EsX01nVSddJ24xXURJXjspbHJjOTJrbTRmSCsyNG4oVlBoI2RnbGE9PlB1S1pKVyY4JS5vMCJyZDtgRWlSUXMicWAtXmoiWjBXO28xc2dPbkRpVT5sUi5AW0giamBlLUlxSTFhUj1WUGwlIzdIQjRSTiE+MTM2TCRTdXJRT2JPJlBZPjlRSzdXTHRvdDRuUkxnP0cjZ21XNmRLPGpDU1BKQlguOTBNKXAoV0B1R0chTC9IKHRjOGJpLExLQVsxbyxWOzhVXiokOkRcKVpWbFNHNCFnXkVPcVtRMlcxIUs+MlEpNiIsa2ZrMCNETWg2REJfMjFiSTBkUGdhUWA0bXMiU2I+YXRBODEzU1xKI0siWXA5bV9DUmgmbTNRLkg6YihkdUxTN2FeNHFSTXBlT3NBKG1Xcjs2LURpbEFUZDtHakI3cGFLQFNIPTMvWk5TOy08IzArImdRaWAkSzc9UTJvWjNfaEwsbzlCJ2JHJEsoP1Q9LG9aMl1RJS1VPS5WR1A2dTFTSXVKXk4lO2s+S2VhNEJcLV8uRmtvaEdcTzRoRVVRbzNwVyUkInRTLiYsRy5KKy9MQ3M6MlRsQy9hRW9ccDE6XShWMks/LTNgI0xLZU9zJjRHdU1UMDo2Imc7XFcqW2BFMWJ0WTthQFZfI0FKU1E0VH4+ZW5kc3RyZWFtCmVuZG9iagoyOSAwIG9iago8PAovRmlsdGVyIFsgL0FTQ0lJODVEZWNvZGUgL0ZsYXRlRGVjb2RlIF0gL0xlbmd0aCA1NTIKPj4Kc3RyZWFtCkdhc2JWOy9iL0InU1lIPygkQkYxSkpbJzRTPmFsMzlqOSxiO2k9Jj5ePnBSZCMkYEhvako1MEFwVGttNTsiQEYrNitCdEBxMF9WKCNqZD9DbXJdKjthUkprX0poZ2pVZCNgcSVyby4hO25UK21RcTBETnBWJERSLVAoPChpNik1c2csLCEibDlSZV9wP3JPJUpaKU1nUWg0V1hzNDwlRmZjYWtlVkVsSjVNLixsLE0oTSNIUC51S1EiP00pMCRHX0dJb0I+VEsnQV9xTFliOCkpT14pSVJlOT4tWyhHZUFQJDNDZytnOmshIW89QyNBSC1kQSdWaSQ9LWxOWihiMyZmLiR0Ll1lWXRQXjVxc2ZTPzdsazFBQ1knJGNdbkYiXVprKD5nKVc5VkVyc2UpJissKnFMOFtOcChPKkcpTWpxX0wiN1JlSyJeWSp1RXAyb1I5P3BpQSdyZSQmWVRCcj1dPWtZdWFEKEBzISwxcHNQbCVOR0EiOz1xKWolYWB0YztWaC9tLSckb1FCTyNKQTA7WjRuQGFnTTxDYzVgWnVqUDBqP0dMal1QXTEnbTUoQG4oU0R1RUVnPktFaC5tXTlAQVZQcShnUXI5UFM1YFZ0U0tjNy0sJW5UIzImVUQjTkdMLS9cUV50YkNsSFFXYmglN3RGWDdOO0BFJz9BUEZfZ1ctPmtkOHVLVzNkcGg9UUVXWkloZCZeOiEzXEFuKDxRUWx0VVt+PmVuZHN0cmVhbQplbmRvYmoKMzAgMCBvYmoKPDwKL0ZpbHRlciBbIC9BU0NJSTg1RGVjb2RlIC9GbGF0ZURlY29kZSBdIC9MZW5ndGggNTYxCj4+CnN0cmVhbQpHYXNiVmNZcThkKjYlQ0YvKUg4Ry9MSXB0UDYyRmdnRV0lX1g6X0A6Z3NnMShPdVJLYDpBYUwiQ2NcalojOEFWbFNlWmFIaHRMIWRtXDBWY1wlbj07Kzc6Tyo2YVsubjg6cCtnRFFBS0MpLy89LmloJmpDKmZzODQxUy0+XkFQJStmO2NHPzc/X19QbDJsX3I0TlVFSyVmVj9DOTg/cG9hQDxVOVdRNlQycmxqRDhmV3FTLnBNTlMpWElJVFJJTVNoUV9AKVJKXUI8SkInT1stTy5aTispRjNDays/XiQ8Q0BRLyJaSlU6MD40LWddSWQ4PDNSOTJgWCJgVWR0bFIoMjhwQ1E7NDRbbGEncWpdajRDYzFwVkUqbmNHPG9jQVRuUkAtJnRYUT87ZT0pZjo7Xj5UcnJzbFAuKkFLUEpTPjxyXjNaajVgPkoiIV40LiMpIURaN1IpPT47KV5TZSpNPXM6JUUpKl43Y0JsZyUwbDQ/PT8haGpOUFVLYlwpM2xDJD9NOz1scCdBZV1QcyUhM1Q1bzNoVDlDPTdyOWZLUGBhVDtoMWNOVClyL2gxb3JzIlVlXmg9RmxPWClHYUhKR29VYz9LRFM/JiFcY006LWxWMmxyTWtLXlkiYydPNTYsYzU6SUg8NTxjT2FDTnUwSCslWCVwJCwrQltIJz9EakZtXWgyIURbbVl1W1tbQEwpOi5HXkA+SXVSWT0oTD87Zj5KQCddKDRRPEZkLUtpfj5lbmRzdHJlYW0KZW5kb2JqCjMxIDAgb2JqCjw8Ci9GaWx0ZXIgWyAvQVNDSUk4NURlY29kZSAvRmxhdGVEZWNvZGUgXSAvTGVuZ3RoIDUxMAo+PgpzdHJlYW0KR2FzYlY1dTZNcCY7QlRPKCU4U0IrbDprM2o1ZE1vL209Pz0lWiFURUg/IS9VKUM5Tjo+RHI0NGojVSI3PXNPZyg4T2k5YERyKlU2ND9iVG1iNz09J2k1WlE5QVNCWWYiWSVnUmlfTUAlRlRzPG5dbT9tMWYqNmhpU0ZNYi5laHVEQVZlQStiRG1JLFtcIy5MJlhtS1ErI1RKYldkcVo6cGIsbUAxOUw5TiM0QEFebms1L0pCVSpiTC5oKG9UcG45QS1DQE8vWmpkW1VLczZicF5SaldKTnFDPzoycmhKQyI/TiphPjplTTxNQUg2Ziclcl4+YWxaNXJWKFM1YzZCa1RHYjcwSlAmYlIoX0hWUlY0XWlBJmg/ck84MWReUzYnOl1eSXNDUy5EPEMtY1BGW0pjXUorRFxcSjw7MStiTXBsPiU7WFMiL1hzQmFnIj0mKFB1YV8yIywiY1BNRFA4U1ZiaVElb1ptUmc9SlpEbGE9azJHUmNMQ2NBbSJjLDBkIUgzQ2lhbWlnTyI3VGlDJCk2NENpX00vV1ZTOjxHIVNgXCk6Pk1gZyc6J1o6YyxjPHRkZUZkUjNHLS1BaTQvQ1BaKyo/XCRvY049OTUyQVhccUUlO1tuKkg2RUw9OSc4Rm5EJ2w2Yiw7T1cpOUcpZUs7KU1hVT9wKGUkb34+ZW5kc3RyZWFtCmVuZG9iagozMiAwIG9iago8PAovRmlsdGVyIFsgL0FTQ0lJODVEZWNvZGUgL0ZsYXRlRGVjb2RlIF0gL0xlbmd0aCA1MTUKPj4Kc3RyZWFtCkdhc2JWNiclS2gnU1ByTidtJi0qQzpsWUowVzxEQC5XbmZiSGAuWD0+aEh0ZF1GI0puN3FyIU8qS3M9SkUyXGpgKU4tUEhrNyZVKiV1J2JUIy8xanRJTyxPcVlsaHJyN2UkVDxNSFM6ZC1qYjRuPS9HNTVLTlEvXWFzJEFII29PPjQpWTtNTTQqRi1NL3BCaDdfREgzOkttMFN0bUNUQGEoKyYsVjE3JS8rYDxWOHJLLCNQQl1iXytkOUkvN2RIWS9mRDArWFhpVmNvbE1ybmsoQT1KN2ZsW2xJamxKbFhnZDdyRkcyYVgjX1RjIk5VXS81JWFMKUcobylTckJIaWVpLHBpISU4WytMR1ordCtxJWpIQTgqLjclRkNWTUhaQjM5YXVRVEgiYWByK3MjZzJcS25zOi8uIihUPDpUJUonaDY1aWc9YGFRREhZUkxbM2J0ZVM5UmxLM0RLLkFOWGAhaHFmQjZTLWBdNnVUaiNwZUdcUl48YC83PF1BMiFVRj45bEo5WmcjMG41VCdoNCplMSgtRk5OKTZEZm02RGNhWz8+WUxgZzA5MllzLkFmMGRKLVUtcD0vaTc0ODdEaj04VyJfJUFBRi9uWjI0aDU/RDNQUTk3PmBBUjY+NFxGR0RZaDRpbWFqYmFoWDUkYT0tMCw4cSoyOilsanBgNGkwRn4+ZW5kc3RyZWFtCmVuZG9iagozMyAwIG9iago8PAovRmlsdGVyIFsgL0FTQ0lJODVEZWNvZGUgL0ZsYXRlRGVjb2RlIF0gL0xlbmd0aCA1MjAKPj4Kc3RyZWFtCkdhc2JWNXU0T0gnU1o7WydrXy9wZysrcl0kdUIxOVcvNVkqO08yLDFWTFNfOEAjWFg1NC5VLF9ZOk8hTkw/J1YkXjJyYF8jMSViQlNUdFV1LStKNS4/bFs5MGJVNExTMVteSFxkbENPZ29dVCheNTZfLTVPLEspZWBcQGVhMGRKPzo6UmBzMDojMGFdTlVFSyVRcUg9WzpnKj1nWl85WSxcVjBUZFwzZmJAalNGTz1NITt1aVZbT2dQUGszK1RQUG9SQ2dfblgwNkpLLTImWzk3TD1lIShAanFgQyQ9YWJublg9JFMlMCJRbjMnR0xfNTVgPEdQTSRGXW5fPHM2K0BrT0d0NTJGWiJJW089bSZnQFpnayM0VkZASlVOKyhEUStzRDo5NSptY1hUbXAnSEhCVWs/PCIqVUQrZEskak8vVzY8PSc4N1pyOlVMK0lGPDk9T3VEVk02QzpqNGYvaUQsZTpWN1E3PChWREdmLFdMaSljYXBOIjRRNTUoNzonW2suVEV1LmVvNlIqbGlCOSUtdFYnW0EtT05pNDMvQTNeSSZhNFJNZTIxO2dcLkA2Ly5GcTonZElTKDxGOVtHbzFYXWEzNXFuVVcyXzsxb19SV2paJ0dXXGlkPlM+dG11RyYsSyNeQXEiaGRbUCxHNzNVUzFEJ2Q/X3FwbitRcG5JPVtqZzkxfj4KZW5kc3RyZWFtCmVuZG9iagozNCAwIG9iago8PAovRmlsdGVyIFsgL0FTQ0lJODVEZWNvZGUgL0ZsYXRlRGVjb2RlIF0gL0xlbmd0aCA1ODIKPj4Kc3RyZWFtCkdhc2JXP1o0Q0knWkp1LC5GJmthOl9WVVoualExJ1tMUT5QVExTRjZRU2BeMk41VV9yKFlINDtFT00hSFI2WmxTbCxMSSNHRTVOSjRTcXNhKCtvIzFgT2NLYmIpZFowSUd1TC1pXUxNVjNXZmdyNG9TWl5HNz1VRzROOWFDLXFPXSo0R3BNYm8oMlxiTFNqTGpMSVFEXycnOlVIZi0ybUIuYj50JWBaZGciJ1ghUFMrRlgyMjc/TlsvTWByZysqaFx0Uk4jQW09anRxOU9GR1FYV2ZsLldiQ0swZytoNU5YLDpXP0xvb2BvVEgiSilLO1tQYG9HPWlhMWhMbSdmUzNFY1IiOktUOyIyOyRgSztYLU0tQDhqTXBsZCpzPS0oTiNMNltvW15mb2hxRFlIZW1nRFVlXi5mWHA1Ik1rJiMhJ140alwkbSNpbzEoZ1VQa1s+MV4iU2hdQUk4a0M7NmNqbmxsSHBQVkc2SSlTRUM/XW5oa1NdbzpPREgtVi9tVmImZVdEa2xvNlVeRChhXjVNYWxjVS9NIzxUTkExO087cSVnQG9oNCNkVj4rby9YUVpzVGgvLG5qJVU2RW9oWy4ja2E8Y15SL2g7aTBTKGZaLlxiUiUzbGspRldmamExIVdKZSVwMVxOMEA/JyFjUmhTc1AhS1xScHIlQUwsaktpVGNgXEphNVloLTBaYCs0TCNbVD8qPGNyOVttVV5TOTNCN01JTTdpJFw1cS49V29DLStEbl4wKFsySzpoMCMjJXNuMUx+PmVuZHN0cmVhbQplbmRvYmoKMzUgMCBvYmoKPDwKL0ZpbHRlciBbIC9BU0NJSTg1RGVjb2RlIC9GbGF0ZURlY29kZSBdIC9MZW5ndGggNTc2Cj4+CnN0cmVhbQpHYXNiVmMmUzhJJ1NaOixNUjJWQmVbWDdkISpzXW9xMipVWGcuRloiOWY+YWMmZ2ghMmdbMCs+XjtlQUJVZ1l0WkBIa3Fpb0ErSHU3SD5PL143LD8lPG9FUjQiX0IqalRKOzojLzkiWmE2Q2laU1RxN2dUb1gtdE84XTpDXytqRylGZHRqYDNFOm5ZVUo4SlQiZHF1M2tCRWJsMz07cl4zWzIsWFhNUW1rMFNCZTk3NEpET3BQYlE1alk9NEtcS0k+RTNDTSZQI1A2SzQtUDpeZmdzNm0kKlw+Zi9gSkcrMW06SjpZZnFJM1lYaG5qKk9KKHRPYCw7Mj5cYlU3L1A1MzQlXzE2KVExKiMiVkg4aTtvUWAwOkk2Oj4hcSNuYlY+UVMuYSxSPVZ1XVozOVlibSxBaCJfMklDZGElaTNgYVdsPVVHN2gkXUNSVHFvSjUhP1ljY0QqNVsnbi5ZXEhoUCQnL1QpPTc9VCFRYj4uUz5xJ2o7LFhWJ2pWdU0maFxASiMpVzNlXFlHcDxWY21CcloydHRPUzBbXSFiJUNtS0pTbnQiU2wsOD5sPjo9UiomSEUjP2dJP181ZUJFVFg5PiE3Vj5FSVRcRU5gclk2Z1NyZyRBX2d0YSUtKW1MZSUlUm9HMWE/RitvYWw1JTNCVGFdbm5fV0k2RjVhYj40dV5ZJGxYWExQUUxnY1FZLkA8MVkob2ttTklJJDAyc3M4LUFWPE1KXF9KakNQTVEiPlA0U1x0TVRKKWNfWGp1fj5lbmRzdHJlYW0KZW5kb2JqCjM2IDAgb2JqCjw8Ci9GaWx0ZXIgWyAvQVNDSUk4NURlY29kZSAvRmxhdGVEZWNvZGUgXSAvTGVuZ3RoIDU3Mgo+PgpzdHJlYW0KR2FzYlZfL0okXShyYnRBKCU0JzVMKThUOVM+XTxyO2Q2JyJSVGJndShJSlYsOSZkcSM3L1BsZkU8WmRxTEMiOig7c2E4VWhZL0VCcy5TQ3VmKVhcOUkhX1RcJSlqOEUtOENCajQ7UDhyMVhJRTJmakMkRFxLSVJrQFFcMzVHdHRsKi4jSjYjKzNVOy9mMl08OGY9SFRQaUpuN0xVTF5wY2RaaUI8LTZRY1svbDkzU3BqQj9AYU48QC8wKzxMXTMpIlsyTjstYHE0UCo+TlRGbk9xUy42JTRHXmIjVyprU0hGO2lMJmVJalloMWMuXlFuSnMuYi0zI1gmXjlOWCc1Qzk1YTtQUWpITGZKb15Bcktgak1fS2hGT2sqSj5lYygpTGMoMEtGR0YkSUlGSlBpa106N0dRL1ZOQG80USUvREtBb1NXP1NUTW48PXE1MUheRS1jbjxLbDA2cyxZQ21oPjwqYj1fNiFcRzZiJSQiT2xydFNfcEtxLVxCNThcXjknUT1fcz9iLjVlZCMldDFhZmM7XkAsVF45KCVcZjZNYChQRlQxImM/YVA9cms9RF11dXRJNTlNT00sPlteJzxJTFFzJiNsXU8pQzhULGo7cGdWZlF0cms1VVM+LzZSMzcoUWVNMU5cbip1TiZQWVkrTG45UUNZYF9jNzUqUFlwRmZNXTZgTkRrS1JKNltSUmkwYmoxXHNpNWdpTlU7UTRYbm9mNi9oPFRfZSdLVjldKlQwNHFzIiJOJ19afj4KZW5kc3RyZWFtCmVuZG9iagozNyAwIG9iago8PAovRmlsdGVyIFsgL0FTQ0lJODVEZWNvZGUgL0ZsYXRlRGVjb2RlIF0gL0xlbmd0aCA1NjQKPj4Kc3RyZWFtCkdhc2JXNiNXNUgqNiVDQidecUUqX28iQ05ZWHBvTUQnTm10ZUxEUUwzOGMmXUo8QCskamtKK0tWQmxWKi44YHA1cCVTPkhxYHRoKiYsIVwrIjhwQzRvbXFdTUE6KVtaNyokRWhULlJfJDVcJHVGKyJEXW4rSnBEcEkqRWVeUF0uNDRBLj1qPksmPjU0PD5ZIjtoKkpOUzd0bUwyWko5Ly45JnRwO0xlK1VLYUJrIVdIRktWPmFsbDFOKSRsOkNSLmo4a0VEUF5bW29SV2glLCkvbzd1KkY9LU9oLWNuJkUrSmVbZlExYkwjV0wiPykwXVpEWlYrTSVibVJFPjAhIzpTXG9gJGA1XXUtb2tfYlBGQypBXE4odCstWXEnLG0mPygiV1EzN2IjXyU8cSZHayVwVzRxUSEyTTpeYzdeZm0tRFc1YE9xWDAmKGc+YVJiajhBJyglUnNKVlxOU21OLEJPckYkdDtoMm9wOy9UbVNdJC5JNmslRGgzUVw0aD1xLlAqS0NvOC9dZXM2UyEhQThTcFM1Ul0yJipjPFBvaWpJKE1rWzYhMSU6RTVpTk9UYDMkTGVuNTZHTEhXUkkmKSRpclVUUS9EcW1MLG9cbCNUI2FkcjpcK2g8aWlva1Y5QTQ8YnIuN0k2IVVMMWhOP1B0UmRUNG5odTdyRSx1YFAzOiNeY2dMRVEyPUhLUTxKP3RTKUM1XHVAPHVlYi8uWks/JFxvQG1zImtJS15ZLWZzcT5+PgplbmRzdHJlYW0KZW5kb2JqCjM4IDAgb2JqCjw8Ci9GaWx0ZXIgWyAvQVNDSUk4NURlY29kZSAvRmxhdGVEZWNvZGUgXSAvTGVuZ3RoIDU2Nwo+PgpzdHJlYW0KR2FzYlZjIzI4aSY7OU0kTUUqXmBjJi87QjhzXk9HMj89X2slOkJwYXBuQWthQDNVaGM4QFFbcFFfTCRNWSZ1LHE4RG8qUnEwJHAwLDYtJFpYdWtSTV5ySk1EYiMlRmlAaFBQPWolSFdfRlUiOmZITTRnPzpDUnEvLDAhT2NPbHFDVUxuYSs7cjQ3M2lZI1lGOGY6IWFNX2BeUmpLLk5NN1BYQydUQGZkaGlrblQoZydcRGVPJ0tKMGdkPD5mMydDPW0+MUloOy8iak4kanJBXT50NUdxIyorOFRBVks9V3I1YkhdSkdOPjBbcnJuSFVtRzJyZ19fIzZTcVJMO2xyLGllKk1gJWJdQlVzcmxGYF8xJF1qYi0+W1MkLTAvXmFcNSk5Pl5hakpTaSMwVEBPUC0vJCpWWDguOz4wYWVfYDNmQTpHL28xNFEuS2pUQ3JbRio2MDI5SjYpTFhEdDBXIic8W2Zvb2M4cFxycWdYOiYsLXAhT0VkOHRKXl1KLF9NSWtyM3JhRzxxQVJKb0pgODVaJkVeOUddJkE5REBNZjIrJ29pby8sTC9XKlc+cTIwcG5ccilTSUI8YG5DbTptVykocnBvL1dIK2xaN1xXaUFAYyFLKkFNdDVlJjcsQ2ktIiNWL0YqZztDLCtwaWREX2hfQVRCdWZIcllMXmhAKmxFJmpsS3JVI1ljIXVPXGZdLyZYUExONEVMJTFQamxeWkZqXi5kQEw9R0FjLFNIIyJIS3NqRH4+ZW5kc3RyZWFtCmVuZG9iagozOSAwIG9iago8PAovRmlsdGVyIFsgL0FTQ0lJODVEZWNvZGUgL0ZsYXRlRGVjb2RlIF0gL0xlbmd0aCA0NjUKPj4Kc3RyZWFtCkdhc2JWNXUzK2UhLzluPSglOjpeO0pBY1E+WUkhLVFEZlNYVGRNSS9GO2tUYSFfaFhoUVBHcTRFQS9aIl1WS3FZbWxfI2lIKVEibDFaMSInaDJIcUAiPDEwbTMhYGhFJTdXZyJUWWZwTFk9YTpuKz1PSzRHOFs0RicvIi1aK04qdXJISCU6KyQ+WWpqIV1paWI7Y287N01IO2hnQHRdZTQ4NFU2KSJGQzonLVBWODE9cic4SCtDJjs5YmspYGRePEE5dFs0NEYlRkU/KU8kI2ZYNTtERiYsPE45cjUsMDshKkNZVDMucFpRZFErOzQ5Q2hZWSJJYCJPMV4jMnFPcE00VHJAZmY+cVopITZNRTZRPVQwWUo7VUdnaUxeVCg8MFQ9QXJHOT9bPk4rRyFwZV0mNzJbQyNcUDI9PU4yQkZzRC5zZ3RsVDRpPDxpU0ImOzcvLGRWcGkuMio/RWtQOj5LMlU/JF0nYFI/SV8iSSxpJGloKXEuZ0xBVHM/WilOaSUobiRYTV9gWHIhRmZdKks8UmlTImc2MGJFJzk4LEhCc1FxM1ckcT1GWG06JF0qUkY3PF9KSzVsW3RxSm09Z2pgUnMvMSsjXiZlJkxeK2Z+PmVuZHN0cmVhbQplbmRvYmoKNDAgMCBvYmoKPDwKL0ZpbHRlciBbIC9BU0NJSTg1RGVjb2RlIC9GbGF0ZURlY29kZSBdIC9MZW5ndGggNTQ2Cj4+CnN0cmVhbQpHYXNiV18vR2VzKHJidD4vKUcuLTxdazEjTCloVVhkb3BKT1RpdFBvXE4mTShGRl1LbilZTGs7MGhrK1ElTV1VSTpVNUs9SUddWiRGOlwnNVUmaSFqcGlvLmwpPWZAbTZtQ105cG1zLk9jOVBtQ1Z1S2BtSDlrNHJhRVlRRVpBYGA3O1dKOlE1RCNOW2VsPE4mQ1lfOmNZV0lQdTs2bnRqQmhHSEUnK2c5c1kpa2prSXQnZF5BN1Q1dVA2XHM3NE8sYF03Ymo+VWsvc15MPWJoMFVQRUdASGg9bXA7OyhIP01WNW1kcVlTblRtNEE9XCwsN29GXDc2QSVjRTBBM2k3dFdkWSNgQycuTlJjRTFWOzxqUUNjXG5KckEiRE9LXyUlaiQxPkw7b29hYThxXDxxQz1eTj9JbSUpIzdXWz0oTUg1amNoUE9oVXFgZz1QQ2NSUG1kaT5WWVMjNC1HO3Azb0ktRUY+XXBeJEIkXD0xLUh1LF1HKVcsaEVUaEQ8XkQpWDElOztfcyk1aChILkZNJkMrRENELz9TZVxxLzdhOkpmQltdSnI2ZVwmWUxqWk01WGQncmk9VzUral9CaDlQKi1JL0snR01zMzhZaFw3LG9PTiZMPG4vTEU3XCdoOipCWXMmMlwjU101SVtoM3VdYzkpdWVoRihAQkNxQjttIVJHNjlhTTM2RjU2X1VgO010aDBzZ21ATFcqVWEmYEtTfj5lbmRzdHJlYW0KZW5kb2JqCjQxIDAgb2JqCjw8Ci9GaWx0ZXIgWyAvQVNDSUk4NURlY29kZSAvRmxhdGVEZWNvZGUgXSAvTGVuZ3RoIDQ2MAo+PgpzdHJlYW0KR2FzYlZjVk1EMyo2JUNFKCUzSzo6dEtrclt1MUtkTzxAQzVCIltJY1RTJkMqYiNXJE1uKk4wUCtabCY7PzJCXzVoXkA9VS1saGhVSFohb18raU4ycUpoaHVjVyhVQks5MEBuUVgjIVJcRm9QTz41NkQkNyVjXFVfJGorO0I2UDhHdDA7ZCZkWkYkJkk9XXFGTFRGVkMhPi9lKkopOnByPE4oSFFBSDR0cyVLWFlTRU1MXWVUb1pUUzFeamFxYkI+al85b2l1OTRbQGpAQWx1YGVWYENIXEg9RU0jJS9KKDE2UihrY1dIbFkjNThCYVJtRG04PEAoSHQ+IWlPWF0hU3MzWjNAXHFTS0VsLlw9KVYyK04zQDEzbVNxVU5TW1YzbCNkMC5xcSgoa1xaQiZuOChydTVpMmpQNW0yaUZ1ZSM4Q0cpc0ZyK2FmWGU4QlRGbnA9MytCKy06K2pMXlAwTkNZJFFFVGBaIkckX3FhSmZYcldTcjY3OSxvRldZUz1GVGJWPjBkQz4nKkk/XUEqM2RqOSc8UVk+LzRfc0YndVImVmQiQzknIWo6NEJBNydCVEZhRyxva2tnKjNuSCNsX2MlZDVNL3FcI11+PmVuZHN0cmVhbQplbmRvYmoKNDIgMCBvYmoKPDwKL0ZpbHRlciBbIC9BU0NJSTg1RGVjb2RlIC9GbGF0ZURlY29kZSBdIC9MZW5ndGggNTgxCj4+CnN0cmVhbQpHYXNiVzYnJUtoJjtCVEsoJTlfTGc6NWM+JSclZkVlU18wcGVTWiwlP0ZWdTJDZnBkLkAnbihrWTsnMFApUGdEKSMyV2VGMnJjaDJTcGRQITpETkBSXzdQJSRiKWtcVzU0T2F0aSxjMkUzV2ZoXSpyU3QjVipJOyZhKj5aSmlnPV1EOydabi0/YWI9QkFeUD5jO0UpcltiVitaW1goNkQnWkhcSWQtNlJbSkROSHQqR3JvLytgKzhNNycqSTFvU3NETWE3ZFFVKWNcIygoQkYoLj5WZlZXMXBSVEkyKzkuZSgqWj9qUl08QGk9YGgnOy0iRXBobDxgc0FTIlZGN1lfIlMtQ0FsPUsnLmtJTldQblEnSmY8VGl1Y1JJZzgkNkIqKiNhX15JNTJCV0RAOjJKUk1pdWtVa2w3Wzs+TkZRUW9CS1VpM1pPRTE7NXRcWDVtUEkhZWt0I09XLFNlPm1yVXBZJ0ZLUTFfbWM5M2dLbjhQTmNWZWEyXVshWVJiaS4xZjhxcEZANFZbcy85M0dxVj8/TF1vQ2FUZU11MUc1I01DU2suUT5yS1YhRDNUTjROUV5pZUwtdC9WZllTNGM0UGBDMkZzVF5NImdQbjAtM3FCJD1jNCtuKlZGTjBnOD1mdHRnPzJmWG5rRExgMlpFWzgxazQ7cyRccGpLMW5tJWRNN09MaT8/MVRLYFs3XW5acT5uPitkIztPdHFWVWEjJG9BczxWLW1IbG5ZTypDbVA2KUo6IjYuJnNObiYmQFlQVyx+PmVuZHN0cmVhbQplbmRvYmoKNDMgMCBvYmoKPDwKL0ZpbHRlciBbIC9BU0NJSTg1RGVjb2RlIC9GbGF0ZURlY29kZSBdIC9MZW5ndGggODE2Cj4+CnN0cmVhbQpHYXRVMT51MDMvJ1JmLkdTNEQ0aChZZWJlWm9zQDZWJWpGZFUtOCUwLT5qYm5pWz9OTXI7MGJdJ08nNEcuOSEjZltNIzJDVDZuaUFkRGFwKVlDWi1rXjBHWXNKVE00ZDFFWWo9MCUxSW0wPklaSysyPy5tZiopNiQ0PFsoQy1xVGViNEg/ZWdsLUpyXVE7dVYwMC5ZakYyX10kJDdBbUcjVHNMbztdYXRjIjU3NV91NHM5Z3IjL3VfLyFLNF40P28jT18zK2FdWTRiXmVkQmlVTGZaPDdXRSgyJTkmTy1YL2NBZ2JqS211Xy4jJjUxTFlJJVE3J0I8JmkpUTRgOz9PQ1tAJy43YE0yLjglbV1OJ2csKjxeM1ZwcS0pbUA9SSo2MlZKJlVIS1pyQHFKM09dK2pPMCckXk9GUDY7blhzLVJLQGMyWkFySWBwJUUwRUJccEwkVUFeQSpNXyhcOl5QPkQhVV8nZTBGQFlcSDNlJFtXb3Q+QDBIWCdPPTIhUURoJSk1QVJldVZoSGo2QzNGIzU/cXFVa0NHcVInYFA0JDZUQ1dpQ3UjOCYpZEApWWd1Zi8iVU9zJVdPPjwySD5LblA4V0NbcyxwVUoqK1dxaixoKitPYmknUVA6LUVaLSwtcE01ZDhdMilRaHBYSWBtNl4/SjphLiYyTVZBMF1YL2JmKDJTNlxuJnNQITEqXypjRGRxdS9fZF0hMlBQUkFnSSkycTZ0TzlBNkZfLCsyXk9ZVjZqV1k+ZT9sUkFjNTJUYz1FZUNdPCosUmdaWTRpLkJQQWkkS0hsQyxxcUlcYCZKTU89X3A9JixbUypzS1I9XyYrLWZTOFFoTzFHJFtDPV90XUxtYEspMSFxV0syL21PZVVEO0FWYVE7LEgiT1gzQTs1Km9sYFQ/T29ebFUrI2tgNGppTFVcWkRLVG8sLChmVSY6LE83XF5VK2FcJFAhKVJTdGhOPVlcNDw/bVhBUjlNamBscVYlUEI2S0gpY2NXYi1pNC5lck1fcGZtYSQnO0xwa2JDLlFANjBbV202cFNwU1JDZ2hmT0NkMkFkO0NAXChrajVfbEcjSS8ufj5lbmRzdHJlYW0KZW5kb2JqCjQ0IDAgb2JqCjw8Ci9GaWx0ZXIgWyAvQVNDSUk4NURlY29kZSAvRmxhdGVEZWNvZGUgXSAvTGVuZ3RoIDg0Ngo+PgpzdHJlYW0KR2F1MS1fL2MjISY7S1khTVo3P0taJT01ZEUrZmNROE5hQzpkc0FtWShFKENOI3A6JUtVajtoRTNPbSI5T3EqbzxPWSwuP24pJUVYJFxgNFhlOiI0dW4zK1ZgLG1Aak4yUDw4KE9eLWloM0g5M0gpRTwqOWNVc2dKJjVfQEAqXHJPMi08dGQwOFYsOSoxPDFgZkcqPlknR0wuWVs8YWV1V1xSJnVRWGcpRDE1a2xOQyxJcDg2amFhKF1hZHRwMylALWptZSdFc2laK25MOyczLHRnXF1ScThWT2gnYiJLIVBYQjloQyMkNmtLM0phWDZmRkErXXQ+OVQ0bCpMc0AvPVMxNlEvKXVrNSplZCwscDVbPFk3dGFoWFgvcU80ZHEnISVfNi1cRC5MZyw7TklpXzVSJTtSTEQiJi5lPmMyZjZKZjc3WT5Pamdrcy80Ik9RPyxoWVdXayFiQG1OKGFPYExrM1RbXSMmQXAyRGNSIWFOQldeIUFLOU5KSDY6Qz1kOSIjWWpyN3NPWSczTXFUMWlCN15sQ2xOVUBrTGYnSTRkNmgpQGAoVFxUXyopN1A9JS1qbEEoJjMwZnUsWFksX2VwZjszcUhhXldHaF1TQik5QWdUYT9lI1NEIz1OVW8tR2FoXmUhUElJWCNJNThkIUZbL1hIX0AhdWVOY05VS2dIYlY1O2ZLLTg4VkxmVUU4UFpTcGkpZ0QpRT43PmxsPllvRFNXYl02STAmJy5SM25aSiUwc0Y9U2wwKUhDQFZhXG8ocHBUQU9HRUpncmVPbGBPayMpaFJbVnFCPlliOyEtLkZiRyhaOWM+Skc2MDhyW2YhWjlqTVZ1TVpkT0FDNVtDaUsnV1hmUDZRMEoiZDhsYDwnMmhtbFA8IydSWj1VdTUrYTdiInA7NE5hMC11YSRTRXBNajdYKSheU21EUkNoUiEoNnVQO2dYVThDTjwxLE9dXSsxOiddbkE7LTs7Zm8ma2BkbS5AaWEhNUdeXCpeWj5sI05EQDFfQlB0SFdmUzc7XT9hOGUkc2ssTkBPNSxYSSZBVWI+SGFWWG1qVj9eb2wrcC5RcishPkZscWlJSC86IkVQRUZsQlxdc2YpQlpBNFNHV09gcnFAVH4+ZW5kc3RyZWFtCmVuZG9iagp4cmVmCjAgNDUKMDAwMDAwMDAwMCA2NTUzNSBmIAowMDAwMDAwMDYxIDAwMDAwIG4gCjAwMDAwMDAxMDIgMDAwMDAgbiAKMDAwMDAwMDIwOSAwMDAwMCBuIAowMDAwMDAwMzIxIDAwMDAwIG4gCjAwMDAwMDA1MjYgMDAwMDAgbiAKMDAwMDAwMDczMSAwMDAwMCBuIAowMDAwMDAwOTM2IDAwMDAwIG4gCjAwMDAwMDExNDEgMDAwMDAgbiAKMDAwMDAwMTM0NiAwMDAwMCBuIAowMDAwMDAxNTUxIDAwMDAwIG4gCjAwMDAwMDE3NTcgMDAwMDAgbiAKMDAwMDAwMTk2MyAwMDAwMCBuIAowMDAwMDAyMTY5IDAwMDAwIG4gCjAwMDAwMDIzNzUgMDAwMDAgbiAKMDAwMDAwMjU4MSAwMDAwMCBuIAowMDAwMDAyNzg3IDAwMDAwIG4gCjAwMDAwMDI5OTMgMDAwMDAgbiAKMDAwMDAwMzE5OSAwMDAwMCBuIAowMDAwMDAzNDA1IDAwMDAwIG4gCjAwMDAwMDM2MTEgMDAwMDAgbiAKMDAwMDAwMzgxNyAwMDAwMCBuIAowMDAwMDA0MDIzIDAwMDAwIG4gCjAwMDAwMDQyMjkgMDAwMDAgbiAKMDAwMDAwNDI5OSAwMDAwMCBuIAowMDAwMDA0NTYxIDAwMDAwIG4gCjAwMDAwMDQ3NDYgMDAwMDAgbiAKMDAwMDAwNjAxMyAwMDAwMCBuIAowMDAwMDA2NjQxIDAwMDAwIG4gCjAwMDAwMDcyODYgMDAwMDAgbiAKMDAwMDAwNzkyOSAwMDAwMCBuIAowMDAwMDA4NTgxIDAwMDAwIG4gCjAwMDAwMDkxODIgMDAwMDAgbiAKMDAwMDAwOTc4OCAwMDAwMCBuIAowMDAwMDEwNDAwIDAwMDAwIG4gCjAwMDAwMTEwNzMgMDAwMDAgbiAKMDAwMDAxMTc0MCAwMDAwMCBuIAowMDAwMDEyNDA0IDAwMDAwIG4gCjAwMDAwMTMwNjAgMDAwMDAgbiAKMDAwMDAxMzcxOCAwMDAwMCBuIAowMDAwMDE0Mjc0IDAwMDAwIG4gCjAwMDAwMTQ5MTEgMDAwMDAgbiAKMDAwMDAxNTQ2MiAwMDAwMCBuIAowMDAwMDE2MTM0IDAwMDAwIG4gCjAwMDAwMTcwNDEgMDAwMDAgbiAKdHJhaWxlcgo8PAovSUQgCls8YjExM2I3YmQ3Mjc1YWExOWFhZjA5ZDcyODBiODlhYWY+PGIxMTNiN2JkNzI3NWFhMTlhYWYwOWQ3MjgwYjg5YWFmPl0KJSBSZXBvcnRMYWIgZ2VuZXJhdGVkIFBERiBkb2N1bWVudCAtLSBkaWdlc3QgKG9wZW5zb3VyY2UpCgovSW5mbyAyNCAwIFIKL1Jvb3QgMjMgMCBSCi9TaXplIDQ1Cj4+CnN0YXJ0eHJlZgoxNzk3OAolJUVPRgo=";
+</script>
+<script>
+"use strict";
+/* ================================================================
+   ROUND AM — three new labs:
+   LOGIC: (1a) J-K flip-flop lab — the full characteristic table
+   with the toggle row as the point of the lab, edge-triggered
+   stepping with a running present-state -> next-state log, and a
+   cross-link to the 7474 D flip-flop. Model: the characteristic
+   equation Q+ = J·¬Q + ¬K·Q, verified exhaustively (8 combos).
+   LOGIC: (1b) the 7476 J-K flip-flop breadboard project (kind
+   "jkff", data in BBP_PROJECTS, behaviour in BBKind.jkNext, pin
+   truth in CHIPS74: Vcc pin 5, GND pin 13 — not the corner pins).
+   Its board self-test runs the shipped model over all 8
+   present-state x J x K combinations through the clock-press
+   cycle (BBKind.jkNext with a pulse).
+   BOARDS: (2) NEC infrared-remote decoder lab — real NEC timings
+   (9 ms + 4.5 ms leader, address, ~address, command, ~command,
+   LSB-first, 562.5 µs bursts, space length carries the bit),
+   a remote pad, bit-by-bit decode, the XOR = 0xFF inverse check
+   applied to every frame, and a corrupt-frame case the decoder
+   rejects. Self-test: round-trip every pad command + rejection.
+   BOARDS: (3) Waveform-generator lab — a binary address counter
+   stepping a 16-entry ROM of samples into the 4-bit R-2R DAC
+   model (Vout = Vref x code / 16, Vref = 5 V): sine, square and
+   triangle tables, each shown as address -> code -> voltage, a
+   level plot that builds as it steps. Self-test: 48 checks
+   (3 tables x 16 addresses) against the ideal sample within
+   half an LSB. All animations load paused.
+   Self-tests are exposed as window.__roundAMSelfTest.
+   ================================================================ */
+(function roundAM() {
+  const $M = id => document.getElementById(id);
+  function jumpM(id) { const el = id && $M(id); if (el) setTimeout(() => el.scrollIntoView({ behavior: "smooth", block: "start" }), 60); }
+  function clickMenuKeyM(key) { const it = document.querySelector('#menuList .menu-item[data-key="' + key + '"]'); if (it) { it.click(); return true; } return false; }
+  function fbSetM(el, ok, msg) { if (!el) return; el.textContent = (ok ? "✓ " : "✗ ") + msg; el.style.color = ok ? "var(--green)" : "var(--red)"; }
+  function optBtnsM(host, labels, onPick) {
+    host.innerHTML = "";
+    labels.forEach((lab, i) => { const b = document.createElement("button"); b.type = "button"; b.className = "btn"; b.textContent = lab; b.addEventListener("click", () => onPick(i, b)); host.appendChild(b); });
+  }
+  function checkBlockM(sec, prefix) {
+    const d = document.createElement("div");
+    d.innerHTML = '<div class="lab-check"><span class="lab-check-q" id="' + prefix + 'Q"></span><span id="' + prefix + 'Opts" style="display:flex;gap:6px;flex-wrap:wrap"></span><span class="lab-check-fb" id="' + prefix + 'Fb" aria-live="polite"></span></div>' +
+      '<div class="share-row"><button type="button" class="btn" id="' + prefix + 'NewQ">New question</button></div>';
+    sec.appendChild(d);
+    return d;
+  }
+  function rngM(seed) { let a = seed >>> 0; return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+
+  /* ================================================================
+     1a) J-K FLIP-FLOP LAB — model first.
+     Q+ = J·¬Q + ¬K·Q. The four J/K rows: 00 hold, 01 reset,
+     10 set, 11 TOGGLE.
+     ================================================================ */
+  function jkNextQ(Q, J, K) { return ((J ? 1 : 0) & (Q ? 0 : 1)) | ((K ? 0 : 1) & (Q ? 1 : 0)); }
+  function jkMode(J, K) { return J && K ? "TOGGLE" : J ? "set" : K ? "reset" : "hold"; }
+  function jkVerify() {
+    let passed = 0, total = 0;
+    for (let Q = 0; Q <= 1; Q++) for (let J = 0; J <= 1; J++) for (let K = 0; K <= 1; K++) {
+      total++;
+      const expect = jkMode(J, K) === "TOGGLE" ? (Q ^ 1) : jkMode(J, K) === "set" ? 1 : jkMode(J, K) === "reset" ? 0 : Q;
+      if (jkNextQ(Q, J, K) === expect) passed++;
+      /* and the shipped breadboard model must agree, combination for combination */
+      if (typeof BBKind !== "undefined" && BBKind.jkNext && BBKind.jkNext(Q, J, K, true) !== jkNextQ(Q, J, K)) passed--;
+    }
+    return { passed, total, pass: passed === total && total === 8 };
+  }
+  const JK_V = jkVerify();
+
+  const jkCard = document.createElement("div");
+  jkCard.className = "card proj-card"; jkCard.id = "jkCard"; jkCard.style.gridColumn = "1/-1"; jkCard.style.marginTop = "16px";
+  jkCard.innerHTML =
+    '<div class="proj-head"><h2>J-K flip-flop lab — hold, set, reset, toggle</h2><span class="badge">Simulator</span></div>' +
+    '<p class="what">The D flip-flop takes one command: become D. The <b>J-K flip-flop</b> takes two, and between them they cover everything a stored bit can be asked to do. <b>J</b> is the set input, <b>K</b> is the reset (kill) input, and the pair is read only at the <b>rising clock edge</b> — between edges, Q holds whatever it was, exactly as on the 7474. The whole behaviour is one equation, <b>Q+ = J·¬Q + ¬K·Q</b>, and one row of its table has no D-flip-flop equivalent: with <b>J = K = 1 the flip-flop TOGGLES</b>, flipping Q to its opposite at every edge. That row is the point of this lab — it is what turns a lone flip-flop into a divide-by-2 counter, and it is where the counters in the sequential pack get their toggling first stage. Set J and K below, press the clock, and watch present state become next state, one edge at a time; every press is logged in the step table.</p>' +
+    '<div class="ctrl-label">The characteristic table — all four commands</div>' +
+    '<div class="tt-wrap" style="max-height:300px"><table class="tt"><thead><tr><th>J</th><th>K</th><th>Q next (Q+)</th><th>Command</th></tr></thead><tbody>' +
+    '<tr><td>0</td><td>0</td><td class="out">Q (unchanged)</td><td>Hold — the edge changes nothing</td></tr>' +
+    '<tr><td>0</td><td>1</td><td class="out">0</td><td>Reset — Q is cleared</td></tr>' +
+    '<tr><td>1</td><td>0</td><td class="out">1</td><td>Set — Q is loaded with 1</td></tr>' +
+    '<tr style="background:var(--amber-soft)"><td><b>1</b></td><td><b>1</b></td><td class="out"><b>¬Q — the opposite of Q now</b></td><td><b>TOGGLE — Q flips at every edge. No D flip-flop can do this.</b></td></tr>' +
+    '</tbody></table></div>' +
+    '<div class="ctrl-label" style="margin-top:12px">Set the command — J and K</div>' +
+    '<div class="seq-state" id="jkState" style="margin-top:4px"></div>' +
+    '<div class="share-row"><button type="button" class="btn" id="jkTogJ">J: 1</button><button type="button" class="btn" id="jkTogK">K: 1</button>' +
+    '<button type="button" class="btn primary" id="jkClock">Press clock — one rising edge ▸</button><button type="button" class="btn" id="jkReset">Reset Q to 0</button></div>' +
+    '<div class="decimal-line" id="jkOut" aria-live="polite"></div>' +
+    '<div class="ctrl-label" style="margin-top:12px">Steps taken — present state → next state at every edge</div>' +
+    '<div class="tt-wrap" style="max-height:300px"><table class="tt" id="jkLog"></table></div>' +
+    '<div class="share-row"><span style="font-size:13.5px">The same cell, other forms:</span>' +
+    '<button type="button" class="btn" id="jkToBoard">This flip-flop on the bench — the 7476 breadboard project →</button>' +
+    '<button type="button" class="btn" id="jkToDff">The 7474 D flip-flop — on the breadboard →</button>' +
+    '<button type="button" class="btn" id="jkToSeqD">The D flip-flop in the sequential pack →</button></div>' +
+    '<p class="proj-teaches"><b>Teaches:</b> the J-K as the general flip-flop — a D flip-flop is the special case J = D, K = ¬D, which is exactly why the J-K never faces the D cell\'s forbidden combination and why its fourth row can be toggle. Load-time check: all ' + JK_V.total + ' present-state × J × K combinations agree with Q+ = J·¬Q + ¬K·Q and with the shipped 7476 board model (' + JK_V.passed + '/' + JK_V.total + ').</p>';
+  const seqViewEl = $M("seqView");
+  if (seqViewEl && seqViewEl.parentNode) seqViewEl.parentNode.insertBefore(jkCard, seqViewEl.nextSibling);
+  else { const cv = $M("circuitsView"); if (cv) cv.appendChild(jkCard); }
+  jkCard.querySelector("#jkToBoard").addEventListener("click", () => { if (!clickMenuKeyM("bb-jkff")) { try { bbSetProject("jkff"); } catch (e) {} jumpM("stageTitle"); } });
+  jkCard.querySelector("#jkToDff").addEventListener("click", () => { if (!clickMenuKeyM("bb-dff")) { try { bbSetProject("dff"); } catch (e) {} jumpM("stageTitle"); } });
+  jkCard.querySelector("#jkToSeqD").addEventListener("click", () => { if (!clickMenuKeyM("seq")) jumpM("seqView"); setTimeout(() => { const b = document.querySelector('#seqSeg button[data-seqdev="dff"]'); if (b) b.click(); }, 150); });
+  const jk = { J: 1, K: 1, Q: 0, steps: [] };
+  function jkRender(note) {
+    const host = jkCard.querySelector("#jkState"); host.innerHTML = "";
+    [["J", jk.J], ["K", jk.K], ["Q — present state", jk.Q], ["Q̅", jk.Q ^ 1], ["Q+ — next state on the edge", jkNextQ(jk.Q, jk.J, jk.K)]].forEach(([k, v]) => {
+      const c = document.createElement("div"); c.className = "seq-cell" + (v ? " one" : "");
+      c.innerHTML = "<b>" + v + '</b><span style="font-size:11px">' + k + "</span>"; host.appendChild(c);
+    });
+    jkCard.querySelector("#jkTogJ").textContent = "J: " + jk.J;
+    jkCard.querySelector("#jkTogK").textContent = "K: " + jk.K;
+    jkCard.querySelector("#jkOut").innerHTML = note || ("Present state <b>Q = " + jk.Q + "</b> · J = " + jk.J + ", K = " + jk.K + " → on the next rising edge Q becomes <b>" + jkNextQ(jk.Q, jk.J, jk.K) + "</b> (" + jkMode(jk.J, jk.K) + "). Nothing changes until the edge — change J or K now and Q sits still.");
+    const t = jkCard.querySelector("#jkLog");
+    let h = "<thead><tr><th>Step</th><th>J</th><th>K</th><th>Q present</th><th>Q next</th><th>Command</th></tr></thead><tbody>";
+    if (!jk.steps.length) h += '<tr><td colspan="6">No edges yet — the flip-flop is holding Q = ' + jk.Q + '. Set J and K, then press the clock.</td></tr>';
+    jk.steps.forEach((s, i) => { h += "<tr><td>" + (i + 1) + "</td><td>" + s.J + "</td><td>" + s.K + '</td><td>' + s.q + '</td><td class="out">' + s.qn + "</td><td>" + s.mode + "</td></tr>"; });
+    t.innerHTML = h + "</tbody>";
+  }
+  jkCard.querySelector("#jkTogJ").addEventListener("click", () => { jk.J ^= 1; jkRender(); });
+  jkCard.querySelector("#jkTogK").addEventListener("click", () => { jk.K ^= 1; jkRender(); });
+  jkCard.querySelector("#jkClock").addEventListener("click", () => {
+    const qn = jkNextQ(jk.Q, jk.J, jk.K);
+    jk.steps.push({ J: jk.J, K: jk.K, q: jk.Q, qn, mode: jkMode(jk.J, jk.K) });
+    const was = jk.Q; jk.Q = qn;
+    jkRender("Edge " + jk.steps.length + ": Q " + was + " → <b>" + jk.Q + "</b> — " + jkMode(jk.J, jk.K) + (jkMode(jk.J, jk.K) === "TOGGLE" ? " — Q flipped, as J = K = 1 commands. Press again and it flips back: that alternation is a clock divided by two." : ". Q now holds " + jk.Q + " until the next edge."));
+  });
+  jkCard.querySelector("#jkReset").addEventListener("click", () => { jk.Q = 0; jk.steps = []; jkRender("Reset: Q = 0 and the step log is clear. (On the 7476 board, preset and clear are tied inactive, so the clock is the only way Q moves — this reset is the lab's convenience, not a chip pin.)"); });
+  jkRender("Loaded paused, as every simulation on this site loads: Q = 0, J = K = 1 — the toggle command is already set, so the first press flips Q to 1.");
+  checkBlockM(jkCard, "jkChk");
+  let jkQn = 0;
+  function jkQuestion() {
+    const rng = rngM(7703 + jkQn * 131);
+    const Q = Math.floor(rng() * 2), J = Math.floor(rng() * 2), K = Math.floor(rng() * 2);
+    const expected = jkNextQ(Q, J, K);
+    jkCard.querySelector("#jkChkQ").textContent = "Predict, then check: Q is " + Q + ", J = " + J + " and K = " + K + ". The clock edge arrives. What is Q+?";
+    const host = jkCard.querySelector("#jkChkOpts"), fb = jkCard.querySelector("#jkChkFb");
+    fb.textContent = "";
+    optBtnsM(host, ["0", "1"], i => {
+      fbSetM(fb, i === expected, i === expected
+        ? "Right — J = " + J + ", K = " + K + " is the " + jkMode(J, K) + " command, so Q " + Q + " → " + expected + (jkMode(J, K) === "TOGGLE" ? ". Toggle is the row with no D-flip-flop equivalent." : ".")
+        : "Not that — read the row: J = " + J + ", K = " + K + " means " + jkMode(J, K) + ", and Q+ = J·¬Q + ¬K·Q with Q = " + Q + " gives " + expected + ".");
+    });
+    window.__jkQuestion = { Q, J, K, expected };
+  }
+  jkCard.querySelector("#jkChkNewQ").addEventListener("click", () => { jkQn++; jkQuestion(); });
+  jkQuestion();
+
+  /* ================================================================
+     1b) 7476 BOARD — self-test of the shipped model.
+     The board itself is data + kind branches (BBP_PROJECTS /
+     BBKind.jkNext / CHIPS74); here the shipped model is run over
+     all 8 combinations through the clock-press cycle, and the
+     chip's pin truth is asserted.
+     ================================================================ */
+  function jkBoardVerify() {
+    let passed = 0, total = 0;
+    for (let Q = 0; Q <= 1; Q++) for (let J = 0; J <= 1; J++) for (let K = 0; K <= 1; K++) {
+      total++;
+      const viaPress = BBKind.jkNext(Q, J, K, true);
+      const heldNoPress = BBKind.jkNext(Q, J, K, false);
+      if (viaPress === jkNextQ(Q, J, K) && heldNoPress === Q) passed++;
+    }
+    const chip = (typeof CHIPS74 !== "undefined" && CHIPS74["7476"]) || null;
+    const pinsOk = !!chip && chip.vcc === 5 && chip.gnd === 13 && chip.pinsTotal === 16 && chip.pins[14] === "1Q̅ out" && chip.pins[15] === "1Q out" && chip.pins[16] === "1K in" && chip.pins[4] === "1J in" && chip.pins[1] === "1CLK in";
+    return { passed, total, pass: passed === total && total === 8, pinsOk, vcc: chip ? chip.vcc : null, gnd: chip ? chip.gnd : null };
+  }
+  const JKB_V = jkBoardVerify();
+  /* extra board buttons living in the parts panel (delegated: the
+     panel is re-rendered on every stage render) */
+  document.addEventListener("click", e => {
+    const t = e.target && e.target.closest ? e.target.closest("#bbJkToDff, #bbJkToLab, #bbJkReset") : null;
+    if (!t) return;
+    if (t.id === "bbJkToDff") { if (!clickMenuKeyM("bb-dff")) { try { bbSetProject("dff"); } catch (err) {} jumpM("stageTitle"); } }
+    else if (t.id === "bbJkToLab") { if (!clickMenuKeyM("jk-lab")) jumpM("jkCard"); }
+    else if (t.id === "bbJkReset") { try { if (window.__bbRound) window.__bbRound.seq.jkff.Q = 0; renderStage(); renderTruth(); startPropagation(); } catch (err) {} }
+  });
+
+  /* ================================================================
+     2) NEC INFRARED-REMOTE DECODER — model first.
+     Frame: leader burst 9000 µs + space 4500 µs; then address,
+     ~address, command, ~command — each byte LSB-first; each bit
+     is a 562.5 µs burst + a space: 562.5 µs = 0, 1687.5 µs = 1;
+     a final 562.5 µs burst ends the frame. The decoder applies
+     the same inverse check to every frame: byte XOR its supposed
+     inverse must be 0xFF, for both pairs, or the frame is
+     rejected and no command is accepted.
+     ================================================================ */
+  const NEC_ADDR = 0x04;
+  const NEC_BUTTONS = [
+    { name: "Power", cmd: 0x10 }, { name: "Vol+", cmd: 0x11 }, { name: "Vol−", cmd: 0x12 },
+    { name: "CH+", cmd: 0x13 }, { name: "CH−", cmd: 0x14 }, { name: "Mute", cmd: 0x15 },
+    { name: "1", cmd: 0x01 }, { name: "2", cmd: 0x02 }, { name: "3", cmd: 0x03 }
+  ];
+  const NEC_BURST = 562.5, NEC_SPACE0 = 562.5, NEC_SPACE1 = 1687.5;
+  function necSegments(addr, cmd, corrupt) {
+    const bytes = [addr & 0xFF, (addr ^ 0xFF) & 0xFF, cmd & 0xFF, (cmd ^ 0xFF) & 0xFF];
+    if (corrupt) bytes[3] ^= 0x01; /* flip bit 0 of the transmitted inverse-command byte */
+    const segs = [{ level: 1, dur: 9000, label: "leader burst" }, { level: 0, dur: 4500, label: "leader space" }];
+    bytes.forEach((b, bi) => {
+      for (let i = 0; i < 8; i++) {
+        const bit = (b >> i) & 1;
+        segs.push({ level: 1, dur: NEC_BURST, label: "burst" });
+        segs.push({ level: 0, dur: bit ? NEC_SPACE1 : NEC_SPACE0, label: "space", byte: bi, bitPos: i, bit });
+      }
+    });
+    segs.push({ level: 1, dur: NEC_BURST, label: "final burst" });
+    return { segs, bytes };
+  }
+  function necDecode(segs) {
+    if (!segs || segs.length < 3 || Math.abs(segs[0].dur - 9000) > 100 || Math.abs(segs[1].dur - 4500) > 100)
+      return { ok: false, reason: "no NEC leader (9 ms burst + 4.5 ms space) at the head of the frame", bytes: [] };
+    const bytes = [0, 0, 0, 0];
+    for (let n = 0; n < 32; n++) {
+      const sp = segs[2 + n * 2 + 1];
+      if (!sp) return { ok: false, reason: "frame ended early at bit " + n, bytes };
+      const bit = sp.dur > 1125 ? 1 : 0;
+      bytes[n >> 3] |= bit << (n & 7);
+    }
+    const addrXor = bytes[0] ^ bytes[1], cmdXor = bytes[2] ^ bytes[3];
+    const addrOk = addrXor === 0xFF, cmdOk = cmdXor === 0xFF;
+    return { ok: addrOk && cmdOk, addrOk, cmdOk, addrXor, cmdXor, bytes, addr: bytes[0], cmd: bytes[2],
+      reason: addrOk && cmdOk ? "" : (!addrOk ? "address check failed" : "command check failed") };
+  }
+  function necVerify() {
+    let passed = 0, total = 0;
+    NEC_BUTTONS.forEach(b => {
+      total++;
+      const enc = necSegments(NEC_ADDR, b.cmd, false);
+      const dec = necDecode(enc.segs);
+      if (dec.ok && dec.addr === NEC_ADDR && dec.cmd === b.cmd) passed++;
+    });
+    total++;
+    const bad = necDecode(necSegments(NEC_ADDR, NEC_BUTTONS[0].cmd, true).segs);
+    const corruptRejected = !bad.ok && !bad.cmdOk;
+    if (corruptRejected) passed++;
+    return { passed, total, pass: passed === total, corruptRejected, commands: NEC_BUTTONS.length };
+  }
+  const NEC_V = necVerify();
+
+  const necCard = document.createElement("div");
+  necCard.className = "card stage-card"; necCard.id = "necCard"; necCard.style.marginTop = "16px";
+  necCard.innerHTML =
+    '<h2>NEC infrared-remote decoder — a TV remote, bit by bit</h2>' +
+    '<p class="what">The UART put bits on a wire and I2C/SPI put them on a bus; this protocol puts them on <b>light</b>. A remote control flashes an infrared LED in the <b>NEC pulse-distance</b> code: the bursts are all the same length, and the <b>distance between them</b> carries the bit. A frame opens with a <b>leader — a 9 ms burst and a 4.5 ms space</b> — that wakes the receiver and says "a frame starts now". Then four bytes follow, each sent <b>least-significant bit first</b>: the <b>address</b> (which device), the <b>bitwise inverse of the address</b>, the <b>command</b> (which button), and the <b>bitwise inverse of the command</b>. Every bit is a <b>562.5 µs burst</b> followed by a space — a <b>short space (562.5 µs) means 0, a long space (1.6875 ms) means 1</b> — and one final burst closes the frame. The inverses are the error check: the decoder accepts a frame only if <b>byte XOR its supposed inverse = 0xFF (all ones)</b>, for both pairs. Press a button on the pad, then step or play, and watch the decoder recover the bits and assemble the bytes. The <b>corrupt</b> switch flips one bit of the transmitted inverse-command byte — the same check then fails, and the decoder rejects the frame outright.</p>' +
+    '<div class="ctrl-label">The remote — one fixed address (0x04), one command code per button</div>' +
+    '<div class="share-row" id="necPad" style="margin-top:4px"></div>' +
+    '<div class="share-row"><button type="button" class="btn" id="necCorrupt" aria-pressed="false">Corrupt the frame: off</button>' +
+    '<span style="font-size:13.5px">When on, bit 0 of the transmitted inverse-command byte is flipped before it leaves the remote.</span></div>' +
+    '<div class="schematic-box uart-lab-svg" style="margin-top:12px"><svg id="necSvg" viewBox="0 0 920 120" role="img" aria-label="NEC frame pulse train: leader burst and space, then 32 bit cells of burst plus short or long space, then a final burst" style="display:block;width:100%;height:auto"></svg></div>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;align-items:center">' +
+    '<button type="button" class="btn primary" id="necStep">Step ▸ one pulse</button>' +
+    '<button type="button" class="btn" id="necPlay">▶ Play — run the frame</button>' +
+    '<button type="button" class="btn" id="necRestart">Restart frame</button>' +
+    '<span class="mono" id="necStatus" style="font-size:13px"></span></div>' +
+    '<div class="ctrl-label" style="margin-top:12px">Bits as the decoder recovers them — LSB first, four bytes</div>' +
+    '<div class="seq-state" id="necBits" style="margin-top:4px"></div>' +
+    '<div class="decimal-line" id="necBytes" aria-live="polite"></div>' +
+    '<div class="decimal-line" id="necVerdict" aria-live="polite"></div>' +
+    '<p class="proj-teaches"><b>Teaches:</b> pulse-distance encoding (information in the gaps, not the pulses), why a protocol sends each byte twice — once inverted — instead of a checksum byte, and honest rejection: the decoder runs the identical XOR check on every frame, so a corrupted frame is not "mostly decoded", it is refused. Load-time check: all ' + NEC_V.commands + ' pad commands round-trip encode → decode with both inverse checks passing, and the corrupt-frame case is rejected (' + NEC_V.passed + '/' + NEC_V.total + ').</p>';
+  const protoCardEl = $M("protoCard");
+  if (protoCardEl && protoCardEl.parentNode) protoCardEl.parentNode.insertBefore(necCard, protoCardEl.nextSibling);
+  else { const am = $M("advModulation"); if (am) am.appendChild(necCard); }
+  const nec = { cmd: NEC_BUTTONS[0].cmd, name: NEC_BUTTONS[0].name, corrupt: false, segs: [], bytes: [], pos: 0, timer: null };
+  const padHost = necCard.querySelector("#necPad");
+  NEC_BUTTONS.forEach(b => {
+    const btn = document.createElement("button");
+    btn.type = "button"; btn.className = "btn"; btn.textContent = b.name + " · 0x" + b.cmd.toString(16).toUpperCase().padStart(2, "0");
+    btn.setAttribute("aria-pressed", b.cmd === nec.cmd ? "true" : "false");
+    btn.addEventListener("click", () => {
+      nec.cmd = b.cmd; nec.name = b.name;
+      padHost.querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x === btn ? "true" : "false"));
+      necLoad("Frame loaded for " + b.name + " and paused, as every simulation here loads: leader first, then address 0x04, its inverse, command 0x" + b.cmd.toString(16).toUpperCase().padStart(2, "0") + ", its inverse. Step or play to transmit.");
+    });
+    padHost.appendChild(btn);
+  });
+  function necLoad(msg) {
+    necStop();
+    const enc = necSegments(NEC_ADDR, nec.cmd, nec.corrupt);
+    nec.segs = enc.segs; nec.bytes = enc.bytes; nec.pos = 0;
+    necRender(msg);
+  }
+  function necStop() { if (nec.timer) { clearInterval(nec.timer); nec.timer = null; const b = necCard.querySelector("#necPlay"); if (b) b.textContent = "▶ Play — run the frame"; } }
+  function necBitsRecovered() {
+    /* bit n's value is known once its space segment (index 2 + 2n + 1) has passed */
+    const out = [];
+    for (let n = 0; n < 32; n++) out.push(nec.pos > 2 + n * 2 + 1 ? nec.segs[2 + n * 2 + 1].bit : null);
+    return out;
+  }
+  function necRender(statusMsg) {
+    const total = nec.segs.reduce((s, x) => s + x.dur, 0);
+    const X0 = 16, W = 888, X = t => X0 + (t / total) * W;
+    let cum = 0, s = "";
+    s += '<line x1="' + X0 + '" y1="86" x2="' + (X0 + W) + '" y2="86" stroke="var(--line2)"/>';
+    nec.segs.forEach((sg, i) => {
+      const x1 = X(cum), x2 = X(cum + sg.dur); cum += sg.dur;
+      const done = i < nec.pos, cur = i === nec.pos;
+      const col = cur ? "var(--amber)" : done ? "var(--teal)" : "var(--slate-wire)";
+      if (sg.level === 1) s += '<rect x="' + x1 + '" y="30" width="' + Math.max(x2 - x1, 1.2) + '" height="26" style="fill:' + col + ';opacity:' + (done || cur ? "1" : ".45") + '"/>';
+      if (cur) s += '<rect x="' + Math.max(x1 - 2, X0) + '" y="18" width="' + Math.max(x2 - x1 + 4, 5) + '" height="80" style="fill:var(--canvas-hi)"/>';
+    });
+    s += '<text class="net-label" x="' + X0 + '" y="112">0 ms</text><text class="net-label" x="' + (X0 + W) + '" y="112" text-anchor="end">' + (total / 1000).toFixed(2) + ' ms — drawn to a true linear time scale, leader included</text>';
+    s += '<text class="net-label strong" x="' + X0 + '" y="16">IR LED — bursts shaded; the spaces between them carry the bits</text>';
+    necCard.querySelector("#necSvg").innerHTML = s;
+    const rec = necBitsRecovered();
+    const names = ["Address", "~Address", "Command", "~Command"];
+    const host = necCard.querySelector("#necBits"); host.innerHTML = "";
+    for (let b = 0; b < 4; b++) {
+      const bits = [];
+      for (let i = 0; i < 8; i++) bits.push(rec[b * 8 + i]);
+      const c = document.createElement("div"); c.className = "seq-cell";
+      c.innerHTML = "<b>" + bits.map(v => v === null ? "·" : v).join("") + '</b><span style="font-size:11px">' + names[b] + " (LSB first)</span>";
+      host.appendChild(c);
+    }
+    const dec = necDecode(nec.segs);
+    const byteStr = dec.bytes.map((b, i) => names[i] + " = 0x" + b.toString(16).toUpperCase().padStart(2, "0")).join(" · ");
+    necCard.querySelector("#necBytes").innerHTML = nec.pos >= nec.segs.length
+      ? "Frame complete — all 32 bits in: " + byteStr + "."
+      : "Transmitting: segment " + Math.min(nec.pos + 1, nec.segs.length) + " of " + nec.segs.length + (nec.pos < nec.segs.length ? " — now sending: " + nec.segs[nec.pos].label + " (" + (nec.segs[nec.pos].dur >= 1000 ? (nec.segs[nec.pos].dur / 1000) + " ms" : nec.segs[nec.pos].dur + " µs") + (nec.segs[nec.pos].level ? ", LED on" : ", LED off") + ")" : "") + ". Bytes so far decode as: " + byteStr + ".";
+    const vd = necCard.querySelector("#necVerdict");
+    if (nec.pos >= nec.segs.length) {
+      if (dec.ok) vd.innerHTML = '<span style="color:var(--green)"><b>✓ Decoded and accepted:</b></span> address <b>0x' + dec.addr.toString(16).toUpperCase().padStart(2, "0") + '</b>, command <b>0x' + dec.cmd.toString(16).toUpperCase().padStart(2, "0") + " (" + nec.name + ')</b>. Inverse checks: address 0x' + dec.bytes[0].toString(16).toUpperCase().padStart(2, "0") + " XOR 0x" + dec.bytes[1].toString(16).toUpperCase().padStart(2, "0") + " = 0x" + dec.addrXor.toString(16).toUpperCase() + " ✓ · command 0x" + dec.bytes[2].toString(16).toUpperCase().padStart(2, "0") + " XOR 0x" + dec.bytes[3].toString(16).toUpperCase().padStart(2, "0") + " = 0x" + dec.cmdXor.toString(16).toUpperCase() + " ✓ — both all-ones, so the command is acted on.";
+      else vd.innerHTML = '<span style="color:var(--red)"><b>✗ Frame REJECTED — no command accepted.</b></span> The decoder ran the same check it runs on every frame: ' + (!dec.addrOk ? "address 0x" + dec.bytes[0].toString(16).toUpperCase().padStart(2, "0") + " XOR 0x" + dec.bytes[1].toString(16).toUpperCase().padStart(2, "0") + " = 0x" + dec.addrXor.toString(16).toUpperCase().padStart(2, "0") : "command 0x" + dec.bytes[2].toString(16).toUpperCase().padStart(2, "0") + " XOR 0x" + dec.bytes[3].toString(16).toUpperCase().padStart(2, "0") + " = 0x" + dec.cmdXor.toString(16).toUpperCase().padStart(2, "0")) + ", not 0xFF — a bit flipped in transit, so the bytes cannot be trusted and the receiver ignores the whole frame.";
+    } else vd.textContent = "";
+    necCard.querySelector("#necStatus").textContent = statusMsg || (nec.pos >= nec.segs.length ? "Frame sent — the verdict is below." : "Paused at segment " + nec.pos + " of " + nec.segs.length + ".");
+  }
+  function necStepOnce() {
+    if (nec.pos < nec.segs.length) { nec.pos++; necRender(); }
+    if (nec.pos >= nec.segs.length) necStop();
+  }
+  necCard.querySelector("#necStep").addEventListener("click", () => { necStop(); necStepOnce(); });
+  necCard.querySelector("#necRestart").addEventListener("click", () => necLoad("Frame restarted and paused at the leader."));
+  necCard.querySelector("#necPlay").addEventListener("click", () => {
+    if (nec.timer) { necStop(); necRender(); return; }
+    const reduced = !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+    if (reduced) { nec.pos = nec.segs.length; necRender("Frame complete (reduced motion: transmission skipped). The verdict is below."); return; }
+    if (nec.pos >= nec.segs.length) nec.pos = 0;
+    const b = necCard.querySelector("#necPlay"); b.textContent = "⏸ Pause";
+    nec.timer = setInterval(necStepOnce, 80);
+  });
+  necCard.querySelector("#necCorrupt").addEventListener("click", () => {
+    nec.corrupt = !nec.corrupt;
+    const b = necCard.querySelector("#necCorrupt");
+    b.setAttribute("aria-pressed", nec.corrupt ? "true" : "false");
+    b.textContent = nec.corrupt ? "Corrupt the frame: ON — one inverse bit flipped" : "Corrupt the frame: off";
+    necLoad(nec.corrupt ? "Corruption armed: bit 0 of the inverse-command byte will be flipped in transmission. Transmit the frame and watch the check fail." : "Corruption off — frames transmit clean again.");
+  });
+  necLoad("Loaded paused, as every simulation on this site loads: the Power frame is ready — leader first. Step or play to transmit it.");
+  checkBlockM(necCard, "necChk");
+  let necQn = 0;
+  function necQuestion() {
+    const rng = rngM(5150 + necQn * 77);
+    const kind = Math.floor(rng() * 3);
+    const host = necCard.querySelector("#necChkOpts"), fb = necCard.querySelector("#necChkFb");
+    fb.textContent = "";
+    if (kind === 0) {
+      const bit = Math.floor(rng() * 2);
+      necCard.querySelector("#necChkQ").textContent = "Predict, then check: a bit cell arrives — a 562.5 µs burst, then a space of " + (bit ? "1.6875 ms" : "562.5 µs") + ". Which bit does the decoder record?";
+      optBtnsM(host, ["0", "1"], i => fbSetM(fb, i === bit, i === bit ? "Right — the burst is always 562.5 µs; the space carries the value, and " + (bit ? "a long space (1.6875 ms) is a 1." : "a short space (562.5 µs) is a 0.") : "Not that — in pulse-distance encoding the burst never changes; read the space: short (562.5 µs) = 0, long (1.6875 ms) = 1, so this cell is a " + bit + "."));
+      window.__necQuestion = { kind, expected: bit };
+    } else if (kind === 1) {
+      const b = 0x35;
+      necCard.querySelector("#necChkQ").textContent = "Predict, then check: the command byte decodes as 0x35 and the following byte as 0xCA. Does the decoder accept the command?";
+      optBtnsM(host, ["Accept — the check passes", "Reject — the check fails"], i => fbSetM(fb, i === 0, i === 0 ? "Right — 0x35 XOR 0xCA = 0xFF, all ones: the second byte is the exact inverse of the first, so the pair checks out." : "Not that — do the XOR: 0x35 XOR 0xCA = 0xFF. All ones means the inverse check passes and the command is accepted."));
+      window.__necQuestion = { kind, expected: 0 };
+    } else {
+      necCard.querySelector("#necChkQ").textContent = "Predict, then check: how many bytes does one NEC frame carry after the leader?";
+      optBtnsM(host, ["2 — address and command", "4 — address, ~address, command, ~command", "5 — with a checksum byte"], i => fbSetM(fb, i === 1, i === 1 ? "Right — four bytes: the address and command, each followed by its own bitwise inverse, which is the error check; there is no separate checksum byte." : "Not that — the frame is address, inverse address, command, inverse command: four bytes, and the inverses do the checking."));
+      window.__necQuestion = { kind, expected: 1 };
+    }
+  }
+  necCard.querySelector("#necChkNewQ").addEventListener("click", () => { necQn++; necQuestion(); });
+  necQuestion();
+
+  /* ================================================================
+     3) WAVEFORM GENERATOR — model first.
+     Datapath: binary address counter -> 16-entry ROM -> the 4-bit
+     R-2R DAC model, Vout = Vref x code / 16 with Vref = 5 V.
+     Tables are computed from the ideal waveforms, never typed:
+     sine round(7.5 + 7.5·sin(2πi/16)); square 15 then 0; triangle
+     even steps of 2 codes up then down (peak 14 — with a step of
+     2 from 0, 15 is never landed on, and the table says so).
+     Self-test: for every table and address, |Vout(code) − the
+     ideal sample expressed in volts on the DAC scale (5·u/16,
+     u the ideal code value)| ≤ half an LSB (Vref/32) — the
+     quantisation bound. 3 x 16 = 48 checks.
+     ================================================================ */
+  const WAVE_VREF = 5;
+  function waveVout(code) { return WAVE_VREF * code / 16; }
+  const WAVE_TABLES = {
+    sine: { label: "Sine", code: i => Math.round(7.5 + 7.5 * Math.sin(2 * Math.PI * i / 16)), ideal: i => 7.5 + 7.5 * Math.sin(2 * Math.PI * i / 16) },
+    square: { label: "Square", code: i => i < 8 ? 15 : 0, ideal: i => i < 8 ? 15 : 0 },
+    triangle: { label: "Triangle", code: i => i < 8 ? 2 * i : 30 - 2 * i, ideal: i => i < 8 ? 2 * i : 30 - 2 * i }
+  };
+  function waveVerify() {
+    let passed = 0, total = 0;
+    Object.keys(WAVE_TABLES).forEach(name => {
+      const T = WAVE_TABLES[name];
+      for (let i = 0; i < 16; i++) {
+        total++;
+        const code = T.code(i);
+        if (code < 0 || code > 15) continue;
+        if (Math.abs(waveVout(code) - WAVE_VREF * T.ideal(i) / 16) <= WAVE_VREF / 32 + 1e-9) passed++;
+      }
+    });
+    return { passed, total, pass: passed === total && total === 48 };
+  }
+  const WAVE_V = waveVerify();
+
+  const waveCard = document.createElement("div");
+  waveCard.className = "card proj-card"; waveCard.id = "waveCard"; waveCard.style.gridColumn = "1/-1";
+  waveCard.innerHTML =
+    '<div class="proj-head"><h2>Waveform generator — a counter, a table, and the DAC</h2><span class="badge">Tool</span></div>' +
+    '<p class="what">Three blocks you already know, wired into an instrument. A <b>binary address counter</b> steps 0000 → 1111 and back; each address reads one stored sample out of a <b>lookup table (ROM)</b>; and each sample feeds the <b>4-bit R-2R ladder DAC</b> — the same model as the DAC lab, <b>Vout = Vref × code / 16</b> with <b>Vref = 5 V</b> — so the output climbs and falls in sixteen exact steps, one per address. That is a real arbitrary waveform generator in miniature: change the table and you change the wave, without touching a wire. Three tables are loaded, each computed from its ideal waveform, not typed in: <b>sine</b>, code = round(7.5 + 7.5·sin(2πi/16)); <b>square</b>, 15 for the first half-cycle and 0 for the second; <b>triangle</b>, rising then falling in even steps of 2 codes (so its peak is 14 — a step of 2 from 0 never lands on 15, and the table below shows that honestly). Because the DAC has only 16 codes, every wave is a <b>staircase</b>: watch the level plot build and you are watching quantisation draw itself. Step the counter by hand, or play it.</p>' +
+    '<div class="ctrl-label">Lookup table (ROM contents)</div>' +
+    '<div class="share-row" id="waveTabs" style="margin-top:4px"></div>' +
+    '<div class="seq-state" id="waveState" style="margin-top:8px"></div>' +
+    '<div class="share-row"><button type="button" class="btn primary" id="waveStep">Step the counter ▸</button><button type="button" class="btn" id="wavePlay">▶ Play</button><button type="button" class="btn" id="waveReset">Reset counter to 0</button></div>' +
+    '<div class="ctrl-label" style="margin-top:12px">DAC output — the staircase builds as the counter steps (last 32 samples)</div>' +
+    '<div class="schematic-box"><svg id="waveSvg" viewBox="0 0 920 250" role="img" aria-label="Waveform generator output: a stepped level plot of DAC voltage against sample number" style="display:block;width:100%;height:auto"></svg></div>' +
+    '<div class="decimal-line" id="waveOut" aria-live="polite"></div>' +
+    '<div class="ctrl-label" style="margin-top:14px">The table in full — address → code → voltage, from Vout = 5 × code / 16</div>' +
+    '<div class="tt-wrap" style="max-height:320px"><table class="tt" id="waveTable"></table></div>' +
+    '<div class="share-row"><span style="font-size:13.5px">The blocks this instrument is built from:</span>' +
+    '<button type="button" class="btn" id="waveToDac">The R-2R ladder DAC lab — the output stage →</button>' +
+    '<button type="button" class="btn" id="waveToCounter">The 7490 decade counter — the counting block, on the bench →</button>' +
+    '<button type="button" class="btn" id="waveToSeq">Counters in the sequential pack →</button></div>' +
+    '<p class="proj-teaches"><b>Teaches:</b> direct digital synthesis at its smallest honest scale — a phase counter, a stored table, and a DAC — plus the price of 4 bits: one LSB is 0.3125 V, so no output can sit closer than half an LSB (0.15625 V) to the ideal curve. Load-time check: for all 3 tables × 16 addresses, the DAC voltage sits within half an LSB of the ideal sample (' + WAVE_V.passed + '/' + WAVE_V.total + ').</p>';
+  const sarCardEl = $M("sarCard");
+  if (sarCardEl && sarCardEl.parentNode) sarCardEl.parentNode.insertBefore(waveCard, sarCardEl.nextSibling);
+  else { const at = $M("advTools"); if (at) at.appendChild(waveCard); }
+  /* the DAC lab gains the return link */
+  const dacCardEl2 = $M("dacCard");
+  if (dacCardEl2 && !dacCardEl2.querySelector("#dacToWave")) {
+    const row = document.createElement("div"); row.className = "share-row";
+    const span = document.createElement("span"); span.style.fontSize = "13.5px";
+    span.textContent = "See it generating a waveform — a counter and a lookup table driving this ladder:";
+    const b = document.createElement("button"); b.type = "button"; b.className = "btn"; b.id = "dacToWave";
+    b.textContent = "Waveform generator — sine, square and triangle from a table →";
+    b.addEventListener("click", () => { if (!clickMenuKeyM("wave-gen")) jumpM("waveCard"); });
+    row.appendChild(span); row.appendChild(b);
+    dacCardEl2.appendChild(row);
+  }
+  waveCard.querySelector("#waveToDac").addEventListener("click", () => { if (!clickMenuKeyM("r2r-dac")) jumpM("dacCard"); });
+  waveCard.querySelector("#waveToCounter").addEventListener("click", () => { if (!clickMenuKeyM("bb-counter7490")) { try { bbSetProject("counter7490"); } catch (e) {} jumpM("stageTitle"); } });
+  waveCard.querySelector("#waveToSeq").addEventListener("click", () => { if (!clickMenuKeyM("seq")) jumpM("seqView"); setTimeout(() => { const b = document.querySelector('#seqSeg button[data-seqdev="counter"]'); if (b) b.click(); }, 150); });
+  const wave = { table: "sine", addr: 0, hist: [], timer: null };
+  const tabsHost = waveCard.querySelector("#waveTabs");
+  Object.keys(WAVE_TABLES).forEach(name => {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "btn"; b.textContent = WAVE_TABLES[name].label;
+    b.setAttribute("aria-pressed", name === wave.table ? "true" : "false");
+    b.addEventListener("click", () => {
+      wave.table = name; wave.addr = 0; wave.hist = []; waveStop();
+      tabsHost.querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x === b ? "true" : "false"));
+      waveRender("Table changed to " + WAVE_TABLES[name].label + " and the counter reset — loaded paused at address 0.");
+    });
+    tabsHost.appendChild(b);
+  });
+  function waveStop() { if (wave.timer) { clearInterval(wave.timer); wave.timer = null; const b = waveCard.querySelector("#wavePlay"); if (b) b.textContent = "▶ Play"; } }
+  function waveRender(note) {
+    const T = WAVE_TABLES[wave.table], code = T.code(wave.addr), v = waveVout(code);
+    const host = waveCard.querySelector("#waveState"); host.innerHTML = "";
+    [["address (decimal)", wave.addr], ["address A3 A2 A1 A0", wave.addr.toString(2).padStart(4, "0")], ["ROM sample (code)", code], ["code in binary", code.toString(2).padStart(4, "0")], ["DAC output", v.toFixed(4) + " V"]].forEach(([k, val]) => {
+      const c = document.createElement("div"); c.className = "seq-cell";
+      c.innerHTML = "<b>" + val + '</b><span style="font-size:11px">' + k + "</span>"; host.appendChild(c);
+    });
+    const X0 = 46, Y0 = 206, W = 828, H = 158;
+    const slot = W / 32, X = k => X0 + k * slot, Y = vv => Y0 - (vv / WAVE_VREF) * H;
+    let g = '<line x1="' + X0 + '" y1="' + Y0 + '" x2="' + (X0 + W) + '" y2="' + Y0 + '" stroke="var(--line2)"/>' +
+      '<line x1="' + X0 + '" y1="' + (Y0 - H) + '" x2="' + X0 + '" y2="' + Y0 + '" stroke="var(--line2)"/>' +
+      '<text class="net-label" x="' + X0 + '" y="' + (Y(WAVE_VREF) - 4) + '">5 V</text>' +
+      '<text class="net-label" x="' + X0 + '" y="' + (Y0 + 20) + '">samples →</text>' +
+      '<text class="net-label" x="' + (X0 + W) + '" y="' + (Y0 + 20) + '" text-anchor="end">one step = one LSB = 0.3125 V</text>';
+    if (wave.hist.length) {
+      let p = "M" + X(0) + " " + Y(waveVout(wave.hist[0]));
+      for (let k = 0; k < wave.hist.length; k++) {
+        p += " H" + X(k + 1);
+        if (k + 1 < wave.hist.length) p += " V" + Y(waveVout(wave.hist[k + 1]));
+      }
+      g += '<path d="' + p + '" fill="none" stroke="var(--teal)" stroke-width="2"/>';
+      g += '<circle cx="' + X(wave.hist.length - 1) + '" cy="' + Y(waveVout(wave.hist[wave.hist.length - 1])) + '" r="5" fill="var(--amber)"/>';
+    } else {
+      g += '<text class="net-label" x="' + (X0 + 12) + '" y="' + (Y0 - 20) + '">Nothing plotted yet — step the counter and the staircase draws itself, one held level per sample.</text>';
+    }
+    waveCard.querySelector("#waveSvg").innerHTML = g;
+    waveCard.querySelector("#waveOut").innerHTML = note || ("Address <b>" + wave.addr.toString(2).padStart(4, "0") + "</b> (" + wave.addr + ") → ROM[" + wave.addr + "] = <b>" + code + "</b> → Vout = 5 × " + code + " / 16 = <b>" + v.toFixed(4) + " V</b>. The counter wraps 1111 → 0000, so the wave repeats every 16 steps.");
+    const t = waveCard.querySelector("#waveTable");
+    let h = "<thead><tr><th>Address</th><th>Address (binary)</th><th>Code</th><th>Code (binary)</th><th>Vout = 5 × code / 16</th></tr></thead><tbody>";
+    for (let i = 0; i < 16; i++) {
+      const cc = T.code(i);
+      h += '<tr' + (i === wave.addr ? ' class="rz-cur-row"' : "") + "><td>" + i + "</td><td>" + i.toString(2).padStart(4, "0") + "</td><td>" + cc + "</td><td>" + cc.toString(2).padStart(4, "0") + "</td><td>" + waveVout(cc).toFixed(4) + " V</td></tr>";
+    }
+    t.innerHTML = h + "</tbody>";
+  }
+  function waveStepOnce() {
+    wave.hist.push(WAVE_TABLES[wave.table].code(wave.addr));
+    if (wave.hist.length > 32) wave.hist.shift();
+    wave.addr = (wave.addr + 1) % 16;
+    waveRender();
+  }
+  waveCard.querySelector("#waveStep").addEventListener("click", () => { waveStop(); waveStepOnce(); });
+  waveCard.querySelector("#waveReset").addEventListener("click", () => { waveStop(); wave.addr = 0; wave.hist = []; waveRender("Counter reset to 0000 and the plot cleared — paused at address 0."); });
+  waveCard.querySelector("#wavePlay").addEventListener("click", () => {
+    if (wave.timer) { waveStop(); waveRender(); return; }
+    const reduced = !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+    if (reduced) { for (let i = 0; i < 16; i++) waveStepOnce(); waveRender("One full cycle drawn at once (reduced motion: play skipped) — 16 samples, back at address 0."); return; }
+    const b = waveCard.querySelector("#wavePlay"); b.textContent = "⏸ Pause";
+    wave.timer = setInterval(waveStepOnce, 280);
+  });
+  waveRender("Loaded paused, as every simulation on this site loads: counter at 0000, sine table selected, nothing plotted yet. Step the counter and the first sample appears.");
+  checkBlockM(waveCard, "wvChk");
+  let wvQn = 0;
+  function waveQuestion() {
+    const rng = rngM(9021 + wvQn * 61);
+    const names = Object.keys(WAVE_TABLES);
+    const tn = names[Math.floor(rng() * 3)], addr = Math.floor(rng() * 16);
+    const T = WAVE_TABLES[tn], expected = waveVout(T.code(addr));
+    waveCard.querySelector("#wvChkQ").textContent = "Predict, then check: the " + T.label + " table is loaded and the counter reaches address " + addr + " (" + addr.toString(2).padStart(4, "0") + "). What is the DAC output?";
+    const cand = Array.from(new Set([expected, waveVout(Math.min(15, T.code(addr) + 1)), waveVout(Math.max(0, T.code(addr) - 1)), WAVE_VREF * T.code(addr) / 8]));
+    for (let i = cand.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); const tmp = cand[i]; cand[i] = cand[j]; cand[j] = tmp; }
+    const host = waveCard.querySelector("#wvChkOpts"), fb = waveCard.querySelector("#wvChkFb");
+    fb.textContent = "";
+    optBtnsM(host, cand.map(v => v.toFixed(4) + " V"), i => {
+      const v = cand[i];
+      fbSetM(fb, Math.abs(v - expected) < 1e-12, Math.abs(v - expected) < 1e-12
+        ? "Right — ROM[" + addr + "] in the " + T.label + " table is code " + T.code(addr) + ", and 5 × " + T.code(addr) + " / 16 = " + expected.toFixed(4) + " V."
+        : "Not that — look the address up in the table: " + T.label + " address " + addr + " holds code " + T.code(addr) + ", so Vout = 5 × " + T.code(addr) + " / 16 = " + expected.toFixed(4) + " V.");
+    });
+    window.__waveQuestion = { table: tn, addr, expected };
+  }
+  waveCard.querySelector("#wvChkNewQ").addEventListener("click", () => { wvQn++; waveQuestion(); });
+  waveQuestion();
+
+  /* ---------------- verification handles + self-tests ---------------- */
+  window.__jkCheck = { next: jkNextQ, mode: jkMode, verify: jkVerify };
+  window.__jkBoardCheck = { verify: jkBoardVerify, chip: (typeof CHIPS74 !== "undefined" && CHIPS74["7476"]) || null };
+  window.__necCheck = { segments: necSegments, decode: necDecode, verify: necVerify, addr: NEC_ADDR, buttons: NEC_BUTTONS };
+  window.__waveCheck = { tables: WAVE_TABLES, vout: waveVout, verify: waveVerify, vref: WAVE_VREF };
+  try {
+    window.__roundAMSelfTest = { jkLab: JK_V, jkBoard: JKB_V, nec: NEC_V, wave: WAVE_V };
+    const bad = Object.keys(window.__roundAMSelfTest).filter(k => !window.__roundAMSelfTest[k].pass);
+    if (bad.length && window.console) console.warn("[Round AM self-test] failures:", bad);
+  } catch (e) { window.__roundAMSelfTest = { error: String(e && e.message || e) }; }
+
+  /* ---------------- MENU REGISTRATION + COUNT REBUILD ---------------- */
+  function addMenuItemM(groupName, afterKey, spec) {
+    const list = $M("menuList"); if (!list) return false;
+    if (list.querySelector('[data-key="' + spec.key + '"]')) return false;
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "menu-item"; b.dataset.key = spec.key;
+    b.dataset.search = (spec.label + " " + spec.hint + " " + spec.search).toLowerCase();
+    if (spec.level) b.dataset.uxlevel = spec.level;
+    b.innerHTML = '<span class="mi-dot" aria-hidden="true"></span><span class="mi-label"></span><small></small>';
+    b.querySelector(".mi-label").textContent = spec.label;
+    b.querySelector("small").textContent = spec.hint;
+    b.addEventListener("click", () => { const p = $M("menuPanel"); if (p) p.hidden = true; const mb = $M("menuBtn"); if (mb) mb.setAttribute("aria-expanded", "false"); spec.go(); });
+    if (afterKey) {
+      const anchor = list.querySelector('[data-key="' + afterKey + '"]');
+      if (anchor) { anchor.parentNode.insertBefore(b, anchor.nextSibling); return true; }
+    }
+    let sib = null, inGroup = false;
+    Array.prototype.slice.call(list.children).forEach(el => {
+      if (el.classList.contains("menu-group")) inGroup = (el.dataset.group || "").trim() === groupName;
+      else if (inGroup && el.classList.contains("menu-item")) sib = el;
+    });
+    if (sib) sib.parentNode.insertBefore(b, sib.nextSibling); else list.appendChild(b);
+    return true;
+  }
+  addMenuItemM("Logic & Circuits", "seq", {
+    key: "jk-lab", label: "J-K flip-flop lab — hold, set, reset, toggle",
+    hint: "Set J and K, press the clock, and log present state → next state edge by edge — the toggle row (J = K = 1) is the point: the mode no D flip-flop has",
+    search: "j-k flip-flop jk lab characteristic table toggle hold set reset edge triggered clock characteristic equation q+ sequential memory divide by two simulator",
+    level: "intermediate", go: () => { setTopArea("circuits"); syncRail("circuits"); jumpM("jkCard"); }
+  });
+  addMenuItemM("Boards, Modulation & Projects", "proto-sim", {
+    key: "nec-lab", label: "NEC infrared-remote decoder — a TV remote, bit by bit",
+    hint: "Pulse-distance encoding with the real timings: 9 ms leader, address and command each followed by their inverse, decoded bit by bit — and a corrupt frame the inverse check rejects",
+    search: "nec infrared remote decoder ir pulse distance encoding leader burst space lsb first address command inverse check tv remote control protocol simulator lab",
+    level: "intermediate", go: () => { setTopArea("advanced"); syncRail("advanced"); const pb = document.querySelector('#advPicker [data-adv="modulation"]'); if (pb) pb.click(); jumpM("necCard"); }
+  });
+  addMenuItemM("Boards, Modulation & Projects", "sar-adc", {
+    key: "wave-gen", label: "Waveform generator — a counter, a table, and the DAC",
+    hint: "A binary counter steps a 16-sample lookup table (sine, square, triangle) into the 4-bit R-2R DAC: address, code and voltage shown per step, staircase plot included",
+    search: "waveform generator arbitrary function generator dds direct digital synthesis lookup table rom counter dac r-2r sine square triangle staircase quantisation quantization simulator lab",
+    level: "intermediate", go: () => { setTopArea("advanced"); syncRail("advanced"); const pb = document.querySelector('#advPicker [data-adv="tools"]'); if (pb) pb.click(); jumpM("waveCard"); }
+  });
+  (function rebuildCountsM() {
+    const RJ = window.__uxRoundJ; if (!RJ) return;
+    const groups = RJ.menuGroups(); const counts = {}; let total = 0;
+    groups.forEach(g => {
+      counts[g.name] = g.items.length; total += g.items.length;
+      const c = g.header.querySelector(".mi-count"); if (c) c.textContent = g.items.length;
+    });
+    window.LAB_MENU = { groups: groups.map(g => ({ name: g.name, items: g.items.map(b => { const l = b.querySelector(".mi-label"); return l ? l.textContent : ""; }) })), count: total };
+    window.LAB_MODULES = { modules: groups.map(g => ({ name: g.name, count: g.items.length })), total };
+    RJ.buildRailAndList(counts);
+    RJ.buildGallery();
+    ["boards", "arch", "os", "org"].forEach(id => {
+      const h = document.querySelector("#module-" + id + " .mh-count");
+      if (!h) return;
+      const name = { boards: "Boards, Modulation & Projects", arch: "Computer Architecture", os: "Operating Systems", org: "Computer Organization" }[id];
+      if (counts[name]) h.textContent = counts[name] + " items";
+    });
+    window.__countsAM = { total, counts };
+  })();
+})();
+
+</script>
