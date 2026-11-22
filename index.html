@@ -31242,3 +31242,448 @@ window.__JK_PDF = "data:application/pdf;base64,JVBERi0xLjMKJZOMi54gUmVwb3J0TGFiI
 })();
 
 </script>
+
+<script>
+"use strict";
+/* ================================================================
+   ROUND AN — one new lab:
+   LOGIC: "Sequential arithmetic, the textbook-chip way" — the
+   sequential multiplier and the restoring divider from the
+   breadboard boards (bb-multseq / bb-divseq), same algorithms,
+   same worked examples (13 x 15 = 195, 13 / 3 = 4 remainder 1),
+   rebuilt with the MSI parts a textbook names: 74194 universal
+   shift registers do the shifting, a 74175 quad register holds
+   the operand that stays still, a 74161 counter counts the four
+   iterations and raises Done (after Done the clock is gated and
+   further presses change nothing, exactly as on the boards), and
+   in the divider a 74157 quad 2-to-1 selector chooses the restore
+   value. The adder and the trial subtractor stay plain blocks,
+   labelled as the site's gate-built adder / divider-step
+   subtractor; the multiplier's add is gated by the current
+   multiplier bit selecting A or 0000, exactly as on the board.
+   SIMULATION ONLY: the breadboard model on this site is built
+   from basic gate packages and cannot draw MSI parts honestly,
+   so there is no breadboard variant and no wiring PDF.
+   The models are verified exhaustively at load against the
+   shipped board models: multiplier — all 256 (A,B) pairs agree
+   with ordinary multiplication AND window.BBMultSeq, freeze
+   after Done, reset cleanly; divider — all 64 (A,D) pairs match
+   window.BBDivSeq, quotient/remainder arithmetic holds on the
+   48 nonzero-divisor pairs, and D = 0 is stated, not hidden
+   (Q = 1111 after four presses). Self-tests are exposed as
+   window.__roundANSelfTest and window.__chipSeqCheck.
+   Everything loads paused.
+   ================================================================ */
+(function roundAN() {
+  const $N = id => document.getElementById(id);
+  function jumpN(id) { const el = id && $N(id); if (el) setTimeout(() => el.scrollIntoView({ behavior: "smooth", block: "start" }), 60); }
+  function clickMenuKeyN(key) { const it = document.querySelector('#menuList .menu-item[data-key="' + key + '"]'); if (it) { it.click(); return true; } return false; }
+  function fbSetN(el, ok, msg) { if (!el) return; el.textContent = (ok ? "✓ " : "✗ ") + msg; el.style.color = ok ? "var(--green)" : "var(--red)"; }
+  function optBtnsN(host, labels, onPick) {
+    host.innerHTML = "";
+    labels.forEach((lab, i) => { const b = document.createElement("button"); b.type = "button"; b.className = "btn"; b.textContent = lab; b.addEventListener("click", () => onPick(i, b)); host.appendChild(b); });
+  }
+  function checkBlockN(sec, prefix) {
+    const d = document.createElement("div");
+    d.innerHTML = '<div class="lab-check"><span class="lab-check-q" id="' + prefix + 'Q"></span><span id="' + prefix + 'Opts" style="display:flex;gap:6px;flex-wrap:wrap"></span><span class="lab-check-fb" id="' + prefix + 'Fb" aria-live="polite"></span></div>' +
+      '<div class="share-row"><button type="button" class="btn" id="' + prefix + 'NewQ">New question</button></div>';
+    sec.appendChild(d);
+    return d;
+  }
+  function rngN(seed) { let a = seed >>> 0; return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+  const binN = (v, w) => (v >>> 0).toString(2).padStart(w, "0");
+
+  /* ================================================================
+     MULTIPLIER — model first.
+     State: A = multiplicand (74175, held), B = multiplier as
+     loaded, C = carry out of the last add, H = accumulator (high
+     74194), L = multiplier register (low 74194), count = 74161.
+     One press: sel = (L's LSB) ? A : 0000 through the gating ANDs;
+     sum = H + sel (5 bits, C·S); the 9-bit field (C, S, L) shifts
+     right one place into the cascaded 74194 pair; count + 1.
+     At count 4 the 74161's Done gates the clock: presses do
+     nothing. Product = (H << 4) | L.
+     ================================================================ */
+  function csMultInit(A, B) { return { A: A & 15, B: B & 15, C: 0, H: 0, L: B & 15, count: 0 }; }
+  function csMultStep(st) {
+    if (st.count >= 4) return { st, info: null };
+    const bit = st.L & 1;
+    const sel = bit ? st.A : 0;
+    const sum = st.H + sel, cout = (sum >> 4) & 1, S = sum & 15;
+    const field = (sum << 4) | st.L;
+    const shifted = field >> 1;
+    const info = { bit, added: sel, sum, cout, S, field };
+    return { st: { A: st.A, B: st.B, C: cout, H: (shifted >> 4) & 15, L: shifted & 15, count: st.count + 1 }, info };
+  }
+  function csMultFinal(A, B, presses) { let st = csMultInit(A, B); for (let i = 0; i < presses; i++) st = csMultStep(st).st; return st; }
+  function csMultProduct(st) { return (st.H << 4) | st.L; }
+  function csMultVerify() {
+    let passed = 0, total = 0, boardPassed = 0, boardTotal = 0, freezeOk = true, resetOk = true;
+    const BM = window.BBMultSeq || null;
+    for (let A = 0; A < 16; A++) for (let B = 0; B < 16; B++) {
+      total++;
+      const fin = csMultFinal(A, B, 4), prod = csMultProduct(fin);
+      let caseOk = prod === A * B && fin.count === 4;
+      if (BM) {
+        boardTotal++;
+        const o = BM.outOf(BM.final(A, B, 4));
+        const bp = o.P7 * 128 + o.P6 * 64 + o.P5 * 32 + o.P4 * 16 + o.P3 * 8 + o.P2 * 4 + o.P1 * 2 + o.P0;
+        if (bp === prod) boardPassed++; else caseOk = false;
+      }
+      if (caseOk) passed++;
+      const fin7 = csMultFinal(A, B, 7);
+      if (fin7.count !== 4 || fin7.H !== fin.H || fin7.L !== fin.L) freezeOk = false;
+      const ini = csMultInit(A, B);
+      if (!(ini.H === 0 && ini.C === 0 && ini.count === 0 && ini.L === B && ini.A === A)) resetOk = false;
+    }
+    return { passed, total, boardPassed, boardTotal, freezeOk, resetOk,
+      pass: total === 256 && passed === 256 && boardPassed === boardTotal && boardTotal === 256 && freezeOk && resetOk };
+  }
+  const CM_V = csMultVerify();
+
+  /* ================================================================
+     DIVIDER — model first.
+     State: A = dividend as loaded, D = divisor (74175, held, low
+     two bits as on the board), Areg = the dividend 74194 — it
+     shifts left, dividend bits leave at the top, quotient bits
+     enter at the bottom, so after four presses it IS the
+     quotient register; R = remainder 74194 (low two bits used);
+     count = 74161. One press: S = (R << 1) | next dividend bit;
+     T = S - D in the trial subtractor; quotient bit = not-borrow;
+     the 74157 feeds the remainder register T if the subtraction
+     succeeded, S if it borrowed (restore). D = 0 never borrows,
+     so Q = 1111 — stated, exactly as the board states it.
+     ================================================================ */
+  function csDivInit(A, D) { return { A: A & 15, D: D & 3, Areg: A & 15, R: 0, count: 0 }; }
+  function csDivStep(st) {
+    if (st.count >= 4) return { st, info: null };
+    const abit = (st.Areg >> 3) & 1;
+    const S = ((st.R << 1) | abit) & 7;
+    const T = S - st.D, borrow = T < 0 ? 1 : 0, qi = borrow ? 0 : 1;
+    const newR = (borrow ? S : T) & 3;
+    const info = { abit, S, T, borrow, qi, newR };
+    return { st: { A: st.A, D: st.D, Areg: ((st.Areg << 1) | qi) & 15, R: newR, count: st.count + 1 }, info };
+  }
+  function csDivFinal(A, D, presses) { let st = csDivInit(A, D); for (let i = 0; i < presses; i++) st = csDivStep(st).st; return st; }
+  function csDivVerify() {
+    let passed = 0, total = 0, boardPassed = 0, boardTotal = 0, arithPassed = 0, arithTotal = 0, zeroOk = true, freezeOk = true, resetOk = true;
+    const BD = window.BBDivSeq || null;
+    for (let A = 0; A < 16; A++) for (let D = 0; D < 4; D++) {
+      total++;
+      const fin = csDivFinal(A, D, 4), q = fin.Areg, r = fin.R;
+      let caseOk = fin.count === 4;
+      if (D) {
+        arithTotal++;
+        if (q === Math.floor(A / D) && r === A % D) arithPassed++; else caseOk = false;
+      } else if (q !== 15 || r !== (A & 3)) { zeroOk = false; caseOk = false; }
+      if (BD) {
+        boardTotal++;
+        const o = BD.outOf(BD.final(A, D, 4));
+        const bq = o.Q3 * 8 + o.Q2 * 4 + o.Q1 * 2 + o.Q0, br = o.R1 * 2 + o.R0;
+        if (bq === q && br === r) boardPassed++; else caseOk = false;
+      }
+      if (caseOk) passed++;
+      const fin7 = csDivFinal(A, D, 7);
+      if (fin7.count !== 4 || fin7.Areg !== fin.Areg || fin7.R !== fin.R) freezeOk = false;
+      const ini = csDivInit(A, D);
+      if (!(ini.R === 0 && ini.count === 0 && ini.Areg === A && ini.D === D)) resetOk = false;
+    }
+    return { passed, total, boardPassed, boardTotal, arithPassed, arithTotal, zeroOk, freezeOk, resetOk,
+      pass: total === 64 && passed === 64 && boardPassed === boardTotal && boardTotal === 64 &&
+        arithPassed === arithTotal && arithTotal === 48 && zeroOk && freezeOk && resetOk };
+  }
+  const CD_V = csDivVerify();
+
+  /* board figures for the contrast table — read from the shipped
+     board models, not re-typed: the multiplier's from its own
+     load-time check; the divider's chip count from its project
+     definition and its gate count from window.BBDivSeq.gates
+     (the project entry itself carries no gates array) */
+  const MSCHK = window.__multSeqCheck || {};
+  const divProjN = (typeof BBH !== "undefined" && BBH.projects && BBH.projects.divseq) || null;
+  const divModelN = window.BBDivSeq || null;
+  const FIG = {
+    multBoardChips: MSCHK.chips != null ? MSCHK.chips : 17,
+    multBoardGates: MSCHK.gates != null ? MSCHK.gates : 27,
+    divBoardChips: divProjN ? divProjN.build.length : 15,
+    divBoardGates: divModelN && divModelN.gates ? divModelN.gates.length : 25
+  };
+  const FIG_V = { passed: [FIG.multBoardChips === 17, FIG.multBoardGates === 27, FIG.divBoardChips === 15, FIG.divBoardGates === 25].filter(Boolean).length, total: 4 };
+  FIG_V.pass = FIG_V.passed === FIG_V.total;
+  const figuresOk = FIG_V.pass;
+
+  /* ================================================================
+     THE CARD — controls and styling follow the J-K lab card.
+     ================================================================ */
+  const csCard = document.createElement("div");
+  csCard.className = "card proj-card"; csCard.id = "chipSeqCard"; csCard.style.gridColumn = "1/-1"; csCard.style.marginTop = "16px";
+  csCard.innerHTML =
+    '<div class="proj-head"><h2>Sequential arithmetic, the textbook-chip way</h2><span class="badge">Simulator</span></div>' +
+    '<p class="what">The two sequential boards on the bench do their shifting the long way on purpose: eight <b>7474</b> packages pass bits hand to hand so you can watch every shift happen. A textbook draws the same machines with the <b>MSI parts the slide names</b> — and this lab is those drawings, running. The algorithms and the worked examples are identical: <b>13 × 15 = 195</b> and <b>13 ÷ 3 = 4 remainder 1</b>. <b>74194 universal shift registers</b> do the shifting; a <b>74175 quad register</b> holds the operand that stays still; a <b>74161 counter</b> counts the four iterations and raises <b>Done</b> at count 4, after which the clock is gated and further presses change nothing — the same freeze as the boards. In the divider, a <b>74157 quad 2-to-1 selector</b> makes the restore decision the breadboard build steers with AND and OR gates: it feeds the remainder register the trial difference when the subtraction succeeded, or the shifted trial value when it borrowed. The adder and the trial subtractor stay plain blocks, labelled as what they are on this site: the gate-built adder and the divider-step subtractor. This lab is a <b>simulation only</b>, deliberately: the breadboard model here is built from basic gate packages, and a 74194 or a 74157 cannot be drawn honestly in it — so there is no breadboard variant of this one, and no wiring PDF. Both machines load paused, as every simulation on this site loads.</p>' +
+
+    '<div class="ctrl-label" style="font-size:15px;margin-top:14px">The multiplier — two 74194s, add-and-shift right</div>' +
+    '<p class="what" style="margin-top:4px">The two cascaded 74194s form one combined register: the <b>accumulator</b> on top, the <b>multiplier</b> below. Each press reads the multiplier\'s lowest bit: through the gating ANDs it selects the multiplicand <b>A</b> or <b>0000</b> into the adder, the adder adds it to the accumulator, and the whole 9-bit field — <b>carry, sum, multiplier</b> — shifts right one place. Four presses and the pair holds the product.</p>' +
+    '<div class="seq-state" id="csMultState" style="margin-top:4px"></div>' +
+    '<div class="ctrl-label">Operands — tap a bit to flip it (flipping a bit reloads the machine)</div>' +
+    '<div class="share-row" id="csMultBitsA" style="margin-top:4px;align-items:center"></div>' +
+    '<div class="share-row" id="csMultBitsB" style="align-items:center"></div>' +
+    '<div class="share-row"><button type="button" class="btn primary" id="csMultClock">Press clock — one edge ▸</button><button type="button" class="btn" id="csMultLoad">Load / Reset</button></div>' +
+    '<div class="decimal-line" id="csMultOut" aria-live="polite"></div>' +
+    '<div class="ctrl-label" style="margin-top:12px">Steps taken — press by press</div>' +
+    '<div class="tt-wrap" style="max-height:300px"><table class="tt" id="csMultLog"></table></div>' +
+    '<div id="csMultChkHost"></div>' +
+
+    '<div class="ctrl-label" style="font-size:15px;margin-top:18px">The divider — one 74194 walks the dividend out and the quotient in</div>' +
+    '<p class="what" style="margin-top:4px">Restoring division, one trial per press. The dividend 74194 <b>shifts left</b>: its top bit joins the remainder to form the trial value <b>S = (R ≪ 1) | next bit</b>, the subtractor tries <b>T = S − D</b>, and the quotient bit is <b>not-borrow</b>. The <b>74157</b> then feeds the remainder register <b>T</b> if the subtraction succeeded or <b>S</b> if it borrowed — the restore — and the quotient bit enters the bottom of the dividend register, so after four presses that register holds the quotient. Divide by zero is stated, not hidden: with <b>D = 0</b> the trial subtraction never borrows, so <b>Q = 1111</b>, exactly as the board produces it.</p>' +
+    '<div class="seq-state" id="csDivState" style="margin-top:4px"></div>' +
+    '<div class="ctrl-label">Operands — tap a bit to flip it (flipping a bit reloads the machine)</div>' +
+    '<div class="share-row" id="csDivBitsA" style="margin-top:4px;align-items:center"></div>' +
+    '<div class="share-row" id="csDivBitsD" style="align-items:center"></div>' +
+    '<div class="share-row"><button type="button" class="btn primary" id="csDivClock">Press clock — one edge ▸</button><button type="button" class="btn" id="csDivLoad">Load / Reset</button></div>' +
+    '<div class="decimal-line" id="csDivOut" aria-live="polite"></div>' +
+    '<div class="ctrl-label" style="margin-top:12px">Steps taken — press by press</div>' +
+    '<div class="tt-wrap" style="max-height:300px"><table class="tt" id="csDivLog"></table></div>' +
+    '<div id="csDivChkHost"></div>' +
+
+    '<div class="ctrl-label" style="font-size:15px;margin-top:18px">The same machines, two ways of counting chips</div>' +
+    '<div class="tt-wrap" style="max-height:300px"><table class="tt"><thead><tr><th>Machine</th><th>As built on the breadboard</th><th>The textbook-chip build</th></tr></thead><tbody>' +
+    '<tr><td><b>Sequential multiplier</b></td><td>' + FIG.multBoardChips + ' chips — 9 gate packages + 8× 7474 — with ' + FIG.multBoardGates + ' gates in its netlist</td><td><b>6 packages</b> — 2× 74194, 1× 74175, 1× 74161, 1× 74283 for the adder, 1× 7408 for the bit-gating ANDs</td></tr>' +
+    '<tr><td><b>Sequential divider</b></td><td>' + FIG.divBoardChips + ' chips, ' + FIG.divBoardGates + ' gates in its netlist</td><td><b>7 packages</b> — 2× 74194, 1× 74175, 1× 74161, 1× 74157, plus a 74283 and a 7404 wired as the trial subtractor</td></tr>' +
+    '</tbody></table></div>' +
+    '<p class="what" style="margin-top:8px">The gates do not vanish: they move inside the packages. A 74194 is itself a few dozen gates, drawn once by the manufacturer instead of by you. The breadboard builds spend their ' + (FIG.multBoardChips + FIG.divBoardChips) + ' chips exposing every shift and every restore, which is the right trade while you are learning what a shift is — and the wrong one once you are building the machine. If you build the textbook versions in metal, the package lists in the right-hand column are the parts list: six packages for the multiplier, seven for the divider, plus switches, LEDs and 330 Ω resistors as on the boards.</p>' +
+    '<div class="share-row"><span style="font-size:13.5px">The same machines, the long way, on the bench:</span>' +
+    '<button type="button" class="btn" id="csToMultBoard">Sequential multiplier — the 7474 breadboard board →</button>' +
+    '<button type="button" class="btn" id="csToDivBoard">Sequential divider — the 7474 breadboard board →</button></div>' +
+    '<p class="proj-teaches"><b>Teaches:</b> what MSI integration actually buys — the algorithm, the sequencing and the Done freeze are unchanged; only the packaging of the shifts, the held operand and the restore steering changes — and what it costs: the inside of a 74194 does not show you its bits moving. Load-time check: the multiplier agrees with ordinary multiplication and with the breadboard board\'s own netlist model on all ' + CM_V.total + ' (A, B) pairs (' + CM_V.passed + '/' + CM_V.total + '); the divider matches the board on all ' + CD_V.total + ' (A, D) pairs (' + CD_V.passed + '/' + CD_V.total + '), quotient/remainder arithmetic holds on all ' + CD_V.arithTotal + ' nonzero-divisor pairs, and both machines freeze after Done and reset cleanly (window.__chipSeqCheck).</p>';
+  const jkCardEl = $N("jkCard");
+  if (jkCardEl && jkCardEl.parentNode) jkCardEl.parentNode.insertBefore(csCard, jkCardEl.nextSibling);
+  else {
+    const seqViewEl = $N("seqView");
+    if (seqViewEl && seqViewEl.parentNode) seqViewEl.parentNode.insertBefore(csCard, seqViewEl.nextSibling);
+    else { const cv = $N("circuitsView"); if (cv) cv.appendChild(csCard); }
+  }
+  csCard.querySelector("#csToMultBoard").addEventListener("click", () => { if (!clickMenuKeyN("bb-multseq")) { try { bbSetProject("multseq"); } catch (e) {} jumpN("stageTitle"); } });
+  csCard.querySelector("#csToDivBoard").addEventListener("click", () => { if (!clickMenuKeyN("bb-divseq")) { try { bbSetProject("divseq"); } catch (e) {} jumpN("stageTitle"); } });
+
+  function cellRowN(host, cells) {
+    host.innerHTML = "";
+    cells.forEach(([v, k, on]) => {
+      const c = document.createElement("div"); c.className = "seq-cell" + (on ? " one" : "");
+      c.innerHTML = "<b>" + v + '</b><span style="font-size:11px">' + k + "</span>"; host.appendChild(c);
+    });
+  }
+  function bitRowN(host, label, bits, prefix, onFlip) {
+    host.innerHTML = "";
+    const s = document.createElement("span"); s.style.fontSize = "13.5px"; s.textContent = label; host.appendChild(s);
+    bits.forEach((bitName, i) => {
+      const b = document.createElement("button"); b.type = "button"; b.className = "btn"; b.id = prefix + i;
+      b.addEventListener("click", () => onFlip(i));
+      host.appendChild(b);
+    });
+  }
+
+  /* ---------------- multiplier UI ---------------- */
+  const cm = { A: 13, B: 15, st: csMultInit(13, 15), steps: [] };
+  bitRowN(csCard.querySelector("#csMultBitsA"), "Multiplicand A — in the 74175:", ["A3", "A2", "A1", "A0"], "csMa", i => { cm.A ^= (8 >> i); cmLoad("A flipped to " + cm.A + " and the machine reloaded — paused at count 0."); });
+  bitRowN(csCard.querySelector("#csMultBitsB"), "Multiplier B — loads the low 74194:", ["B3", "B2", "B1", "B0"], "csMb", i => { cm.B ^= (8 >> i); cmLoad("B flipped to " + cm.B + " and the machine reloaded — paused at count 0."); });
+  function cmSyncBits() {
+    ["A", "B"].forEach(which => {
+      const val = cm[which];
+      for (let i = 0; i < 4; i++) {
+        const b = csCard.querySelector("#csM" + which.toLowerCase() + i);
+        if (b) b.textContent = which + (3 - i) + ": " + ((val >> (3 - i)) & 1);
+      }
+    });
+  }
+  function cmRender(note) {
+    const st = cm.st, done = st.count >= 4, last = cm.steps.length ? cm.steps[cm.steps.length - 1] : null;
+    cellRowN(csCard.querySelector("#csMultState"), [
+      [binN(st.A, 4), "74175 · multiplicand A = " + st.A + " — held still", false],
+      [binN(st.H, 4) + " " + binN(st.L, 4), "74194 ×2 · accumulator · multiplier — shifts right", false],
+      [last ? last.info.cout + " " + binN(last.info.S, 4) : "– ––––", "gate-built adder · carry · sum of the last press", false],
+      [st.count + " / 4", "74161 · iteration count", false],
+      [done ? "DONE" : "···", "74161 · Done — clock gated", done]
+    ]);
+    cmSyncBits();
+    csCard.querySelector("#csMultOut").innerHTML = note || (done
+      ? "Done — the 74161 reached 4 and the clock is gated; further presses change nothing. <b>" + st.A + " × " + st.B + " = " + csMultProduct(st) + "</b> — the 74194 pair holds " + binN(st.H, 4) + " " + binN(st.L, 4) + "."
+      : "Press " + (st.count + 1) + " of 4 next: the multiplier's lowest bit is <b>" + (st.L & 1) + "</b>, so the gating ANDs pass " + ((st.L & 1) ? "<b>A = " + st.A + "</b>" : "<b>0000</b>") + " to the adder. The pair currently holds " + binN(st.H, 4) + " " + binN(st.L, 4) + " (" + csMultProduct(st) + " so far — the product is only finished at Done).");
+    const t = csCard.querySelector("#csMultLog");
+    let h = "<thead><tr><th>Press</th><th>Multiplier bit</th><th>Added</th><th>Sum C·S</th><th>Accumulator H after shift</th><th>Multiplier L after shift</th><th>Count</th></tr></thead><tbody>";
+    if (!cm.steps.length) h += '<tr><td colspan="7">No presses yet — loaded paused: accumulator 0000, multiplier ' + binN(st.L, 4) + ' (B = ' + st.B + '), count 0.</td></tr>';
+    cm.steps.forEach((s, i) => {
+      h += "<tr><td>" + (i + 1) + "</td><td>" + s.info.bit + "</td><td>" + (s.info.bit ? binN(s.info.added, 4) + " (A)" : "0000") + "</td><td>" + s.info.cout + " " + binN(s.info.S, 4) + '</td><td>' + binN(s.after.H, 4) + "</td><td>" + binN(s.after.L, 4) + '</td><td class="out">' + s.after.count + "</td></tr>";
+    });
+    t.innerHTML = h + "</tbody>";
+  }
+  function cmLoad(note) { cm.st = csMultInit(cm.A, cm.B); cm.steps = []; cmRender(note); }
+  csCard.querySelector("#csMultClock").addEventListener("click", () => {
+    const r = csMultStep(cm.st);
+    if (!r.info) { cmRender("Done already — the 74161 is at 4, the clock is gated, and this press changed nothing. Load / Reset to run another multiplication."); return; }
+    cm.st = r.st;
+    cm.steps.push({ info: r.info, after: { H: r.st.H, L: r.st.L, count: r.st.count } });
+    cmRender("Press " + r.st.count + ": multiplier bit " + r.info.bit + (r.info.bit ? " → the ANDs passed A = " + cm.A : " → the ANDs passed 0000") + "; the adder produced C·S = " + r.info.cout + " " + binN(r.info.S, 4) + ", and the 9-bit field " + binN(r.info.field, 9) + " shifted right into the 74194 pair." + (r.st.count >= 4 ? " That was the fourth press — Done." : ""));
+  });
+  csCard.querySelector("#csMultLoad").addEventListener("click", () => cmLoad("Loaded and reset: A = " + cm.A + " in the 74175, B = " + cm.B + " in the low 74194, accumulator cleared, 74161 at 0 — paused, waiting for the clock."));
+  cmRender("Loaded paused, as every simulation on this site loads: A = 13 in the 74175, B = 15 in the low 74194 — the worked example, 13 × 15. Press the clock four times and watch the pair fill with 195.");
+  checkBlockN(csCard.querySelector("#csMultChkHost"), "csmChk");
+  let csmQn = 0;
+  function csmQuestion() {
+    const rng = rngN(4101 + csmQn * 97);
+    const A = 2 + Math.floor(rng() * 14), B = 2 + Math.floor(rng() * 14);
+    const expected = A * B;
+    csCard.querySelector("#csmChkQ").textContent = "Predict, then check: A = " + A + " sits in the 74175 and B = " + B + " in the multiplier register. Four clock presses later — Done lit — what product do the two 74194s hold?";
+    const cand = Array.from(new Set([expected, expected + A, expected - B, (A + 1) * B, expected + 16])).filter(v => v >= 0).slice(0, 4);
+    if (!cand.includes(expected)) cand[0] = expected;
+    for (let i = cand.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); const tmp = cand[i]; cand[i] = cand[j]; cand[j] = tmp; }
+    const host = csCard.querySelector("#csmChkOpts"), fb = csCard.querySelector("#csmChkFb");
+    fb.textContent = "";
+    optBtnsN(host, cand.map(v => String(v)), i => {
+      fbSetN(fb, cand[i] === expected, cand[i] === expected
+        ? "Right — add-and-shift adds A once for each 1 bit in B, so four presses always land on A × B = " + A + " × " + B + " = " + expected + ", whatever the intermediate shifts looked like."
+        : "Not that — the machine adds A exactly where B has a 1 bit and shifts between adds; after four presses the pair holds the full product A × B = " + expected + ". Run it above with these operands and read the log.");
+    });
+    window.__csmQuestion = { A, B, expected };
+  }
+  csCard.querySelector("#csmChkNewQ").addEventListener("click", () => { csmQn++; csmQuestion(); });
+  csmQuestion();
+
+  /* ---------------- divider UI ---------------- */
+  const cd = { A: 13, D: 3, st: csDivInit(13, 3), steps: [] };
+  bitRowN(csCard.querySelector("#csDivBitsA"), "Dividend A — loads the dividend 74194:", ["A3", "A2", "A1", "A0"], "csDa", i => { cd.A ^= (8 >> i); cdLoad("A flipped to " + cd.A + " and the machine reloaded — paused at count 0."); });
+  bitRowN(csCard.querySelector("#csDivBitsD"), "Divisor D — in the 74175 (low two bits, as on the board):", ["D1", "D0"], "csDd", i => { cd.D ^= (2 >> i); cdLoad("D flipped to " + cd.D + " and the machine reloaded — paused at count 0." + (cd.D === 0 ? " D = 0: watch what the hardware does with it — it is stated, not hidden." : "")); });
+  function cdSyncBits() {
+    for (let i = 0; i < 4; i++) { const b = csCard.querySelector("#csDa" + i); if (b) b.textContent = "A" + (3 - i) + ": " + ((cd.A >> (3 - i)) & 1); }
+    for (let i = 0; i < 2; i++) { const b = csCard.querySelector("#csDd" + i); if (b) b.textContent = "D" + (1 - i) + ": " + ((cd.D >> (1 - i)) & 1); }
+  }
+  function cdRender(note) {
+    const st = cd.st, done = st.count >= 4, last = cd.steps.length ? cd.steps[cd.steps.length - 1] : null;
+    cellRowN(csCard.querySelector("#csDivState"), [
+      [binN(st.D, 2), "74175 · divisor D = " + st.D + " — held still", false],
+      [binN(st.Areg, 4), done ? "74194 · quotient register (was the dividend)" : "74194 · dividend → quotient — shifts left", false],
+      [binN(st.R, 2), "74194 · remainder register R", false],
+      [last ? binN(last.info.S, 3) + " − " + binN(st.D, 2) + (last.info.borrow ? " → borrow" : " → " + binN(last.info.T, 3)) : "—", "trial subtractor (gate-built) · S − D, last press", false],
+      [last ? binN(last.info.newR, 2) + (last.info.borrow ? " (S — restored)" : " (T — kept)") : "—", "74157 · selector output → remainder register", false],
+      [st.count + " / 4", "74161 · iteration count", false],
+      [done ? "DONE" : "···", "74161 · Done — clock gated", done]
+    ]);
+    cdSyncBits();
+    csCard.querySelector("#csDivOut").innerHTML = note || (done
+      ? (st.D === 0
+        ? "Done — and the divisor was <b>0</b>: the trial subtraction S − 0 never borrows, so every quotient bit came out 1 and <b>Q = 1111 (15)</b>, with R = " + st.R + " (the dividend's low two bits). The hardware states this; nothing is hidden or special-cased."
+        : "Done — the 74161 reached 4 and the clock is gated; further presses change nothing. <b>" + st.A + " ÷ " + st.D + ": quotient Q = " + st.Areg + " (" + binN(st.Areg, 4) + "), remainder R = " + st.R + " (" + binN(st.R, 2) + ")</b> — check: " + st.D + " × " + st.Areg + " + " + st.R + " = " + (st.D * st.Areg + st.R) + ".")
+      : "Press " + (st.count + 1) + " of 4 next: the dividend register's top bit is <b>" + ((st.Areg >> 3) & 1) + "</b>, so S will be (R ≪ 1) | " + ((st.Areg >> 3) & 1) + " = " + binN(((st.R << 1) | ((st.Areg >> 3) & 1)) & 7, 3) + ", and the subtractor will try S − " + st.D + ".");
+    const t = csCard.querySelector("#csDivLog");
+    let h = "<thead><tr><th>Press</th><th>Dividend bit in</th><th>S</th><th>T = S − D</th><th>Borrow?</th><th>Quotient bit</th><th>R after (74157 out)</th><th>Dividend reg after</th></tr></thead><tbody>";
+    if (!cd.steps.length) h += '<tr><td colspan="8">No presses yet — loaded paused: dividend ' + binN(st.Areg, 4) + ' (A = ' + st.A + '), remainder 00, count 0.</td></tr>';
+    cd.steps.forEach((s, i) => {
+      h += "<tr><td>" + (i + 1) + "</td><td>" + s.info.abit + "</td><td>" + binN(s.info.S, 3) + "</td><td>" + (s.info.borrow ? "—" : binN(s.info.T, 3)) + "</td><td>" + (s.info.borrow ? "yes — restore" : "no") + '</td><td>' + s.info.qi + "</td><td>" + binN(s.after.R, 2) + "</td><td>" + binN(s.after.Areg, 4) + "</td></tr>";
+    });
+    t.innerHTML = h + "</tbody>";
+  }
+  function cdLoad(note) { cd.st = csDivInit(cd.A, cd.D); cd.steps = []; cdRender(note); }
+  csCard.querySelector("#csDivClock").addEventListener("click", () => {
+    const r = csDivStep(cd.st);
+    if (!r.info) { cdRender("Done already — the 74161 is at 4, the clock is gated, and this press changed nothing. Load / Reset to run another division."); return; }
+    cd.st = r.st;
+    cd.steps.push({ info: r.info, after: { R: r.st.R, Areg: r.st.Areg, count: r.st.count } });
+    cdRender("Press " + r.st.count + ": S = " + binN(r.info.S, 3) + ", T = S − " + cd.D + (r.info.borrow ? " borrows, so the quotient bit is 0 and the 74157 restores S — the remainder register takes " + binN(r.info.newR, 2) + " (the low two bits of S)." : " = " + binN(r.info.T, 3) + ", no borrow: quotient bit 1, and the 74157 keeps T — the remainder register takes " + binN(r.info.newR, 2) + ".") + (r.st.count >= 4 ? " That was the fourth press — Done." : ""));
+  });
+  csCard.querySelector("#csDivLoad").addEventListener("click", () => cdLoad("Loaded and reset: A = " + cd.A + " in the dividend 74194, D = " + cd.D + " in the 74175, remainder cleared, 74161 at 0 — paused, waiting for the clock."));
+  cdRender("Loaded paused, as every simulation on this site loads: A = 13 in the dividend 74194, D = 3 in the 74175 — the worked example, 13 ÷ 3. Two of the four presses will borrow and restore; watch the 74157 choose S on those presses.");
+  checkBlockN(csCard.querySelector("#csDivChkHost"), "csdChk");
+  let csdQn = 0;
+  function csdQuestion() {
+    const rng = rngN(7331 + csdQn * 53);
+    const kind = Math.floor(rng() * 3);
+    const host = csCard.querySelector("#csdChkOpts"), fb = csCard.querySelector("#csdChkFb");
+    fb.textContent = "";
+    if (kind === 0) {
+      const A = 4 + Math.floor(rng() * 12), D = 2 + Math.floor(rng() * 2);
+      const q = Math.floor(A / D), r = A % D;
+      csCard.querySelector("#csdChkQ").textContent = "Predict, then check: A = " + A + ", D = " + D + ". After four presses (Done), what do the quotient and remainder registers hold?";
+      const cand = Array.from(new Set([q + "," + r, (q + 1) + "," + r, q + "," + ((r + 1) % D), (q - 1) + "," + (r + D > 3 ? r : r + D)]));
+      const labels = cand.map(s => { const p = s.split(","); return "Q = " + p[0] + ", R = " + p[1]; });
+      optBtnsN(host, labels, i => {
+        const ok = cand[i] === q + "," + r;
+        fbSetN(fb, ok, ok ? "Right — " + A + " ÷ " + D + " = " + q + " remainder " + r + ": the dividend register ends holding " + binN(q, 4) + " and the remainder register " + binN(r, 2) + "." : "Not that — run the division: " + A + " ÷ " + D + " gives Q = " + q + ", R = " + r + " (check: " + D + " × " + q + " + " + r + " = " + A + ").");
+      });
+      window.__csdQuestion = { kind, A, D, expected: q + "," + r };
+    } else if (kind === 1) {
+      csCard.querySelector("#csdChkQ").textContent = "Predict, then check: the divisor bits in the 74175 are D = 0. Four presses later, what does the quotient register read?";
+      optBtnsN(host, ["1111 — every trial subtraction succeeded", "0000 — the machine refuses", "The dividend, unchanged", "An error lights and the clock stops"], i => fbSetN(fb, i === 0, i === 0 ? "Right — S − 0 can never borrow, so the quotient bit is 1 on all four presses and Q = 1111 (15). The board produces exactly the same; divide-by-zero here is stated behaviour, not a hidden case." : "Not that — nothing refuses and nothing stops: subtracting 0 never borrows, so every quotient bit is 1 and Q = 1111 after four presses."));
+      window.__csdQuestion = { kind, expected: 0 };
+    } else {
+      const R = Math.floor(rng() * 4), abit = Math.floor(rng() * 2), D = 2 + Math.floor(rng() * 2);
+      const S = ((R << 1) | abit) & 7, T = S - D, borrow = T < 0;
+      if (!borrow) { csdQn++; csdQuestion(); return; }
+      csCard.querySelector("#csdChkQ").textContent = "Predict, then check: on one press, R = " + binN(R, 2) + " and the next dividend bit is " + abit + ", so S = " + binN(S, 3) + "; D = " + D + " and the trial subtraction S − D borrows. What does the 74157 feed the remainder register?";
+      optBtnsN(host, ["The trial difference T", "The shifted trial value S — the restore", "0000 — the register clears", "The divisor D"], i => fbSetN(fb, i === 1, i === 1 ? "Right — a borrow means the subtraction should not have happened, so the selector restores: the remainder register loads S (its low two bits, " + binN(S & 3, 2) + "), undoing the trial, and the quotient bit is 0." : "Not that — borrowing is exactly the restore case: the 74157 selects S, not T, so the remainder register loads " + binN(S & 3, 2) + " and the trial is undone."));
+      window.__csdQuestion = { kind, S, D, expected: 1 };
+    }
+  }
+  csCard.querySelector("#csdChkNewQ").addEventListener("click", () => { csdQn++; csdQuestion(); });
+  csdQuestion();
+
+  /* ---------------- verification handles + self-tests ---------------- */
+  window.__chipSeq = { multInit: csMultInit, multStep: csMultStep, multFinal: csMultFinal, multProduct: csMultProduct,
+    divInit: csDivInit, divStep: csDivStep, divFinal: csDivFinal, multVerify: csMultVerify, divVerify: csDivVerify, figures: FIG };
+  try {
+    window.__chipSeqCheck = { mult: CM_V, div: CD_V, figures: FIG, figuresOk, pass: CM_V.pass && CD_V.pass && figuresOk };
+    window.__roundANSelfTest = { chipMult: CM_V, chipDiv: CD_V, boardFigures: FIG_V };
+    const bad = Object.keys(window.__roundANSelfTest).filter(k => !window.__roundANSelfTest[k].pass);
+    if (bad.length && window.console) console.warn("[Round AN self-test] failures:", bad);
+  } catch (e) { window.__roundANSelfTest = { error: String(e && e.message || e) }; }
+
+  /* ---------------- MENU REGISTRATION + COUNT REBUILD ---------------- */
+  function addMenuItemN(groupName, afterKey, spec) {
+    const list = $N("menuList"); if (!list) return false;
+    if (list.querySelector('[data-key="' + spec.key + '"]')) return false;
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "menu-item"; b.dataset.key = spec.key;
+    b.dataset.search = (spec.label + " " + spec.hint + " " + spec.search).toLowerCase();
+    if (spec.level) b.dataset.uxlevel = spec.level;
+    b.innerHTML = '<span class="mi-dot" aria-hidden="true"></span><span class="mi-label"></span><small></small>';
+    b.querySelector(".mi-label").textContent = spec.label;
+    b.querySelector("small").textContent = spec.hint;
+    b.addEventListener("click", () => { const p = $N("menuPanel"); if (p) p.hidden = true; const mb = $N("menuBtn"); if (mb) mb.setAttribute("aria-expanded", "false"); spec.go(); });
+    if (afterKey) {
+      const anchor = list.querySelector('[data-key="' + afterKey + '"]');
+      if (anchor) { anchor.parentNode.insertBefore(b, anchor.nextSibling); return true; }
+    }
+    let sib = null, inGroup = false;
+    Array.prototype.slice.call(list.children).forEach(el => {
+      if (el.classList.contains("menu-group")) inGroup = (el.dataset.group || "").trim() === groupName;
+      else if (inGroup && el.classList.contains("menu-item")) sib = el;
+    });
+    if (sib) sib.parentNode.insertBefore(b, sib.nextSibling); else list.appendChild(b);
+    return true;
+  }
+  addMenuItemN("Logic & Circuits", "bb-multseq", {
+    key: "chip-seq", label: "Sequential arithmetic, the textbook-chip way",
+    hint: "The sequential multiplier and divider rebuilt with MSI chips: 74194 shift registers, a 74175 holding the fixed operand, a 74161 counting to Done, a 74157 choosing the restore value — same 13 × 15 and 13 ÷ 3, far fewer packages",
+    search: "sequential arithmetic textbook chip msi 74194 universal shift register 74175 quad register 74161 counter done 74157 selector mux quad 2-to-1 74283 adder 7408 multiplier divider restoring division add and shift trial subtraction restore simulator lab",
+    level: "advanced", go: () => { setTopArea("circuits"); syncRail("circuits"); jumpN("chipSeqCard"); }
+  });
+  (function rebuildCountsN() {
+    const RJ = window.__uxRoundJ; if (!RJ) return;
+    const groups = RJ.menuGroups(); const counts = {}; let total = 0;
+    groups.forEach(g => {
+      counts[g.name] = g.items.length; total += g.items.length;
+      const c = g.header.querySelector(".mi-count"); if (c) c.textContent = g.items.length;
+    });
+    window.LAB_MENU = { groups: groups.map(g => ({ name: g.name, items: g.items.map(b => { const l = b.querySelector(".mi-label"); return l ? l.textContent : ""; }) })), count: total };
+    window.LAB_MODULES = { modules: groups.map(g => ({ name: g.name, count: g.items.length })), total };
+    RJ.buildRailAndList(counts);
+    RJ.buildGallery();
+    ["boards", "arch", "os", "org"].forEach(id => {
+      const h = document.querySelector("#module-" + id + " .mh-count");
+      if (!h) return;
+      const name = { boards: "Boards, Modulation & Projects", arch: "Computer Architecture", os: "Operating Systems", org: "Computer Organization" }[id];
+      if (counts[name]) h.textContent = counts[name] + " items";
+    });
+    window.__countsAN = { total, counts };
+  })();
+})();
+
+</script>
