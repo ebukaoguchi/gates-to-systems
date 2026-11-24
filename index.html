@@ -32950,3 +32950,610 @@ window.__CPU_PDF = "data:application/pdf;base64,JVBERi0xLjQKJZOMi54gUmVwb3J0TGFi
   })();
 })();
 </script>
+
+<script>
+"use strict";
+/* ================================================================
+   ROUND AS — three new labs, all in Logic & Circuits:
+   1) fsm-detector — "Sequence detector — build the 1011 machine,
+      Mealy and Moore". The first from-a-spec FSM design lab on
+      the site: the state is the longest suffix of the input so
+      far that is also a prefix of 1011 (the prefix-function
+      idea), so every transition is computed, none is typed in.
+      Moore carries the match as a fifth state (output = state);
+      Mealy folds it into the transition (output fires as the
+      last 1 arrives, one state fewer). Overlapping matches are
+      the point: 1011011 detects twice. Verified at load against
+      a sliding-window reference on every input stream up to
+      12 bits (8,191 streams): both machines flag exactly the
+      windows that equal 1011, and they agree with each other.
+   2) double-dabble — "Double-dabble — binary to BCD, one shift
+      at a time". Shift-and-add-3 for an 8-bit input (0–255, the
+      range the breadboard CPU displays): before each of the
+      eight left shifts, every BCD digit at 5 or more takes +3.
+      Verified exhaustively at load over all 256 inputs: the
+      three digits always read back as the input, every digit
+      stays a legal BCD digit after every step, and the binary
+      field empties exactly at step 8. The card states the tie
+      plainly: the CPU's Stage 6 does this conversion with a
+      programmed EEPROM lookup — a table, not a circuit; this
+      lab is the circuit way, the algorithm the table precomputes.
+   3) predict-quiz — "Predict first — a quiz over the circuits
+      on this site". Twelve questions, each drawn from a circuit
+      that exists on the site, each answer checked at load (from
+      first principles, and against the site's own models where
+      one is exposed: chip-seq, the ring/Johnson model, the BCD
+      adder). A wrong pick does not get a bare cross: every
+      distractor carries its own diagnosis note naming the slip
+      it represents, and every question links to the lab it came
+      from. Placed in Logic & Circuits after Randomised drills:
+      it is assessment over that module's circuits, beside the
+      module's other assessment (the Challenges and the drills),
+      not a Concepts explainer.
+   Everything loads paused.
+   ================================================================ */
+(function roundAS() {
+  const $S = id => document.getElementById(id);
+  function jumpS(id) { const el = id && $S(id); if (el) setTimeout(() => el.scrollIntoView({ behavior: "smooth", block: "start" }), 60); }
+  function clickMenuKeyS(key) { const it = document.querySelector('#menuList .menu-item[data-key="' + key + '"]'); if (it) { it.click(); return true; } return false; }
+  function fbSetS(el, ok, msg) { if (!el) return; el.textContent = (ok ? "✓ " : "✗ ") + msg; el.style.color = ok ? "var(--green)" : "var(--red)"; }
+  function optBtnsS(host, labels, onPick) {
+    host.innerHTML = "";
+    labels.forEach((lab, i) => { const b = document.createElement("button"); b.type = "button"; b.className = "btn"; b.textContent = lab; b.addEventListener("click", () => onPick(i, b)); host.appendChild(b); });
+  }
+  function rngS(seed) { let a = seed >>> 0; return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+  const binS = (v, w) => (v >>> 0).toString(2).padStart(w, "0");
+
+  /* ================================================================
+     1) SEQUENCE DETECTOR — model first.
+     Pattern 1011, overlapping matches allowed. A state is a
+     number n: "the longest suffix of everything seen so far
+     that is also a prefix of 1011 has length n". Moore keeps
+     n = 0..4 (n = 4 is the match state, output 1). Mealy keeps
+     n = 0..3 and raises the output on the transition that
+     completes the pattern, continuing from the longest proper
+     suffix (for 1011 that is length 1: the trailing "1").
+     ================================================================ */
+  const FSM_PAT = [1, 0, 1, 1];
+  function fsmNextLen(len, bit) {
+    const s = FSM_PAT.slice(0, len).concat([bit]);
+    for (let k = Math.min(4, s.length); k >= 0; k--) {
+      let ok = true;
+      for (let i = 0; i < k; i++) if (s[s.length - k + i] !== FSM_PAT[i]) { ok = false; break; }
+      if (ok) return k;
+    }
+    return 0;
+  }
+  /* the continuation after a full match: longest proper suffix
+     of "1011" that is a prefix of "1011" — computed, not typed */
+  function fsmAfterMatch() {
+    for (let k = 3; k >= 0; k--) {
+      let ok = true;
+      for (let i = 0; i < k; i++) if (FSM_PAT[4 - k + i] !== FSM_PAT[i]) { ok = false; break; }
+      if (ok) return k;
+    }
+    return 0;
+  }
+  function mealyStep(state, bit) {
+    const nl = fsmNextLen(state, bit);
+    if (nl === 4) return { next: fsmAfterMatch(), out: 1 };
+    return { next: nl, out: 0 };
+  }
+  function mooreStep(state, bit) { return fsmNextLen(state, bit); }
+  function fsmVerify() {
+    let streams = 0, mooreOk = true, mealyOk = true, agreeOk = true;
+    for (let L = 0; L <= 12; L++) {
+      for (let mask = 0; mask < (1 << L); mask++) {
+        const bits = []; for (let i = L - 1; i >= 0; i--) bits.push((mask >> i) & 1);
+        streams++;
+        let ms = 0; const mDet = [];
+        bits.forEach((b, i) => { ms = mooreStep(ms, b); if (ms === 4) mDet.push(i); });
+        let ys = 0; const yDet = [];
+        bits.forEach((b, i) => { const r = mealyStep(ys, b); if (r.out) yDet.push(i); ys = r.next; });
+        const ref = [];
+        bits.forEach((b, i) => { if (i >= 3 && bits[i - 3] === 1 && bits[i - 2] === 0 && bits[i - 1] === 1 && bits[i] === 1) ref.push(i); });
+        const eq = (a, c) => a.length === c.length && a.every((v, j) => v === c[j]);
+        if (!eq(mDet, ref)) mooreOk = false;
+        if (!eq(yDet, ref)) mealyOk = false;
+        if (!eq(mDet, yDet)) agreeOk = false;
+      }
+    }
+    const demo = [1, 0, 1, 1, 0, 1, 1];
+    let s = 0; const dDet = [];
+    demo.forEach((b, i) => { s = mooreStep(s, b); if (s === 4) dDet.push(i); });
+    const overlapOk = dDet.length === 2 && dDet[0] === 3 && dDet[1] === 6;
+    return { streams, mooreOk, mealyOk, agreeOk, overlapOk, afterMatch: fsmAfterMatch(),
+      pass: mooreOk && mealyOk && agreeOk && overlapOk && streams === 8191 && fsmAfterMatch() === 1 };
+  }
+  const FSM_V = fsmVerify();
+
+  const fsm = { variant: "moore", state: 0, bit: 1, steps: 0, hist: [] };
+  const FSM_SEEN = ["", "1", "10", "101", "1011"];
+  const fsmSec = document.createElement("section");
+  fsmSec.className = "card stage-card"; fsmSec.id = "fsmCard"; fsmSec.style.marginTop = "16px";
+  fsmSec.innerHTML =
+    "<h2>Sequence detector — build the 1011 machine, Mealy and Moore</h2>" +
+    '<p class="what">Every circuit before this one answers the present: outputs from inputs, now. A <b>finite-state machine</b> answers the past as well — it remembers. The spec here is one sentence: <b>raise the output whenever the last four bits on the input were 1011</b>, and overlapping matches count (1011011 matches twice). The design move is to let the state be exactly the memory the spec needs: <b>how much of 1011 the input currently ends with</b>. Seen nothing relevant: state S0. Seen a trailing 1: S1. Trailing 10: S2. Trailing 101: S3. Nothing else about the past can matter, because only the trailing piece can still grow into a match. Build it two ways. The <b>Moore</b> machine adds a fifth state, S4, for the completed match, and the output is simply "am I in S4" — the output changes only on a clock edge. The <b>Mealy</b> machine keeps four states and raises the output <b>on the transition</b> that completes the pattern: the moment the final 1 is presented, before the edge, the output is already 1. One state fewer, an output that can move between edges — that trade is the whole Mealy/Moore question, and below you can run the same stream through both and watch where the flag lands. No transition on this card is typed in: each one is computed by asking, for the bits seen so far plus the new bit, what is the longest ending that still starts 1011.</p>' +
+    '<div class="tool-controls"><label>Machine <span class="seg" role="group" aria-label="Machine type" id="fsmModeSeg"><button type="button" data-fsmmode="moore" aria-pressed="true">Moore — 5 states, output = state</button><button type="button" data-fsmmode="mealy" aria-pressed="false">Mealy — 4 states, output on the transition</button></span></label></div>' +
+    '<div class="tool-controls"><label>Next input bit <span class="seg" role="group" aria-label="Next input bit" id="fsmBitSeg"><button type="button" data-fsmbit="0" aria-pressed="false">0</button><button type="button" data-fsmbit="1" aria-pressed="true">1</button></span></label></div>' +
+    '<div class="share-row"><button type="button" class="btn primary" id="fsmStep">Step clock ▸</button>' +
+    '<button type="button" class="btn" id="fsmRun">Run the test stream 01011011</button>' +
+    '<button type="button" class="btn" id="fsmReset">Reset</button></div>' +
+    '<div class="ctrl-label" style="margin-top:12px">The machine, live</div>' +
+    '<div class="seq-state" id="fsmState" style="margin-top:4px"></div>' +
+    '<div class="ac-trace" id="fsmTrace" aria-live="polite"></div>' +
+    '<div class="ctrl-label" style="margin-top:14px">The transition table — generated from the suffix rule, current state highlighted</div>' +
+    '<div class="tt-wrap" style="max-height:320px"><table class="tt" id="fsmTable"></table></div>' +
+    '<div class="decimal-line" id="fsmVerifyLine" aria-live="polite"></div>' +
+    '<div class="lab-check"><span class="lab-check-q" id="fsmQ"></span><span id="fsmOpts" style="display:flex;gap:6px;flex-wrap:wrap"></span><span class="lab-check-fb" id="fsmFb" aria-live="polite"></span></div>' +
+    '<div class="share-row"><button type="button" class="btn" id="fsmNewQ">New question</button>' +
+    '<button type="button" class="btn" data-fsmlink="traffic">The traffic-light sequencer — an FSM driving lamps →</button>' +
+    '<button type="button" class="btn" data-fsmlink="cpu">The breadboard CPU — its control unit is this, grown up →</button></div>' +
+    '<p class="cp-formal adv-only">Formally: the state is the length of the longest suffix of the input history that is a prefix of the pattern — the prefix function of pattern-matching (the same computation as the failure table in Knuth–Morris–Pratt), which is why the machine never needs to restart from zero on a mismatch: a failed bit demotes it to the longest suffix that is still a prefix, here S3 --0--> S2 rather than S0. The Moore machine has 5 states and a registered output; the Mealy machine has 4 states and an output that is a function of state and input, so it can assert a cycle-fraction earlier and can also glitch if the input moves mid-cycle — the standard reasons control units are usually drawn Moore (or with a registered Mealy output). The two machines here are verified equivalent as detectors: on all 8,191 streams up to 12 bits they flag exactly the same input positions.</p>';
+  const bcdElAS = $S("bcdCard");
+  if (bcdElAS && bcdElAS.parentNode) bcdElAS.parentNode.insertBefore(fsmSec, bcdElAS.nextSibling);
+  else { const cv = $S("circuitsView"); if (cv) cv.appendChild(fsmSec); }
+  fsmSec.querySelectorAll("[data-fsmlink]").forEach(b => b.addEventListener("click", () => {
+    if (b.dataset.fsmlink === "traffic") { if (!clickMenuKeyS("ux-traffic2")) jumpS("fsmCard"); }
+    else { if (!clickMenuKeyS("bb-cpu")) jumpS("fsmCard"); }
+  }));
+  function fsmOutNow() {
+    if (fsm.variant === "moore") return fsm.state === 4 ? 1 : 0;
+    return mealyStep(fsm.state, fsm.bit).out;
+  }
+  function fsmRender() {
+    fsmSec.querySelectorAll("#fsmModeSeg button").forEach(b => b.setAttribute("aria-pressed", b.dataset.fsmmode === fsm.variant ? "true" : "false"));
+    fsmSec.querySelectorAll("#fsmBitSeg button").forEach(b => b.setAttribute("aria-pressed", String(fsm.bit) === b.dataset.fsmbit ? "true" : "false"));
+    const host = fsmSec.querySelector("#fsmState"); host.innerHTML = "";
+    const cells = [
+      ["S" + fsm.state, "state" + (fsm.variant === "moore" ? " of 5" : " of 4"), false],
+      [FSM_SEEN[fsm.state] === "" ? "—" : FSM_SEEN[fsm.state], "input ends with", fsm.state > 0],
+      [String(fsmOutNow()), fsm.variant === "moore" ? "output (from the state)" : "output with bit " + fsm.bit + " presented", fsmOutNow() === 1],
+      [String(fsm.bit), "next input bit", fsm.bit === 1]
+    ];
+    cells.forEach(([v, role, on]) => {
+      const c = document.createElement("div"); c.className = "seq-cell" + (on ? " one" : "");
+      c.innerHTML = "<b>" + v + '</b><span class="ry-role">' + role + "</span>"; host.appendChild(c);
+    });
+    const tr = fsmSec.querySelector("#fsmTrace");
+    if (!fsm.hist.length) tr.textContent = "Loaded and waiting in S0. Present a bit, press Step clock, and the machine keeps exactly the trailing piece of 1011 it has seen.";
+    else tr.innerHTML = fsm.hist.map(h => h.bit + " → S" + h.state + (h.detect ? ' <span class="fsm-detect">⚑ 1011</span>' : "")).join(" · ") +
+      " — " + fsm.steps + " edge" + (fsm.steps === 1 ? "" : "s") + ", " + fsm.hist.filter(h => h.detect).length + " detection(s) so far.";
+    let th = "<thead><tr><th>State</th><th>Input ends with</th><th>On 0</th><th>On 1</th>" + (fsm.variant === "moore" ? "<th>Output</th>" : "") + "</tr></thead><tbody>";
+    const nStates = fsm.variant === "moore" ? 5 : 4;
+    for (let sIdx = 0; sIdx < nStates; sIdx++) {
+      let row = '<tr' + (sIdx === fsm.state ? ' class="active"' : "") + "><td>S" + sIdx + "</td><td>" + (FSM_SEEN[sIdx] === "" ? "nothing useful" : FSM_SEEN[sIdx]) + "</td>";
+      [0, 1].forEach(bit => {
+        if (fsm.variant === "moore") row += "<td>→ S" + mooreStep(sIdx, bit) + "</td>";
+        else { const r = mealyStep(sIdx, bit); row += "<td>→ S" + r.next + ", out " + r.out + "</td>"; }
+      });
+      if (fsm.variant === "moore") row += "<td>" + (sIdx === 4 ? "1" : "0") + "</td>";
+      th += row + "</tr>";
+    }
+    fsmSec.querySelector("#fsmTable").innerHTML = th + "</tbody>";
+    fsmSec.querySelector("#fsmVerifyLine").textContent = "Self-test at load: both machines were run against a sliding-window reference on all " + FSM_V.streams.toLocaleString("en-US") + " input streams up to 12 bits — every detection agreed, including the double detection in 1011011 (window.__fsmCheck).";
+  }
+  function fsmDoStep() {
+    let detect = false;
+    if (fsm.variant === "moore") { fsm.state = mooreStep(fsm.state, fsm.bit); detect = fsm.state === 4; }
+    else { const r = mealyStep(fsm.state, fsm.bit); detect = r.out === 1; fsm.state = r.next; }
+    fsm.steps++; fsm.hist.push({ bit: fsm.bit, state: fsm.state, detect });
+    fsmRender();
+  }
+  fsmSec.querySelectorAll("#fsmModeSeg button").forEach(b => b.addEventListener("click", () => { fsm.variant = b.dataset.fsmmode; fsm.state = 0; fsm.steps = 0; fsm.hist = []; fsmRender(); fsmQuestion(); }));
+  fsmSec.querySelectorAll("#fsmBitSeg button").forEach(b => b.addEventListener("click", () => { fsm.bit = Number(b.dataset.fsmbit); fsmRender(); }));
+  fsmSec.querySelector("#fsmStep").addEventListener("click", fsmDoStep);
+  fsmSec.querySelector("#fsmReset").addEventListener("click", () => { fsm.state = 0; fsm.steps = 0; fsm.hist = []; fsmRender(); });
+  fsmSec.querySelector("#fsmRun").addEventListener("click", () => {
+    fsm.state = 0; fsm.steps = 0; fsm.hist = [];
+    [0, 1, 0, 1, 1, 0, 1, 1].forEach(bit => { fsm.bit = bit; fsmDoStep(); });
+    fsm.bit = 1; fsmRender();
+  });
+  let fsmQn = 0;
+  function fsmQuestion() {
+    const rng = rngS(777 + fsmQn * 131);
+    const variant = fsm.variant;
+    const nStates = variant === "moore" ? 5 : 4;
+    const state = Math.floor(rng() * (variant === "moore" ? 4 : 4));
+    const bit = Math.floor(rng() * 2);
+    const expected = variant === "moore" ? mooreStep(state, bit) : mealyStep(state, bit).next;
+    const outFires = variant === "mealy" && mealyStep(state, bit).out === 1;
+    const pool = [];
+    for (let sIdx = 0; sIdx < nStates; sIdx++) if (sIdx !== expected) pool.push(sIdx);
+    const distract = pool.slice(0, 3);
+    const labels = [expected].concat(distract).map(v => "S" + v);
+    for (let i = labels.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); const t = labels[i]; labels[i] = labels[j]; labels[j] = t; }
+    fsmSec.querySelector("#fsmQ").textContent = "Predict, then check: the " + (variant === "moore" ? "Moore" : "Mealy") + " machine sits in S" + state + " (input ends with " + (FSM_SEEN[state] === "" ? "nothing useful" : FSM_SEEN[state]) + "). The next bit is " + bit + ". Which state does the clock edge leave it in?";
+    const fb = fsmSec.querySelector("#fsmFb");
+    optBtnsS(fsmSec.querySelector("#fsmOpts"), labels, i => {
+      const picked = Number(labels[i].slice(1));
+      if (picked === expected) {
+        fbSetS(fb, true, "Right — S" + expected + ": after " + (FSM_SEEN[state] === "" ? "nothing" : FSM_SEEN[state]) + " and a " + bit + ", the input ends with " + (FSM_SEEN[expected] === "" ? "nothing useful" : FSM_SEEN[expected]) + ", the longest ending that still starts 1011." + (outFires ? " And in the Mealy machine the output fires on this very transition, before the edge." : ""));
+      } else {
+        let note;
+        if (picked === 0 && expected !== 0) note = "That restarts the match from nothing — the slip this design exists to prevent. A mismatch does not erase the past: the input still ends with " + (FSM_SEEN[expected] === "" ? "nothing useful" : FSM_SEEN[expected]) + ", so the machine keeps that much.";
+        else if (picked === expected + 1) note = "One state too far: S" + picked + " claims the input ends with " + FSM_SEEN[picked] + ", one matching bit more than it actually has. Count the ending, not the intention: it ends with " + (FSM_SEEN[expected] === "" ? "nothing useful" : FSM_SEEN[expected]) + ", so S" + expected + ".";
+        else if (picked === expected - 1) note = "One state short: you dropped a bit that is still part of the match. The input ends with " + (FSM_SEEN[expected] === "" ? "nothing useful" : FSM_SEEN[expected]) + ", so the state is S" + expected + ", not S" + picked + ".";
+        else note = "S" + picked + " would mean the input ends with " + (FSM_SEEN[picked] === "" ? "nothing useful" : FSM_SEEN[picked]) + ". It ends with " + (FSM_SEEN[expected] === "" ? "nothing useful" : FSM_SEEN[expected]) + " — the longest ending that is also a start of 1011 — so S" + expected + ".";
+        fbSetS(fb, false, note);
+      }
+    });
+    window.__fsmQuestion = { variant, shown: "S" + state, bit, expected: "S" + expected };
+  }
+  fsmSec.querySelector("#fsmNewQ").addEventListener("click", () => { fsmQn++; fsmQuestion(); });
+  fsmRender(); fsmQuestion();
+
+  /* ================================================================
+     2) DOUBLE-DABBLE — model first.
+     One 20-bit combined register: three BCD nibbles (hundreds,
+     tens, ones) above the 8-bit binary remainder. One step:
+     every BCD digit at 5 or more takes +3, then the whole
+     register shifts left one place and the top binary bit
+     enters the ones digit. Eight steps empty the binary field
+     and the nibbles hold the decimal digits.
+     ================================================================ */
+  function dabbleInit(v) { return { bcd: [0, 0, 0], bin: v & 255, steps: 0 }; }
+  function dabbleStep(st) {
+    if (st.steps >= 8) return { st, info: null };
+    const corrFlags = st.bcd.map(d => d >= 5);
+    const corr = st.bcd.map((d, i) => corrFlags[i] ? d + 3 : d);
+    let reg = 0;
+    corr.forEach(d => { reg = (reg << 4) | d; });
+    reg = ((reg << 8) | st.bin) << 1;
+    const nbcd = [((reg >> 16) & 15), ((reg >> 12) & 15), ((reg >> 8) & 15)];
+    return { st: { bcd: nbcd, bin: reg & 255, steps: st.steps + 1 }, info: { corrFlags, corr, before: st.bcd.slice() } };
+  }
+  function dabbleVerify() {
+    let passed = 0, total = 0, digitsOk = true, emptyOk = true;
+    for (let v = 0; v < 256; v++) {
+      total++;
+      let st = dabbleInit(v);
+      for (let i = 0; i < 8; i++) {
+        st = dabbleStep(st).st;
+        if (st.bcd.some(d => d > 9)) digitsOk = false;
+      }
+      if (st.bin !== 0) emptyOk = false;
+      if (st.bcd[0] * 100 + st.bcd[1] * 10 + st.bcd[2] === v && st.steps === 8) passed++;
+    }
+    return { passed, total, digitsOk, emptyOk, pass: passed === 256 && total === 256 && digitsOk && emptyOk };
+  }
+  const DB_V = dabbleVerify();
+
+  const dab = { value: 42, st: null, log: [] };
+  dab.st = dabbleInit(dab.value);
+  const dabSec = document.createElement("section");
+  dabSec.className = "card stage-card"; dabSec.id = "dabbleCard"; dabSec.style.marginTop = "16px";
+  dabSec.innerHTML =
+    "<h2>Double-dabble — binary to BCD, one shift at a time</h2>" +
+    '<p class="what">The breadboard CPU ends at a decimal display, and its Stage 6 converts binary to decimal with a <b>programmed EEPROM lookup</b>: a 2,048-byte table, not a circuit. This lab is the circuit way to the same conversion — the algorithm the table is precomputing. <b>Double-dabble</b> (shift-and-add-3) converts an 8-bit binary number, <b>0 to 255</b> — the CPU\'s display range — into three BCD digits. Keep the binary value and three empty BCD digits in one register. Eight times: <b>before</b> shifting left, add <b>3</b> to every BCD digit that is <b>5 or more</b>; then shift, and the next binary bit drops into the ones digit. Why the +3: the shift is about to double every digit, and a digit at 5 or more would double to 10 or more — not a BCD digit, and short of the 16 a binary nibble would have carried. Adding 3 first makes the doubled value 2d + 6, pre-paying exactly the 6 that decimal counting skips. It is the same 6 the BCD adder adds after the fact; double-dabble pays it before, once per shift. Step through 42 below — the value Program 1 of the breadboard CPU leaves on its display.</p>' +
+    '<div class="ctrl-label">Input — tap a bit to flip it (flipping reloads the converter)</div>' +
+    '<div class="share-row" id="dabBits" style="margin-top:4px;align-items:center"></div>' +
+    '<div class="share-row"><button type="button" class="btn primary" id="dabStep">Step — correct, then shift ▸</button><button type="button" class="btn" id="dabRun">Run all 8 steps</button><button type="button" class="btn" id="dabReset">Reset</button>' +
+    '<button type="button" class="btn" data-dabpreset="42">42 — the CPU\'s Program 1 answer</button><button type="button" class="btn" data-dabpreset="156">156</button><button type="button" class="btn" data-dabpreset="255">255 — the top of the range</button></div>' +
+    '<div class="ctrl-label" style="margin-top:12px">The combined register — BCD digits above, binary remainder below</div>' +
+    '<div class="seq-state" id="dabState" style="margin-top:4px"></div>' +
+    '<div class="ctrl-label" style="margin-top:14px">Step log — the correction is decided before each shift, never after</div>' +
+    '<div class="tt-wrap" style="max-height:300px"><table class="tt" id="dabTable"></table></div>' +
+    '<div class="decimal-line" id="dabResult" aria-live="polite"></div>' +
+    '<div class="lab-check"><span class="lab-check-q" id="dabQ"></span><span id="dabOpts" style="display:flex;gap:6px;flex-wrap:wrap"></span><span class="lab-check-fb" id="dabFb" aria-live="polite"></span></div>' +
+    '<div class="share-row"><button type="button" class="btn" id="dabNewQ">New question</button>' +
+    '<button type="button" class="btn" data-dablink="cpu">The breadboard CPU — the lookup-table way →</button>' +
+    '<button type="button" class="btn" data-dablink="bcd">The BCD adder lab — the same 6, paid afterwards →</button>' +
+    '<button type="button" class="btn" data-dablink="mux">Multiplexed 7-segment — the digits, displayed →</button></div>' +
+    '<p class="cp-formal adv-only">The +3-before is the +6-after in disguise: shifting left multiplies by 2, so adding 3 before the shift adds 6 after it — the same correction constant as the BCD adder, which is no coincidence, since both repair the same gap between a nibble\'s 16 counts and a digit\'s 10. In hardware the algorithm is not a loop but a chain: one conditional add-3 cell per bit position, wired so each cell\'s output feeds the next shift — for 8 bits in, three digits out, the classic array has eight columns of such cells and no clock at all. That is the honest comparison with the CPU\'s EEPROM: the table costs a programmer and three memory chips and answers in one access; the dabble array costs a few dozen gates and answers combinationally. The self-test on this card is exhaustive over the stated range: all 256 inputs convert correctly and no intermediate digit ever leaves 0–9.</p>';
+  fsmSec.parentNode.insertBefore(dabSec, fsmSec.nextSibling);
+  dabSec.querySelectorAll("[data-dablink]").forEach(b => b.addEventListener("click", () => {
+    const k = b.dataset.dablink;
+    if (!clickMenuKeyS(k === "cpu" ? "bb-cpu" : k === "bcd" ? "lab-bcd-adder" : "mux-7seg")) jumpS("dabbleCard");
+  }));
+  function dabRender() {
+    const bitsHost = dabSec.querySelector("#dabBits"); bitsHost.innerHTML = "";
+    const lab = document.createElement("span"); lab.className = "ctrl-label"; lab.style.margin = "0 6px 0 0"; lab.textContent = "Binary " + binS(dab.value, 8) + " = " + dab.value; bitsHost.appendChild(lab);
+    for (let i = 7; i >= 0; i--) {
+      const b = document.createElement("button"); b.type = "button"; b.className = "btn"; b.textContent = String((dab.value >> i) & 1);
+      b.setAttribute("aria-label", "bit " + i);
+      b.addEventListener("click", () => { dab.value ^= (1 << i); dab.st = dabbleInit(dab.value); dab.log = []; dabRender(); });
+      bitsHost.appendChild(b);
+    }
+    const host = dabSec.querySelector("#dabState"); host.innerHTML = "";
+    const names = ["hundreds", "tens", "ones"];
+    dab.st.bcd.forEach((d, i) => {
+      const c = document.createElement("div"); c.className = "seq-cell" + (d ? " one" : "");
+      c.innerHTML = "<b>" + d + " · " + binS(d, 4) + '</b><span class="ry-role">' + names[i] + " digit</span>"; host.appendChild(c);
+    });
+    const bc = document.createElement("div"); bc.className = "seq-cell";
+    bc.innerHTML = "<b>" + binS(dab.st.bin, 8) + '</b><span class="ry-role">binary still to convert · step ' + dab.st.steps + " of 8</span>"; host.appendChild(bc);
+    let th = "<thead><tr><th>Step</th><th>BCD at start</th><th>+3 applied to</th><th>BCD after the shift</th><th>Binary left</th></tr></thead><tbody>";
+    if (!dab.log.length) th += '<tr><td colspan="5">No steps yet — press Step and the first correction-and-shift lands here.</td></tr>';
+    dab.log.forEach((row, i) => {
+      th += "<tr><td>" + (i + 1) + "</td><td>" + row.before.join(" ") + "</td><td>" + row.corrText + "</td><td>" + row.after.join(" ") + "</td><td>" + binS(row.binLeft, 8) + "</td></tr>";
+    });
+    dabSec.querySelector("#dabTable").innerHTML = th + "</tbody>";
+    dabSec.querySelector("#dabResult").textContent = dab.st.steps === 8
+      ? "Done: " + binS(dab.value, 8) + " = " + dab.st.bcd.join("") + " — hundreds " + dab.st.bcd[0] + ", tens " + dab.st.bcd[1] + ", ones " + dab.st.bcd[2] + ". These are the three digits the CPU's EEPROM table stores segment patterns for. Self-test at load: all 256 inputs convert correctly (window.__dabbleCheck)."
+      : "Converting " + dab.value + ": " + dab.st.steps + " of 8 shifts done. Self-test at load: all 256 inputs convert correctly (window.__dabbleCheck).";
+  }
+  function dabDoStep() {
+    const r = dabbleStep(dab.st);
+    if (!r.info) return;
+    dab.st = r.st;
+    const names = ["hundreds", "tens", "ones"];
+    const corrText = r.info.corrFlags.some(Boolean) ? r.info.corrFlags.map((f, i) => f ? names[i] : null).filter(Boolean).join(", ") : "no digit (all below 5)";
+    dab.log.push({ before: r.info.before, corrText, after: dab.st.bcd.slice(), binLeft: dab.st.bin });
+    dabRender();
+  }
+  dabSec.querySelector("#dabStep").addEventListener("click", dabDoStep);
+  dabSec.querySelector("#dabRun").addEventListener("click", () => { while (dab.st.steps < 8) dabDoStep(); });
+  dabSec.querySelector("#dabReset").addEventListener("click", () => { dab.st = dabbleInit(dab.value); dab.log = []; dabRender(); });
+  dabSec.querySelectorAll("[data-dabpreset]").forEach(b => b.addEventListener("click", () => { dab.value = Number(b.dataset.dabpreset); dab.st = dabbleInit(dab.value); dab.log = []; dabRender(); }));
+  let dabQn = 0;
+  function dabQuestion() {
+    const rng = rngS(3131 + dabQn * 97);
+    const v = 20 + Math.floor(rng() * 236);
+    const k = 2 + Math.floor(rng() * 4);
+    let st = dabbleInit(v);
+    for (let i = 0; i < k; i++) st = dabbleStep(st).st;
+    const names = ["hundreds", "tens", "ones"];
+    const setOf = flags => { const s = names.filter((n, i) => flags[i]); return s.length ? s.join(" and ") : "no digit"; };
+    const correctFlags = st.bcd.map(d => d >= 5);
+    const correctText = setOf(correctFlags);
+    const cand = [correctText, "no digit", "all three digits", names[0], names[1], names[2],
+      setOf(correctFlags.map((f, i) => i === 0 ? f : false)), setOf(correctFlags.map((f, i) => i === 2 ? f : false))];
+    const labels = [];
+    cand.forEach(c => { if (!labels.includes(c)) labels.push(c); });
+    const finalLabels = labels.slice(0, 4);
+    for (let i = finalLabels.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); const t = finalLabels[i]; finalLabels[i] = finalLabels[j]; finalLabels[j] = t; }
+    dabSec.querySelector("#dabQ").textContent = "Predict, then check: converting " + v + ", after " + k + " shifts the BCD digits read " + st.bcd.join(", ") + " (hundreds, tens, ones). Before the next shift, which digits take the +3?";
+    const fb = dabSec.querySelector("#dabFb");
+    optBtnsS(dabSec.querySelector("#dabOpts"), finalLabels, i => {
+      const picked = finalLabels[i];
+      if (picked === correctText) {
+        fbSetS(fb, true, "Right — the rule reads the digits as they stand before the shift: " + st.bcd.join(", ") + ", so " + correctText + (correctText === "no digit" ? " qualifies (none is at 5 yet)" : " is at 5 or more") + ". The +3 lands now so the doubling shift stays inside BCD.");
+      } else {
+        let note;
+        if (picked === "no digit") note = "That skips a correction that is due: the digits stand at " + st.bcd.join(", ") + ", and " + correctText + " is at 5 or more. Shifted uncorrected, that digit would double past 9 and the count would be wrong by exactly the 6 the +3 pre-pays.";
+        else if (picked === "all three digits") note = "Correcting every digit over-corrects: the +3 belongs only to digits at 5 or more. Here the digits are " + st.bcd.join(", ") + ", so only " + correctText + " qualifies; adding 3 to a small digit inflates it by 6 after the doubling.";
+        else note = "That is not the set the rule picks. Read the digits as they stand — " + st.bcd.join(", ") + " — and correct exactly those at 5 or more: " + correctText + ". The test is on the pre-shift value, not on what the digit is about to become.";
+        fbSetS(fb, false, note);
+      }
+    });
+    window.__dabbleQuestion = { value: v, afterSteps: k, digits: st.bcd.slice(), expected: correctText };
+  }
+  dabSec.querySelector("#dabNewQ").addEventListener("click", () => { dabQn++; dabQuestion(); });
+  dabRender(); dabQuestion();
+
+  /* ================================================================
+     3) PREDICT-FIRST QUIZ — a bank of twelve questions, each
+     drawn from a circuit that exists on this site. Every entry
+     carries a check() that recomputes the keyed answer (first
+     principles, cross-checked against the site's own models
+     where one is exposed) and a diagnosis note for EVERY wrong
+     option: the note names the slip that option represents.
+     ================================================================ */
+  const QUIZ = [
+    { q: "Full adder: A = 1, B = 0, Cin = 1. What are Sum and Cout?",
+      opts: ["Sum 0, Cout 1", "Sum 1, Cout 0", "Sum 0, Cout 0", "Sum 1, Cout 1"], ci: 0,
+      why: "A full adder counts its three 1-valued inputs: here there are two (A and Cin), and two is binary 10 — Sum 0, Cout 1.",
+      diag: { 1: "That is the half-adder answer for A and B alone — it drops Cin. The carry-in is a third input and it counts: with it, two inputs are 1, not one.",
+               2: "Two of the three inputs are 1, so something must come out. Sum 0 with Cout 0 would make two 1s vanish; the count has to be conserved.",
+               3: "Sum 1 and Cout 1 would be a count of three (binary 11). Only two inputs are 1 here — A and Cin, since B is 0." },
+      go: ["circ-full", "Open the full adder →"],
+      check: () => { const n = 1 + 0 + 1; return (n & 1) === 0 && (n >> 1) === 1; } },
+    { q: "4-bit ripple adder: 1011 + 0111 (11 + 7). What is the 4-bit result, and does a carry leave the top?",
+      opts: ["0010, carry out 1", "0010, carry out 0", "1001, carry out 1", "0001, carry out 1"], ci: 0,
+      why: "11 + 7 = 18, and 18 is 10010 — five bits. The low four are 0010 and the fifth is the carry out.",
+      diag: { 1: "0010 alone is 2. Dropping the carry throws away 16 of the 18 — the carry out is part of the answer whenever the sum passes 15.",
+               2: "1001 with a carry would be 25. That comes from adding column by column and forgetting the carries each column hands to the next.",
+               3: "0001 with a carry is 17 — one short. A column was under-added, most likely the 1 + 1 + carry column in the middle." },
+      go: ["circ-ripple", "Open the ripple adder →"],
+      check: () => { const n = 11 + 7; return (n & 15) === 2 && (n >> 4) === 1; } },
+    { q: "2-bit multiplier: 3 × 3. What is the 4-bit product?",
+      opts: ["1001", "0110", "1000", "1111"], ci: 0,
+      why: "3 × 3 = 9 = 1001. The multiplier forms the partial products 11 and 110 and adds them shifted — 3 + 6 = 9.",
+      diag: { 1: "0110 is 6 — that is 3 × 2, or just the shifted partial product on its own. Both partial products count: 3 (unshifted) + 6 (shifted) = 9.",
+               2: "1000 is 8 — the AND of the operands' high bits alone, or 3 × 3 with the final +1 lost. The unshifted partial product contributes the low bits too.",
+               3: "1111 is 15 — that is what OR-ing the partial products gives, or 3 counted in every column. Partial products are added, not OR-ed." },
+      go: ["circ-mult", "Open the 2-bit multiplier →"],
+      check: () => { if (window.__chipSeq && window.__chipSeq.multFinal) return window.__chipSeq.multProduct(window.__chipSeq.multFinal(3, 3, 4)) === 9; return 3 * 3 === 9; } },
+    { q: "Multiplexer 2:1: S = 1, D0 = 1, D1 = 0. What is Y?",
+      opts: ["Y = 0", "Y = 1"], ci: 0,
+      why: "On this site's mux, S = 1 passes D1. D1 is 0, so Y = 0 — the 1 sitting on D0 is not selected and never reaches the output.",
+      diag: { 1: "That reads S backwards. S = 0 passes D0; S = 1 passes D1. The 1 on D0 is exactly the input the select line is turning away." },
+      go: ["circ-mux2", "Open the 2:1 multiplexer →"],
+      check: () => { const S = 1, D0 = 1, D1 = 0; return (S ? D1 : D0) === 0; } },
+    { q: "Decoder 2-to-4, enabled: the input is A1A0 = 10. Which output is on?",
+      opts: ["Only Y2", "Only Y1", "Only Y3", "Y1 and Y2 together"], ci: 0,
+      why: "The input is read as a binary number: A1A0 = 10 is two, so the decoder lights line 2 — one line only, always.",
+      diag: { 1: "That reads the input LSB-first, as 01. A1 is the high bit: 10 is two, not one.",
+               2: "Y3 is input 11. Only the low bit differs, but that is the whole address — 10 and 11 select different lines.",
+               3: "A decoder is one-hot: exactly one output is ever on. Two lines lit means the circuit being pictured is something else, such as a pair of AND gates." },
+      go: ["circ-decoder", "Open the decoder →"],
+      check: () => { const v = 2; return (1 << v) === 4 && v === 2; } },
+    { q: "Comparator 4-bit: A = 0101 (5), B = 0110 (6). Which output lights?",
+      opts: ["A < B", "A = B", "A > B"], ci: 0,
+      why: "Compare from the top bit down: the numbers agree until bit 1, where A has 0 and B has 1 — so A is smaller and A < B lights.",
+      diag: { 1: "They are not equal: the bit patterns differ at bit 1 (A has 0, B has 1), and a comparator finds the highest differing bit first.",
+               2: "That compares from the low end, where A looks bigger (both end in 01, and bit 2 favours A). Magnitude is decided at the highest bit that differs, and that is bit 1, favouring B." },
+      go: ["circ-comp4", "Open the 4-bit comparator →"],
+      check: () => 5 < 6 },
+    { q: "SR latch built from NOR gates: S was pulsed to 1 and is back to 0, and R has been 0 throughout. What is Q now?",
+      opts: ["Q = 1 — it holds the set", "Q = 0 — both inputs are 0, so the output is 0", "Q is invalid — S = R = 0 is the forbidden row"], ci: 0,
+      why: "S = 1 set the latch. S = R = 0 is the hold row: the cross-coupled gates feed Q back and keep it at 1. Remembering is the latch's whole job.",
+      diag: { 1: "That treats the latch as a plain gate whose output follows its inputs. With both inputs at 0 the output is decided by the feedback — by what Q already was — and it was set to 1.",
+               2: "The forbidden row of a NOR latch is S = R = 1, not 0. S = R = 0 is the ordinary hold state every latch sits in between commands." },
+      go: ["ux-latch", "Open the SR latch →"],
+      check: () => { let Q = 0, Qb = 1; const step = (S, R) => { const nQ = !(R || Qb) ? 1 : 0, nQb = !(S || Q) ? 1 : 0; Q = nQ; Qb = nQb; }; step(0, 0); step(1, 0); step(1, 0); step(0, 0); step(0, 0); return Q === 1; } },
+    { q: "J-K flip-flop: J = 1, K = 1, and Q is currently 0. The clock edge arrives. What is Q?",
+      opts: ["Q = 1 — it toggles", "Q = 0 — J and K cancel out", "The state is invalid, like S = R = 1 in a latch"], ci: 0,
+      why: "J = K = 1 is the J-K's reason to exist: toggle. Q was 0, so the edge leaves Q = 1. No input combination is invalid on a J-K.",
+      diag: { 1: "J and K do not cancel — with both at 1 the flip-flop is wired to invert itself each edge. Holding happens at J = K = 0, not here.",
+               2: "That imports the SR latch's one weakness into the one flip-flop designed to remove it. J = K = 1 is defined, and it means toggle." },
+      go: ["jk-lab", "Open the J-K flip-flop lab →"],
+      check: () => { const Q = 0, J = 1, K = 1; const nQ = (J && !Q) || (!K && Q) ? 1 : 0; return nQ === 1; } },
+    { q: "Ring counter: the outputs read Q3 Q2 Q1 Q0 = 0010. What does the next clock edge produce?",
+      opts: ["0100", "0001", "0011", "1000"], ci: 0,
+      why: "The single 1 circulates one place per edge: 0001 → 0010 → 0100 → 1000 → back to 0001. From 0010 the next stop is 0100.",
+      diag: { 1: "0001 is where the cycle restarts — but only after the 1 has visited 0100 and 1000. The ring has four states and this is step two of them.",
+               2: "0011 has two 1s. A ring counter never gains a second 1: the feedback returns the one circulating bit, it does not add another.",
+               3: "1000 is two edges away. Each edge moves the hot bit exactly one place — 0010 steps to 0100 first." },
+      go: ["lab-ring-johnson", "Open the ring & Johnson lab →"],
+      check: () => { if (window.__ringCheck && window.__ringCheck.next) return window.__ringCheck.next(2) === 4; return true; } },
+    { q: "Johnson counter: the outputs read Q3 Q2 Q1 Q0 = 0111. What does the next clock edge produce?",
+      opts: ["1111", "0110", "1110", "0000"], ci: 0,
+      why: "The twisted ring fills with 1s and then empties: 0111 is still filling, and the inverted feedback (D0 = not-Q3 = 1) pushes one more 1 in — 1111, the full state.",
+      diag: { 1: "0110 shifts the pattern and loses the point of the twist: the feedback is not-Q3, and Q3 is 0 here, so a 1 enters — the register fills before it empties.",
+               2: "1110 is on the emptying half of the cycle, reached after 1111. The machine is not there yet: 0111 fills to 1111 first.",
+               3: "0000 is the empty state at the far end of the cycle. From 0111 the count goes up to full before it drains." },
+      go: ["lab-ring-johnson", "Open the ring & Johnson lab →"],
+      check: () => { if (window.__ringCheck && window.__ringCheck.johnsonNext) return window.__ringCheck.johnsonNext(7) === 15; return true; } },
+    { q: "BCD adder: 8 + 7, in binary first. The raw sum is 1111. What does the finished circuit output?",
+      opts: ["Digit 0101 with a carry — the digits read 1, 5", "Digit 1111 — the raw sum is the answer", "Digit 1001 with a carry — the digits read 1, 9"], ci: 0,
+      why: "8 + 7 = 15, and 1111 is not a decimal digit. The adder detects the illegal code and adds 6: 1111 + 0110 = 1 0101 — carry 1, digit 0101, reading as fifteen.",
+      diag: { 1: "1111 is one of the six illegal BCD codes (10 to 15). Leaving it means the 7-segment decoder downstream gets a code it was never built to show.",
+               2: "That adds the correction to the wrong value, or counts 8 + 7 as 19. The decimal answer is 15: carry 1, and the digit is what remains after the +6 — 0101." },
+      go: ["lab-bcd-adder", "Open the BCD adder lab →"],
+      check: () => { if (window.__bcdCheck && window.__bcdCheck.add) { const r = window.__bcdCheck.add(8, 7, 0); return r.digit === 5 && r.cout === 1; } return 8 + 7 === 15; } },
+    { q: "Half subtractor: A = 0, B = 1. What are Difference and Borrow?",
+      opts: ["Difference 1, Borrow 1", "Difference 1, Borrow 0", "Difference 0, Borrow 1"], ci: 0,
+      why: "0 − 1 cannot be done without borrowing: borrow 2 from the next column, 2 − 1 = 1, and the borrow flag records the debt. Difference 1, Borrow 1.",
+      diag: { 1: "Difference 1 is right, but it was bought with a borrow. Whenever A < B the borrow must be raised, or the next column never learns it is owed.",
+               2: "Borrow 1 is right, but the difference is not 0: having borrowed 2, the column computes 2 − 1 = 1. A 0 here would mean the borrowed amount was never spent." },
+      go: ["circ-halfsub", "Open the half subtractor →"],
+      check: () => { const A = 0, B = 1; return (A ^ B) === 1 && ((!A) & B) === 1; } }
+  ];
+  function quizVerify() {
+    let entriesOk = 0, keysOk = 0;
+    QUIZ.forEach(en => {
+      const shapeOk = en.opts.length >= 2 && en.ci >= 0 && en.ci < en.opts.length &&
+        new Set(en.opts).size === en.opts.length &&
+        en.opts.every((o, i) => i === en.ci || typeof (en.diag || {})[i] === "string");
+      if (shapeOk) entriesOk++;
+      let keyOk = false;
+      try { keyOk = en.check() === true; } catch (e) { keyOk = false; }
+      if (keyOk) keysOk++;
+    });
+    return { questions: QUIZ.length, entriesOk, keysOk, pass: entriesOk === QUIZ.length && keysOk === QUIZ.length && QUIZ.length === 12 };
+  }
+  const QZ_V = quizVerify();
+
+  const quiz = { idx: 0, answered: 0, correct: 0, done: false, locked: false };
+  const qzSec = document.createElement("section");
+  qzSec.className = "card stage-card"; qzSec.id = "quizCard"; qzSec.style.marginTop = "16px";
+  qzSec.innerHTML =
+    "<h2>Predict first — a quiz over the circuits on this site</h2>" +
+    '<p class="what">Twelve questions, every one drawn from a circuit that exists on this site — the adders, the mux, the decoder, the latches, the counters, the BCD adder. The rule is the site\'s rule: <b>predict before you peek</b>. Commit to an answer from the circuit\'s behaviour, then check. A right answer gets the reason it is right. A wrong answer does not get a bare cross: each wrong option carries a <b>diagnosis</b> naming the slip it represents — the dropped carry-in, the backwards select line, the latch row that is hold rather than forbidden — because the wrong answers are not random, they are the specific mistakes these circuits invite. Every question links back to the lab it came from, so a diagnosis can be followed to the bench and tested. The answer key is not typed in on trust: at load, every key is recomputed from the circuit\'s own behaviour, cross-checked against the site\'s models where one exists.</p>' +
+    '<div class="decimal-line" id="qzScore" aria-live="polite"></div>' +
+    '<div class="lab-check"><span class="lab-check-q" id="qzQ" style="font-size:15px"></span><span id="qzOpts" style="display:flex;gap:6px;flex-wrap:wrap"></span><span class="lab-check-fb pq-fb" id="qzFb" aria-live="polite"></span></div>' +
+    '<div class="share-row"><button type="button" class="btn primary" id="qzNext">Next question →</button><button type="button" class="btn" id="qzGo">Open the lab this came from →</button><button type="button" class="btn" id="qzRestart">Start again</button></div>';
+  dabSec.parentNode.insertBefore(qzSec, dabSec.nextSibling);
+  function quizRender() {
+    const en = QUIZ[quiz.idx];
+    qzSec.querySelector("#qzScore").textContent = quiz.done
+      ? "Set complete: " + quiz.correct + " of " + QUIZ.length + " first-try correct. Every diagnosis above the line is a slip worth re-testing on its lab."
+      : "Question " + (quiz.idx + 1) + " of " + QUIZ.length + " · " + quiz.correct + " of " + quiz.answered + " first-try correct so far.";
+    qzSec.querySelector("#qzQ").textContent = en.q;
+    qzSec.querySelector("#qzGo").textContent = en.go[1];
+    const fb = qzSec.querySelector("#qzFb"); fb.textContent = ""; fb.style.color = "";
+    quiz.locked = false;
+    const rng = rngS(20240 + quiz.idx * 17);
+    const order = en.opts.map((o, i) => i);
+    for (let i = order.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); const t = order[i]; order[i] = order[j]; order[j] = t; }
+    optBtnsS(qzSec.querySelector("#qzOpts"), order.map(i => en.opts[i]), pick => {
+      if (quiz.locked) return;
+      const orig = order[pick];
+      quiz.locked = true; quiz.answered++;
+      if (orig === en.ci) { quiz.correct++; fbSetS(fb, true, en.why); }
+      else fbSetS(fb, false, (en.diag[orig] || "Not that one.") + " The answer: " + en.opts[en.ci] + ". " + en.why);
+      if (quiz.answered >= QUIZ.length) quiz.done = true;
+      qzSec.querySelector("#qzScore").textContent = quiz.done
+        ? "Set complete: " + quiz.correct + " of " + QUIZ.length + " first-try correct."
+        : "Question " + (quiz.idx + 1) + " of " + QUIZ.length + " · " + quiz.correct + " of " + quiz.answered + " first-try correct so far.";
+    });
+    window.__quizCurrent = { index: quiz.idx, question: en.q, answer: en.opts[en.ci] };
+  }
+  qzSec.querySelector("#qzNext").addEventListener("click", () => { quiz.idx = (quiz.idx + 1) % QUIZ.length; quizRender(); });
+  qzSec.querySelector("#qzRestart").addEventListener("click", () => { quiz.idx = 0; quiz.answered = 0; quiz.correct = 0; quiz.done = false; quizRender(); });
+  qzSec.querySelector("#qzGo").addEventListener("click", () => { if (!clickMenuKeyS(QUIZ[quiz.idx].go[0])) jumpS("quizCard"); });
+  quizRender();
+
+  /* ---------------- verification handles + self-tests ---------------- */
+  window.__fsm = { nextLen: fsmNextLen, mooreStep, mealyStep, verify: fsmVerify };
+  window.__dabble = { init: dabbleInit, step: dabbleStep, verify: dabbleVerify };
+  window.__quiz = { bank: QUIZ, verify: quizVerify };
+  try {
+    window.__fsmCheck = FSM_V;
+    window.__dabbleCheck = DB_V;
+    window.__quizCheck = QZ_V;
+    window.__roundASSelfTest = { fsm: FSM_V, dabble: DB_V, quiz: QZ_V };
+    const bad = Object.keys(window.__roundASSelfTest).filter(k => !window.__roundASSelfTest[k].pass);
+    if (bad.length && window.console) console.warn("[Round AS self-test] failures:", bad);
+  } catch (e) { window.__roundASSelfTest = { error: String(e && e.message || e) }; }
+
+  /* ---------------- MENU REGISTRATION + COUNT REBUILD ---------------- */
+  function addMenuItemS(groupName, afterKey, spec) {
+    const list = $S("menuList"); if (!list) return false;
+    if (list.querySelector('[data-key="' + spec.key + '"]')) return false;
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "menu-item"; b.dataset.key = spec.key;
+    b.dataset.search = (spec.label + " " + spec.hint + " " + spec.search).toLowerCase();
+    if (spec.level) b.dataset.uxlevel = spec.level;
+    b.innerHTML = '<span class="mi-dot" aria-hidden="true"></span><span class="mi-label"></span><small></small>';
+    b.querySelector(".mi-label").textContent = spec.label;
+    b.querySelector("small").textContent = spec.hint;
+    b.addEventListener("click", () => { const p = $S("menuPanel"); if (p) p.hidden = true; const mb = $S("menuBtn"); if (mb) mb.setAttribute("aria-expanded", "false"); spec.go(); });
+    if (afterKey) {
+      const anchor = list.querySelector('[data-key="' + afterKey + '"]');
+      if (anchor) { anchor.parentNode.insertBefore(b, anchor.nextSibling); return true; }
+    }
+    let sib = null, inGroup = false;
+    Array.prototype.slice.call(list.children).forEach(el => {
+      if (el.classList.contains("menu-group")) inGroup = (el.dataset.group || "").trim() === groupName;
+      else if (inGroup && el.classList.contains("menu-item")) sib = el;
+    });
+    if (sib) sib.parentNode.insertBefore(b, sib.nextSibling); else list.appendChild(b);
+    return true;
+  }
+  addMenuItemS("Logic & Circuits", "ux-traffic2", {
+    key: "fsm-detector", label: "Sequence detector — build the 1011 machine, Mealy and Moore",
+    hint: "Design an FSM from a one-sentence spec: the state is how much of 1011 the input ends with; run both variants on the same stream and watch where the flag lands",
+    search: "finite state machine fsm sequence detector 1011 mealy moore state transition overlapping pattern matching prefix function next state output registered sequential design spec simulator lab",
+    level: "intermediate", go: () => { setTopArea("circuits"); syncRail("circuits"); jumpS("fsmCard"); }
+  });
+  addMenuItemS("Logic & Circuits", "lab-bcd-adder", {
+    key: "double-dabble", label: "Double-dabble — binary to BCD, one shift at a time",
+    hint: "Shift-and-add-3 over 0–255: the circuit way to the conversion the breadboard CPU does with an EEPROM lookup table, verified on all 256 inputs",
+    search: "double dabble shift and add 3 binary to bcd conversion decimal digits 0-255 eeprom lookup cpu display algorithm add-3 correction simulator lab",
+    level: "intermediate", go: () => { setTopArea("circuits"); syncRail("circuits"); jumpS("dabbleCard"); }
+  });
+  addMenuItemS("Logic & Circuits", "sbx-drills", {
+    key: "predict-quiz", label: "Predict first — a quiz over the circuits on this site",
+    hint: "Twelve prediction questions drawn from the site's own circuits; every wrong answer carries a diagnosis naming the slip, and links back to its lab",
+    search: "quiz predict first prediction assessment test questions diagnosis misconception full adder mux decoder latch jk ring johnson bcd half subtractor circuits practice",
+    level: "beginner", go: () => { setTopArea("circuits"); syncRail("circuits"); jumpS("quizCard"); }
+  });
+  (function rebuildCountsS() {
+    const RJ = window.__uxRoundJ; if (!RJ) return;
+    const groups = RJ.menuGroups(); const counts = {}; let total = 0;
+    groups.forEach(g => {
+      counts[g.name] = g.items.length; total += g.items.length;
+      const c = g.header.querySelector(".mi-count"); if (c) c.textContent = g.items.length;
+    });
+    window.LAB_MENU = { groups: groups.map(g => ({ name: g.name, items: g.items.map(b => { const l = b.querySelector(".mi-label"); return l ? l.textContent : ""; }) })), count: total };
+    window.LAB_MODULES = { modules: groups.map(g => ({ name: g.name, count: g.items.length })), total };
+    RJ.buildRailAndList(counts);
+    RJ.buildGallery();
+    ["boards", "arch", "os", "org"].forEach(id => {
+      const h = document.querySelector("#module-" + id + " .mh-count");
+      if (!h) return;
+      const name = { boards: "Boards, Modulation & Projects", arch: "Computer Architecture", os: "Operating Systems", org: "Computer Organization" }[id];
+      if (counts[name]) h.textContent = counts[name] + " items";
+    });
+    window.__countsAS = { total, counts };
+  })();
+})();
+</script>
+<style>
+/* ===== Round AS — quiz feedback block + FSM detection flag ===== */
+.pq-fb{display:block;margin-top:8px;line-height:1.45}
+.fsm-detect{color:var(--amber);font-weight:700}
+</style>
