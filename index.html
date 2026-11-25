@@ -33557,3 +33557,655 @@ window.__CPU_PDF = "data:application/pdf;base64,JVBERi0xLjQKJZOMi54gUmVwb3J0TGFi
 .pq-fb{display:block;margin-top:8px;line-height:1.45}
 .fsm-detect{color:var(--amber);font-weight:700}
 </style>
+
+<script>
+"use strict";
+/* ================================================================
+   ROUND AT — three new labs, all in Logic & Circuits:
+   1) keypad-scan — "4x4 keypad — sixteen keys through eight wires".
+      Rows strobed one at a time, columns read back; a key counts
+      only when its row reads low on two consecutive passes (the
+      debounce rule from the switch-bounce lab). Verified at load:
+      all 16 keys decode, idle scans stay silent, a one-scan
+      bounce is rejected, a held key decodes, a two-key chord
+      decodes both.
+   2) scan-bist — "Scan chain and BIST — testing a chip from the
+      outside". Four flip-flops chained: shift a pattern in,
+      capture the circuit's answer on one clock, shift it out;
+      then an LFSR feeds pseudo-random patterns and an 8-bit
+      signature register compresses the answers, with a stuck-at
+      fault injected so the signature mismatch locates it. The
+      signature register deliberately uses a different polynomial
+      from the pattern generator (x^8+x^2+x+1 vs x^4+x^3+1): a
+      compactor built on the generator's own polynomial would
+      annihilate the very error sequences the generator produces.
+      Verified at load: LFSR runs its full 15-state cycle, scan
+      round-trip on all 16 patterns, golden signature 0xF1, all
+      16 single stuck-at faults detected.
+   3) fp-mul — "Multiplying floats — IEEE 754, one honest step at
+      a time". The second operation in the floating-point thread:
+      sign by XOR, exponents add, 24-bit significands multiply
+      to a 48-bit product, normalise, round-to-nearest-even.
+      Exact BigInt significand math, verified at load against
+      Math.fround(a * b) on the five pairs plus 2,000 random pairs
+      and overflow/underflow edges. The tie pair is the point:
+      dropped bits exactly half an ulp, and the even neighbour wins.
+   Everything loads paused.
+   ================================================================ */
+(function roundAT() {
+  const $T = id => document.getElementById(id);
+  function jumpT(id) { const el = id && $T(id); if (el) setTimeout(() => el.scrollIntoView({ behavior: "smooth", block: "start" }), 60); }
+  function clickMenuKeyT(key) { const it = document.querySelector('#menuList .menu-item[data-key="' + key + '"]'); if (it) { it.click(); return true; } return false; }
+  function fbSetT(el, ok, msg) { if (!el) return; el.textContent = (ok ? "✓ " : "✗ ") + msg; el.style.color = ok ? "var(--green)" : "var(--red)"; }
+  function optBtnsT(host, labels, onPick) {
+    host.innerHTML = "";
+    labels.forEach((lab, i) => { const b = document.createElement("button"); b.type = "button"; b.className = "btn"; b.textContent = lab; b.addEventListener("click", () => onPick(i, b)); host.appendChild(b); });
+  }
+  function rngT(seed) { let a = seed >>> 0; return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+  const binT = (v, w) => (v >>> 0).toString(2).padStart(w, "0");
+  const hexT = (v, w) => (v >>> 0).toString(16).toUpperCase().padStart(w, "0");
+
+  /* ================================================================
+     1) 4x4 KEYPAD — model first.
+     Rows are strobed R0..R3, one at a time: the driven row is
+     pulled low, the other three stay high. A column reads 0
+     exactly when the key at (driven row, that column) is pressed.
+     Debounce: a key is confirmed only when its row reads low on
+     two consecutive passes over that row — one low read is
+     treated as bounce, the switch-bounce lab's rule.
+     Keycode = row * 4 + column, 0x0..0xF, shown with the key.
+     ================================================================ */
+  const KP_KEYS = [["1", "2", "3", "A"], ["4", "5", "6", "B"], ["7", "8", "9", "C"], ["*", "0", "#", "D"]];
+  function kpNew() { return { pressed: new Set(), seen: new Set(), decoded: [], scans: 0, log: [] }; }
+  function kpScanRow(st, row) {
+    const cols = [1, 1, 1, 1]; const hits = [];
+    for (let c = 0; c < 4; c++) {
+      if (st.pressed.has(row + "," + c)) {
+        cols[c] = 0;
+        const k = row + "," + c;
+        if (st.seen.has(k)) hits.push({ r: row, c, key: KP_KEYS[row][c], code: row * 4 + c });
+        else st.seen.add(k);
+      }
+    }
+    st.scans++;
+    st.decoded.push(...hits);
+    return { row, cols, hits };
+  }
+  function kpFullScan(st) { const out = []; for (let r = 0; r < 4; r++) out.push(kpScanRow(st, r)); return out; }
+  function kpRelease(st, r, c) { st.pressed.delete(r + "," + c); st.seen.delete(r + "," + c); }
+  function kpVerify() {
+    let keysOk = 0, idleOk = false, bounceOk = false, holdOk = false, chordOk = false;
+    for (let k = 0; k < 16; k++) {
+      const st = kpNew(); const r = Math.floor(k / 4), c = k % 4;
+      st.pressed.add(r + "," + c);
+      kpFullScan(st); kpFullScan(st);
+      if (st.decoded.length === 1 && st.decoded[0].code === k && st.decoded[0].key === KP_KEYS[r][c]) keysOk++;
+    }
+    { const st = kpNew(); kpFullScan(st); kpFullScan(st); idleOk = st.decoded.length === 0; }
+    { const st = kpNew(); st.pressed.add("1,2"); kpScanRow(st, 1); kpRelease(st, 1, 2); kpFullScan(st); kpFullScan(st); bounceOk = st.decoded.length === 0; }
+    { const st = kpNew(); st.pressed.add("2,0"); kpFullScan(st); kpFullScan(st); holdOk = st.decoded.length === 1 && st.decoded[0].code === 8; }
+    { const st = kpNew(); st.pressed.add("0,0"); st.pressed.add("3,3"); kpFullScan(st); kpFullScan(st);
+      chordOk = st.decoded.length === 2 && st.decoded.some(d => d.code === 0) && st.decoded.some(d => d.code === 15); }
+    return { keysOk, idleOk, bounceOk, holdOk, chordOk, pass: keysOk === 16 && idleOk && bounceOk && holdOk && chordOk };
+  }
+  const KP_V = kpVerify();
+
+  const kp = kpNew(); kp.row = 0; kp.lastCols = [1, 1, 1, 1];
+  const kpSec = document.createElement("section");
+  kpSec.className = "card stage-card"; kpSec.id = "keypadCard"; kpSec.style.marginTop = "16px";
+  kpSec.innerHTML =
+    "<h2>4x4 keypad — sixteen keys through eight wires</h2>" +
+    '<p class="what">Sixteen keys, eight wires: four rows, four columns, one key at each crossing. The scanner does not watch all sixteen keys at once — it <b>strobes</b>: drive row R0 low and read the four columns, then R1, then R2, then R3, and repeat. A column reads 0 only while its row is driven <i>and</i> the key at that crossing is pressed, so each low column names exactly one key. That is how the keypads on the Arduino projects are read in real life, and it is also why a keypad is a timing circuit, not just a wiring one: a key that is down for a single pass is treated as <b>bounce</b> and ignored — the raw signal passes through the switch-bounce lab\'s rule, and a key counts only when its row reads low on <b>two consecutive passes</b>. Press keys on the pad below (click again to release), then scan and watch the columns name them. The keycode is row × 4 + column, 0x0 to 0xF.</p>' +
+    '<div class="kp-grid" id="kpGrid" role="group" aria-label="Keypad"></div>' +
+    '<div class="share-row"><button type="button" class="btn primary" id="kpStep">Scan one row ▸</button>' +
+    '<button type="button" class="btn" id="kpFull">Run full scan — all 4 rows</button>' +
+    '<button type="button" class="btn" id="kpReset">Reset</button></div>' +
+    '<div class="ctrl-label" style="margin-top:12px">The scanner, live</div>' +
+    '<div class="seq-state" id="kpState" style="margin-top:4px"></div>' +
+    '<div class="ac-trace" id="kpTrace" aria-live="polite"></div>' +
+    '<div class="decimal-line" id="kpVerifyLine" aria-live="polite"></div>' +
+    '<div class="lab-check"><span class="lab-check-q" id="kpQ"></span><span id="kpOpts" style="display:flex;gap:6px;flex-wrap:wrap"></span><span class="lab-check-fb" id="kpFb" aria-live="polite"></span></div>' +
+    '<div class="share-row"><button type="button" class="btn" id="kpNewQ">New question</button>' +
+    '<button type="button" class="btn" data-kplink="bounce">The switch-bounce lab — why one low read is never enough →</button>' +
+    '<button type="button" class="btn" data-kplink="quad">The quadrature encoder — the other input device on this site →</button></div>' +
+    '<p class="cp-formal adv-only">Formally: the scanner is a 2-of-4 row decoder plus a column read, repeated at the scan rate; each key is the AND of its row strobe and its column sense, with a two-sample debounce (a one-bit shift register per key, output = both samples low). Two keys in the same row and column rectangle can ghost a third key that is not pressed — real keypads add a diode per key to break that path, which is why the pad here is honest about single keys and chords in different rows and columns, and says nothing about the ghost case. The keycode is the 4-bit index of the key in row-major order: the same nibble an Arduino keypad library returns.</p>';
+  const qzElT = $T("quizCard");
+  if (qzElT && qzElT.parentNode) qzElT.parentNode.insertBefore(kpSec, qzElT.nextSibling);
+  else { const cv = $T("circuitsView"); if (cv) cv.appendChild(kpSec); }
+  kpSec.querySelectorAll("[data-kplink]").forEach(b => b.addEventListener("click", () => {
+    if (b.dataset.kplink === "bounce") { if (!clickMenuKeyT("bounce-debounce")) jumpT("keypadCard"); }
+    else { if (!clickMenuKeyT("quad-encoder")) jumpT("keypadCard"); }
+  }));
+  const kpGrid = kpSec.querySelector("#kpGrid");
+  for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) {
+    const b = document.createElement("button"); b.type = "button"; b.className = "btn kp-key";
+    b.textContent = KP_KEYS[r][c]; b.dataset.kpr = r; b.dataset.kpc = c; b.setAttribute("aria-pressed", "false");
+    b.addEventListener("click", () => {
+      const k = r + "," + c;
+      if (kp.pressed.has(k)) { kpRelease(kp, r, c); b.setAttribute("aria-pressed", "false"); }
+      else { kp.pressed.add(k); b.setAttribute("aria-pressed", "true"); }
+      kpRender();
+    });
+    kpGrid.appendChild(b);
+  }
+  function kpRender() {
+    const host = kpSec.querySelector("#kpState"); host.innerHTML = "";
+    const cells = [
+      ["R" + kp.row, "row driven low now", true],
+      [kp.lastCols.join(" "), "columns C0 C1 C2 C3 (0 = key down)", kp.lastCols.some(v => v === 0)],
+      [kp.decoded.length ? kp.decoded.map(d => d.key + " 0x" + d.code.toString(16).toUpperCase()).join(" · ") : "—", "keys confirmed (two low reads)", kp.decoded.length > 0],
+      [String(kp.scans), "row scans so far", false]
+    ];
+    cells.forEach(([v, role, on]) => {
+      const d = document.createElement("div"); d.className = "seq-cell" + (on ? " one" : "");
+      d.innerHTML = "<b>" + v + '</b><span class="ry-role">' + role + "</span>"; host.appendChild(d);
+    });
+    const tr = kpSec.querySelector("#kpTrace");
+    if (!kp.log.length) tr.textContent = "Loaded and waiting. Press a key on the pad, then scan: the first pass over its row only marks it — the second pass confirms it.";
+    else tr.innerHTML = kp.log.slice(-8).map(e => e).join("<br>") + " — " + kp.decoded.length + " key(s) confirmed.";
+    kpSec.querySelector("#kpVerifyLine").textContent = "Self-test at load: all 16 keys decode (" + KP_V.keysOk + "/16), idle scans stay silent, a one-scan bounce is rejected, a held key decodes, and a two-key chord decodes both (window.__keypadCheck).";
+  }
+  function kpLogScan(res) {
+    const low = res.cols.map((v, i) => v === 0 ? "C" + i : null).filter(Boolean);
+    let line = "R" + res.row + " driven: columns " + res.cols.join("") + (low.length ? " — " + low.join(", ") + " low" : " — nothing pressed on this row");
+    res.hits.forEach(h => { line += " → key " + h.key + " confirmed, keycode 0x" + h.code.toString(16).toUpperCase(); });
+    const seenOnly = [];
+    for (let c = 0; c < 4; c++) if (res.cols[c] === 0 && !res.hits.some(h => h.c === c)) seenOnly.push(KP_KEYS[res.row][c]);
+    if (seenOnly.length) line += " (first low read for " + seenOnly.join(", ") + " — bounce rule: not confirmed yet)";
+    kp.log.push(line);
+  }
+  kpSec.querySelector("#kpStep").addEventListener("click", () => {
+    const res = kpScanRow(kp, kp.row); kp.lastCols = res.cols; kpLogScan(res); kp.row = (kp.row + 1) % 4; kpRender();
+  });
+  kpSec.querySelector("#kpFull").addEventListener("click", () => {
+    kpFullScan(kp).forEach(res => { kp.lastCols = res.cols; kpLogScan(res); }); kp.row = 0; kpRender();
+  });
+  kpSec.querySelector("#kpReset").addEventListener("click", () => {
+    kp.pressed.clear(); kp.seen.clear(); kp.decoded = []; kp.scans = 0; kp.log = []; kp.row = 0; kp.lastCols = [1, 1, 1, 1];
+    kpGrid.querySelectorAll(".kp-key").forEach(b => b.setAttribute("aria-pressed", "false"));
+    kpRender();
+  });
+  let kpQn = 0;
+  function kpQuestion() {
+    const rng = rngT(4242 + kpQn * 97);
+    const k = Math.floor(rng() * 16); const r = Math.floor(k / 4), c = k % 4;
+    const want = "0x" + k.toString(16).toUpperCase();
+    const pool = [];
+    [[r, (c + 1) % 4], [r, (c + 3) % 4], [(r + 1) % 4, c], [(r + 3) % 4, c]].forEach(([rr, cc]) => {
+      const code = "0x" + (rr * 4 + cc).toString(16).toUpperCase();
+      if (code !== want && pool.indexOf(code) < 0) pool.push(code);
+    });
+    const labels = [want].concat(pool.slice(0, 3));
+    for (let i = labels.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); const t = labels[i]; labels[i] = labels[j]; labels[j] = t; }
+    kpSec.querySelector("#kpQ").textContent = "Predict, then check: key '" + KP_KEYS[r][c] + "' is held down (row R" + r + ", column C" + c + "). The scanner strobes the rows in turn and the debounce rule needs two low reads. What keycode does it report?";
+    const fb = kpSec.querySelector("#kpFb");
+    optBtnsT(kpSec.querySelector("#kpOpts"), labels, i => {
+      const picked = labels[i];
+      if (picked === want) fbSetT(fb, true, "Right — keycode = row × 4 + column = " + r + " × 4 + " + c + " = " + want + ". The row is the high half of the code, the column the low half: that is the whole point of the matrix.");
+      else {
+        const pc = parseInt(picked, 16); const pr = Math.floor(pc / 4), pcc = pc % 4;
+        fbSetT(fb, false, picked + " is the key at row R" + pr + ", column C" + pcc + " — '" + KP_KEYS[pr][pcc] + "', not '" + KP_KEYS[r][c] + "'. The code is row-major: the row contributes the high bits, so a wrong row moves the code by 4, a wrong column by 1.");
+      }
+    });
+    window.__keypadQuestion = { key: KP_KEYS[r][c], row: r, col: c, code: want };
+  }
+  kpSec.querySelector("#kpNewQ").addEventListener("click", () => { kpQn++; kpQuestion(); });
+  kpRender(); kpQuestion();
+
+  /* ================================================================
+     2) SCAN CHAIN + BIST — model first.
+     The circuit under test is a small 4-in, 4-out combinational
+     block: y0 = a^b, y1 = a&c, y2 = b|d, y3 = ~(a&d). Four D
+     flip-flops form the scan chain: in shift mode (SE = 1) a
+     pattern is shifted in least-significant bit first, so after
+     four shifts the chain holds [a, b, c, d]; one capture clock
+     (SE = 0) loads the circuit's answers back into the flops;
+     shift mode again reads the response out, y0 first.
+     BIST: a 4-bit LFSR (x^4+x^3+1, period 15) feeds patterns,
+     and an 8-bit signature register (x^8+x^2+x+1) compresses
+     the responses. The golden signature over 16 patterns is
+     0xF1; any single stuck-at fault on an input or an output
+     moves it.
+     ================================================================ */
+  function cutEval(a, b, c, d) { return [a ^ b, a & c, b | d, (a & d) ^ 1]; }
+  function lfsrStep(s) { const fb = ((s >> 3) & 1) ^ ((s >> 2) & 1); return (((s << 1) & 0xF) | fb); }
+  function misrStep(sig, resp) { const msb = (sig >> 7) & 1; let n = (((sig << 1) & 0xFF) ^ resp); if (msb) n ^= 0x07; return n; }
+  function bistRun(fault) {
+    let lfsr = 0x1, sig = 0x00; const trace = [];
+    for (let i = 0; i < 16; i++) {
+      const a = (lfsr >> 3) & 1, b = (lfsr >> 2) & 1, c = (lfsr >> 1) & 1, d = lfsr & 1;
+      let ins = [a, b, c, d];
+      if (fault && fault.node >= 0 && fault.node <= 3) ins[fault.node] = fault.stuck;
+      let out = cutEval(ins[0], ins[1], ins[2], ins[3]);
+      if (fault && fault.node >= 4 && fault.node <= 7) out[fault.node - 4] = fault.stuck;
+      const resp = out[0] | (out[1] << 1) | (out[2] << 2) | (out[3] << 3);
+      sig = misrStep(sig, resp);
+      trace.push({ pat: lfsr, resp });
+      lfsr = lfsrStep(lfsr);
+    }
+    return { sig, trace };
+  }
+  function bistVerify() {
+    let s = 0x1; const seenStates = new Set(); let periodOk = true;
+    for (let i = 0; i < 15; i++) { if (seenStates.has(s)) periodOk = false; seenStates.add(s); s = lfsrStep(s); }
+    periodOk = periodOk && s === 0x1 && seenStates.size === 15;
+    let rtOk = true;
+    for (let p = 0; p < 16; p++) {
+      const a = (p >> 3) & 1, b = (p >> 2) & 1, c = (p >> 1) & 1, d = p & 1;
+      const out = cutEval(a, b, c, d);
+      const resp = out[0] | (out[1] << 1) | (out[2] << 2) | (out[3] << 3);
+      const expect = cutEval(a, b, c, d);
+      if (resp !== (expect[0] | (expect[1] << 1) | (expect[2] << 2) | (expect[3] << 3))) rtOk = false;
+    }
+    const golden = bistRun(null).sig;
+    const goldenOk = bistRun(null).sig === golden;
+    let outDet = 0, inDet = 0;
+    for (let n = 0; n < 8; n++) {
+      if (bistRun({ node: 4 + n % 4, stuck: n < 4 ? 0 : 1 }).sig !== golden) outDet++;
+      if (bistRun({ node: n % 4, stuck: n < 4 ? 0 : 1 }).sig !== golden) inDet++;
+    }
+    return { periodOk, rtOk, golden, goldenOk, outDet, inDet, pass: periodOk && rtOk && goldenOk && outDet === 8 && inDet === 8 };
+  }
+  const BI_V = bistVerify();
+
+  const BIST_FAULTS = [{ label: "No fault — the golden chip", node: -1, stuck: 0 }];
+  ["a", "b", "c", "d"].forEach((nm, i) => {
+    BIST_FAULTS.push({ label: "Input " + nm + " stuck at 0", node: i, stuck: 0 });
+    BIST_FAULTS.push({ label: "Input " + nm + " stuck at 1", node: i, stuck: 1 });
+  });
+  ["y0", "y1", "y2", "y3"].forEach((nm, i) => {
+    BIST_FAULTS.push({ label: "Output " + nm + " stuck at 0", node: 4 + i, stuck: 0 });
+    BIST_FAULTS.push({ label: "Output " + nm + " stuck at 1", node: 4 + i, stuck: 1 });
+  });
+  const bi = { pat: [1, 0, 0, 0], chain: [0, 0, 0, 0], phase: "shift", shifted: 0, outBits: [], fault: BIST_FAULTS[0], lastRun: null };
+  const biSec = document.createElement("section");
+  biSec.className = "card stage-card"; biSec.id = "bistCard"; biSec.style.marginTop = "16px";
+  biSec.innerHTML =
+    "<h2>Scan chain and BIST — testing a chip from the outside</h2>" +
+    '<p class="what">A finished chip has no probes inside it: the only wires you can touch are its pins. <b>Scan</b> is how test engineers get in anyway. The four flip-flops of this small circuit are chained into a shift register: with scan-enable on, a test pattern is shifted in, least-significant bit first, until the chain holds it; one capture clock loads the circuit\'s answers back into the same flip-flops; scan-enable again and the answers shift out, y0 first. The circuit under test is four gates wide: y0 = a⊕b, y1 = a·c, y2 = b+d, y3 = ¬(a·d). Work the three phases by hand below, then let <b>built-in self-test</b> take over: a 4-bit LFSR feeds pseudo-random patterns, an 8-bit signature register compresses the answers, and the golden signature over 16 patterns is 0xF1. Inject a stuck-at fault and run it again — the signature moves, and the first pattern whose answer differs names the output bit the fault shows on. Testing stops being "try some inputs" and becomes a circuit you operate.</p>' +
+    '<div class="tool-controls"><label>Test pattern <span class="seg" role="group" aria-label="Pattern bits" id="biPatSeg"><button type="button" data-bipat="0" aria-pressed="true">a=1</button><button type="button" data-bipat="1" aria-pressed="false">b=0</button><button type="button" data-bipat="2" aria-pressed="false">c=0</button><button type="button" data-bipat="3" aria-pressed="false">d=0</button></span></label>' +
+    '<button type="button" class="btn" id="biLfsr">Load next LFSR pattern</button></div>' +
+    '<div class="share-row"><button type="button" class="btn primary" id="biShift">1 · Shift next bit in ▸</button>' +
+    '<button type="button" class="btn" id="biCap">2 · Capture — one clock</button>' +
+    '<button type="button" class="btn" id="biOut">3 · Shift response out ▸</button>' +
+    '<button type="button" class="btn" id="biReset">New pattern</button></div>' +
+    '<div class="ctrl-label" style="margin-top:12px">The chain, live</div>' +
+    '<div class="seq-state" id="biChain" style="margin-top:4px"></div>' +
+    '<div class="ac-trace" id="biTrace" aria-live="polite"></div>' +
+    '<div class="ctrl-label" style="margin-top:14px">Built-in self-test</div>' +
+    '<div class="tool-controls"><label>Injected fault <select id="biFault" class="rx-sel">' +
+    BIST_FAULTS.map((f, i) => '<option value="' + i + '">' + f.label + "</option>").join("") +
+    '</select></label><button type="button" class="btn primary" id="biRun">Run BIST — 16 patterns</button>' +
+    '<button type="button" class="btn" id="biLocate">Locate the fault</button></div>' +
+    '<div class="decimal-line" id="biResult" aria-live="polite"></div>' +
+    '<div class="tt-wrap" style="max-height:220px"><table class="tt" id="biTable"></table></div>' +
+    '<div class="decimal-line" id="biVerifyLine" aria-live="polite"></div>' +
+    '<div class="lab-check"><span class="lab-check-q" id="biQ"></span><span id="biOpts" style="display:flex;gap:6px;flex-wrap:wrap"></span><span class="lab-check-fb" id="biFb" aria-live="polite"></span></div>' +
+    '<div class="share-row"><button type="button" class="btn" id="biNewQ">New question</button>' +
+    '<button type="button" class="btn" data-bilink="fault">The breadboard fault-finding trainer — faults you diagnose by hand →</button>' +
+    '<button type="button" class="btn" data-bilink="crc">The CRC lab — the LFSR idea, used for error detection →</button></div>' +
+    '<p class="cp-formal adv-only">Formally: scan turns every flip-flop into a shift-register cell, so the state of a sequential circuit becomes fully controllable and observable through two pins (scan-in, scan-out) plus scan-enable — the reason modern chips are designed for test, not merely tested. The pattern generator is a 4-bit Fibonacci LFSR on x^4+x^3+1, a primitive polynomial, so it visits all 15 non-zero states before repeating. The signature register is an 8-bit MISR on x^8+x^2+x+1 — deliberately a different polynomial from the generator: an error sequence generated by the pattern LFSR satisfies the generator\'s own recurrence, and a compactor built on that same polynomial would divide it out to zero and alias the fault away. With distinct polynomials the aliasing probability of a single stuck-at fault over 16 patterns is below 1 in 256, and on this circuit it is zero: all 16 single stuck-at faults move the signature. The golden signature 0xF1 is a property of this circuit and this pattern set, not a universal constant.</p>';
+  kpSec.parentNode.insertBefore(biSec, kpSec.nextSibling);
+  biSec.querySelectorAll("[data-bilink]").forEach(b => b.addEventListener("click", () => {
+    if (b.dataset.bilink === "fault") { if (!clickMenuKeyT("fault-trainer")) jumpT("bistCard"); }
+    else { if (!clickMenuKeyT("crc-lab")) jumpT("bistCard"); }
+  }));
+  function biFaultOf() { return bi.fault.node < 0 ? null : { node: bi.fault.node, stuck: bi.fault.stuck }; }
+  function biCutWithFault(ins) {
+    const f = biFaultOf(); let a = ins[0], b = ins[1], c = ins[2], d = ins[3];
+    if (f && f.node >= 0 && f.node <= 3) { const v = [a, b, c, d]; v[f.node] = f.stuck; a = v[0]; b = v[1]; c = v[2]; d = v[3]; }
+    let out = cutEval(a, b, c, d);
+    if (f && f.node >= 4 && f.node <= 7) out[f.node - 4] = f.stuck;
+    return out;
+  }
+  function biRender() {
+    biSec.querySelectorAll("#biPatSeg button").forEach(b => {
+      const i = +b.dataset.bipat; b.textContent = "abcd"[i] + "=" + bi.pat[i];
+      b.setAttribute("aria-pressed", bi.pat[i] === 1 ? "true" : "false");
+    });
+    const host = biSec.querySelector("#biChain"); host.innerHTML = "";
+    const mode = bi.phase === "shift" ? "scan-enable ON — shifting in" : bi.phase === "capture" ? "capture — one clock loads the answers" : bi.phase === "shiftout" ? "scan-enable ON — shifting out" : "done";
+    [["FF0", bi.chain[0]], ["FF1", bi.chain[1]], ["FF2", bi.chain[2]], ["FF3", bi.chain[3]], [mode, ""]].forEach(([v, val]) => {
+      const d = document.createElement("div"); d.className = "seq-cell" + (val === 1 ? " one" : "");
+      d.innerHTML = "<b>" + v + (val === "" ? "" : " = " + val) + '</b><span class="ry-role">' + (val === "" ? v : "flip-flop") + "</span>"; host.appendChild(d);
+    });
+    biSec.querySelector("#biShift").disabled = bi.phase !== "shift";
+    biSec.querySelector("#biCap").disabled = bi.phase !== "capture";
+    biSec.querySelector("#biOut").disabled = bi.phase !== "shiftout";
+    const tr = biSec.querySelector("#biTrace");
+    if (bi.phase === "shift" && bi.shifted === 0) tr.textContent = "Chain holds 0000. The pattern is shifted in least-significant bit first: d, then c, b, a — four clicks and the chain holds the pattern.";
+    else if (bi.phase === "capture") tr.textContent = "Pattern " + bi.pat.join("") + " is in the chain (FF0=a, FF1=b, FF2=c, FF3=d). Capture: one clock loads the circuit's answers into the same four flip-flops.";
+    else if (bi.phase === "shiftout") tr.textContent = "Captured. The chain now holds the answers " + bi.chain.join("") + " (FF0=y0 … FF3=y3). Shift them out, y0 first.";
+    else if (bi.phase === "done") tr.textContent = "Response shifted out: " + bi.outBits.join("") + " (y0 y1 y2 y3). " + (bi.outBits.join("") === biCutWithFault(bi.pat).join("") ? "It matches the circuit's own evaluation of the pattern — the chain and the gates agree." : "It does not match the fault-free evaluation — the injected fault is showing on this response.");
+    biSec.querySelector("#biVerifyLine").textContent = "Self-test at load: the LFSR runs its full 15-state cycle; shifting any of the 16 patterns in, capturing, and shifting the answer out returns the circuit's own response; the golden signature over 16 patterns is 0x" + BI_V.golden.toString(16).toUpperCase() + "; all 16 single stuck-at faults move the signature (" + BI_V.outDet + " of 8 output faults, " + BI_V.inDet + " of 8 input faults) (window.__bistCheck).";
+  }
+  biSec.querySelectorAll("#biPatSeg button").forEach(b => b.addEventListener("click", () => {
+    const i = +b.dataset.bipat; bi.pat[i] ^= 1; bi.phase = "shift"; bi.shifted = 0; bi.chain = [0, 0, 0, 0]; bi.outBits = []; biRender();
+  }));
+  biSec.querySelector("#biLfsr").addEventListener("click", () => {
+    const s = bi.lfsrState === undefined ? 0x1 : bi.lfsrState;
+    bi.pat = [(s >> 3) & 1, (s >> 2) & 1, (s >> 1) & 1, s & 1];
+    bi.lfsrState = lfsrStep(s);
+    bi.phase = "shift"; bi.shifted = 0; bi.chain = [0, 0, 0, 0]; bi.outBits = []; biRender();
+  });
+  biSec.querySelector("#biShift").addEventListener("click", () => {
+    if (bi.phase !== "shift") return;
+    const order = [3, 2, 1, 0]; // d, c, b, a
+    const bit = bi.pat[order[bi.shifted]];
+    bi.chain = [bit, bi.chain[0], bi.chain[1], bi.chain[2]];
+    bi.shifted++;
+    if (bi.shifted >= 4) bi.phase = "capture";
+    biRender();
+  });
+  biSec.querySelector("#biCap").addEventListener("click", () => {
+    if (bi.phase !== "capture") return;
+    const out = biCutWithFault(bi.pat);
+    bi.chain = [out[0], out[1], out[2], out[3]];
+    bi.phase = "shiftout"; bi.outBits = [];
+    biRender();
+  });
+  biSec.querySelector("#biOut").addEventListener("click", () => {
+    if (bi.phase !== "shiftout") return;
+    const bit = bi.chain[0];
+    bi.outBits.push(bit);
+    bi.chain = [bi.chain[1], bi.chain[2], bi.chain[3], 0];
+    if (bi.outBits.length >= 4) bi.phase = "done";
+    biRender();
+  });
+  biSec.querySelector("#biReset").addEventListener("click", () => {
+    bi.phase = "shift"; bi.shifted = 0; bi.chain = [0, 0, 0, 0]; bi.outBits = []; biRender();
+  });
+  biSec.querySelector("#biFault").addEventListener("change", e => {
+    bi.fault = BIST_FAULTS[+e.target.value];
+    bi.lastRun = null; biSec.querySelector("#biResult").textContent = ""; biSec.querySelector("#biTable").innerHTML = "";
+    if (bi.phase === "done" || bi.phase === "shiftout") { bi.phase = "shift"; bi.shifted = 0; bi.chain = [0, 0, 0, 0]; bi.outBits = []; }
+    biRender();
+  });
+  biSec.querySelector("#biRun").addEventListener("click", () => {
+    const f = biFaultOf();
+    const run = bistRun(f);
+    bi.lastRun = { fault: bi.fault, run };
+    const golden = BI_V.golden;
+    const detected = run.sig !== golden;
+    biSec.querySelector("#biResult").textContent = "BIST complete: 16 patterns, signature 0x" + run.sig.toString(16).toUpperCase().padStart(2, "0") + " against golden 0x" + golden.toString(16).toUpperCase() + " — " + (detected ? "FAULT DETECTED: the signature moved." : "CLEAN: the signature matches the golden chip.");
+    biSec.querySelector("#biResult").style.color = detected ? "var(--red)" : "var(--green)";
+    let th = "<thead><tr><th>#</th><th>Pattern abcd</th><th>Response y0y1y2y3</th><th>Signature after</th></tr></thead><tbody>";
+    let sig = 0x00;
+    run.trace.forEach((t, i) => {
+      sig = misrStep(sig, t.resp);
+      th += "<tr><td>" + (i + 1) + "</td><td class=\"mono\">" + binT(t.pat, 4) + "</td><td class=\"mono\">" + binT(t.resp, 4) + "</td><td class=\"mono\">0x" + sig.toString(16).toUpperCase().padStart(2, "0") + "</td></tr>";
+    });
+    biSec.querySelector("#biTable").innerHTML = th + "</tbody>";
+  });
+  biSec.querySelector("#biLocate").addEventListener("click", () => {
+    if (!bi.lastRun) { biSec.querySelector("#biResult").textContent = "Run BIST first — there is no signature to compare yet."; return; }
+    const goldenRun = bistRun(null);
+    const run = bi.lastRun.run;
+    let first = -1;
+    for (let i = 0; i < 16; i++) if (run.trace[i].resp !== goldenRun.trace[i].resp) { first = i; break; }
+    if (first < 0) { biSec.querySelector("#biResult").textContent = "The 16 responses are identical to the golden chip's — this fault is masked by this pattern set. (On this circuit that never happens: every single stuck-at fault shows.)"; return; }
+    const bad = run.trace[first].resp ^ goldenRun.trace[first].resp;
+    const bits = [0, 1, 2, 3].filter(k => (bad >> k) & 1);
+    biSec.querySelector("#biResult").textContent = "First disagreement: pattern " + (first + 1) + " (abcd = " + binT(run.trace[first].pat, 4) + "). Golden response " + binT(goldenRun.trace[first].resp, 4) + ", faulty response " + binT(run.trace[first].resp, 4) + " — the fault shows on " + bits.map(k => "y" + k).join(" and ") + ". That is the output bit to probe on the bench.";
+  });
+  let biQn = 0;
+  function biQuestion() {
+    const rng = rngT(9101 + biQn * 53);
+    const fi = 9 + Math.floor(rng() * 8); // output faults only: exactly one bit differs, so the question stays well-posed
+    const f = BIST_FAULTS[fi];
+    const run = bistRun({ node: f.node, stuck: f.stuck });
+    const goldenRun = bistRun(null);
+    let first = -1;
+    for (let i = 0; i < 16; i++) if (run.trace[i].resp !== goldenRun.trace[i].resp) { first = i; break; }
+    const bad = first >= 0 ? run.trace[first].resp ^ goldenRun.trace[first].resp : 0;
+    const bits = [0, 1, 2, 3].filter(k => (bad >> k) & 1);
+    const want = bits.map(k => "y" + k).join(" and ");
+    const pool = ["y0", "y1", "y2", "y3"].filter(v => v !== want);
+    const labels = [want].concat(pool.slice(0, 3));
+    for (let i = labels.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); const t = labels[i]; labels[i] = labels[j]; labels[j] = t; }
+    biSec.querySelector("#biQ").textContent = "Predict, then check: fault injected — " + f.label + ". The 16-pattern BIST runs. Which output bit is the first to disagree with the golden chip's response?";
+    const fb = biSec.querySelector("#biFb");
+    optBtnsT(biSec.querySelector("#biOpts"), labels, i => {
+      const picked = labels[i];
+      if (picked === want) fbSetT(fb, true, "Right — on pattern " + (first + 1) + " (abcd = " + binT(run.trace[first].pat, 4) + ") the golden response is " + binT(goldenRun.trace[first].resp, 4) + " and the faulty one is " + binT(run.trace[first].resp, 4) + ": " + want + " differs, and that is the bit the fault shows on.");
+      else fbSetT(fb, false, "Not " + picked + ": on the first disagreeing pattern the golden and faulty responses differ on " + want + ", not " + picked + ". Run BIST with this fault injected and use Locate the fault — the table shows the first disagreement.");
+    });
+    window.__bistQuestion = { fault: f.label, firstPattern: first + 1, bit: want };
+  }
+  biSec.querySelector("#biNewQ").addEventListener("click", () => { biQn++; biQuestion(); });
+  biRender(); biQuestion();
+
+  /* ================================================================
+     3) IEEE 754 MULTIPLICATION STEPPER — model first.
+     Exact BigInt significand math, following the A6 addition
+     stepper: each operand becomes (sign, exp, sig24) from its
+     float32 bits; the product is up to 48 bits; the top 27 bits
+     are kept (24 wanted + 3 rounding bits) and rounded
+     round-to-nearest-even. Verified at load against
+     Math.fround(a * b).
+     ================================================================ */
+  function f32bitsT(x) { const dv = new DataView(new ArrayBuffer(4)); dv.setFloat32(0, x); return dv.getUint32(0); }
+  function f32decompT(x) {
+    const b = f32bitsT(x), sign = (b >>> 31) & 1, ef = (b >>> 23) & 0xFF, frac = b & 0x7FFFFF;
+    if (ef === 0 && frac === 0) return { sign, exp: -126, sig: 0n, zero: true };
+    if (ef === 0) return { sign, exp: -126, sig: BigInt(frac), zero: false, sub: true };
+    return { sign, exp: ef - 127, sig: BigInt(frac | 0x800000), zero: false };
+  }
+  function f32fromBits(bits) { const dv = new DataView(new ArrayBuffer(4)); dv.setUint32(0, bits); return dv.getFloat32(0); }
+  function fpMul(a, b) {
+    const A = f32decompT(a), B = f32decompT(b);
+    if (A.zero || B.zero) return { bits: (A.sign ^ B.sign) ? 0x80000000 : 0, steps: null, note: "zero" };
+    if (A.sub || B.sub) return { bits: f32bitsT(Math.fround(a * b)), steps: null, note: "subnormal" };
+    const sign = A.sign ^ B.sign;
+    const expSum = A.exp + B.exp;
+    const prod = A.sig * B.sig;
+    const wide = prod >= (1n << 47n);
+    let exp = wide ? expSum + 1 : expSum;
+    const drop = wide ? 21n : 20n;
+    const top27 = prod >> drop;
+    const dropped = prod & ((1n << drop) - 1n);
+    let keep = top27 >> 3n;
+    const rem = top27 & 7n;
+    let roundedUp = false;
+    if (rem > 4n || (rem === 4n && (keep & 1n) === 1n)) { keep = keep + 1n; roundedUp = true; }
+    if (keep >= (1n << 24n)) { keep = keep >> 1n; exp++; }
+    if (exp + 127 > 254) return { bits: ((sign << 31) | 0x7F800000) >>> 0, steps: { A, B, sign, expSum, prod, wide, top27, dropped, keep, rem, exp, roundedUp }, note: "overflow" };
+    if (exp + 127 <= 0) return { bits: f32bitsT(Math.fround(a * b)), steps: { A, B, sign, expSum, prod, wide, top27, dropped, keep, rem, exp, roundedUp }, note: "underflow" };
+    const bits = (((sign << 31) | ((exp + 127) << 23) | Number(keep & 0x7FFFFFn)) >>> 0);
+    return { bits, steps: { A, B, sign, expSum, prod, wide, top27, dropped, keep, rem, exp, roundedUp }, note: null };
+  }
+  const FM_PAIRS = [
+    { a: 1.5, b: 1.5, why: "product needs the extra normalisation step" },
+    { a: 1 + Math.pow(2, -23), b: 1.5, why: "the tie: dropped bits exactly half an ulp" },
+    { a: 1 + Math.pow(2, -23), b: 1 + Math.pow(2, -23), why: "a low bit that rounding drops" },
+    { a: 2.5, b: 0.75, why: "clean product, exact" },
+    { a: -1.25, b: 4.0, why: "sign flips, exponent jumps" }
+  ];
+  function fpMulVerify() {
+    let ok = true, checked = 0;
+    FM_PAIRS.forEach(p => { checked++; if (fpMul(p.a, p.b).bits !== f32bitsT(Math.fround(p.a * p.b))) ok = false; });
+    let seed = 1234; const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+    for (let i = 0; i < 2000 && ok; i++) {
+      const a = (Math.floor(rnd() * 2000) - 1000) / Math.pow(2, Math.floor(rnd() * 8));
+      const b = (Math.floor(rnd() * 2000) - 1000) / Math.pow(2, Math.floor(rnd() * 8));
+      checked++;
+      if (fpMul(a, b).bits !== f32bitsT(Math.fround(a * b))) ok = false;
+    }
+    [[3.4e38, 2], [1e-38, 1e-38], [1e38, 1e-38]].forEach(([a, b]) => { checked++; if (fpMul(a, b).bits !== f32bitsT(Math.fround(a * b))) ok = false; });
+    return { ok, checked, pass: ok };
+  }
+  const FM_V = fpMulVerify();
+
+  let fmCur = FM_PAIRS[0];
+  const fmSec = document.createElement("section");
+  fmSec.className = "card stage-card"; fmSec.id = "fpMulCard"; fmSec.style.marginTop = "16px";
+  fmSec.innerHTML =
+    "<h2>Multiplying floats — IEEE 754, one honest step at a time</h2>" +
+    '<p class="what">Addition aligns and then adds; multiplication is the cleaner operation, and the one where rounding is easiest to see. Pick a pair and work the five steps: the sign is an XOR, the exponents add, the two 24-bit significands multiply to a product up to 48 bits wide, the product is normalised back to 24 bits, and round-to-nearest-even settles what was dropped. Each step is checked against exact integer significand math done by this page, and the assembled result is verified against the machine\'s own float32 multiply. The second pair is the famous one: the dropped bits are <b>exactly half an ulp</b>, a tie, and only the even-neighbour rule can settle it — the kept significand is odd, so it rounds up. The third pair is the quieter lesson: a low bit the product genuinely needs, dropped because 24 bits is all a float holds.</p>' +
+    '<div class="tool-controls"><label>Operand pair <select id="fmSel" class="rx-sel">' +
+    FM_PAIRS.map((p, i) => '<option value="' + i + '">' + p.a + " × (" + p.b + ") — " + p.why + "</option>").join("") +
+    '<option value="gen">Generate a pair for me</option></select></label><span class="mono" id="fmBits" style="font-size:12.5px"></span></div>' +
+    '<div id="fmSteps"></div>' +
+    '<div class="decimal-line" id="fmVerifyLine" aria-live="polite"></div>' +
+    '<div class="share-row"><button type="button" class="btn" data-fmlink="add">The IEEE 754 addition stepper — the first operation in this thread →</button>' +
+    '<button type="button" class="btn" data-fmlink="fpu">The FPU minifloat adder — the same rounding, in breadboard chips →</button></div>' +
+    '<p class="cp-formal adv-only">Single precision: 1 sign bit, 8 exponent bits (bias 127), 23 stored fraction bits with an implicit leading 1 (the hidden bit) for normals. The product of two 24-bit significands lies between 2^46 and 2^48, so it needs one normalisation shift (or two, when the product reaches 2^47 and the exponent gains one more). The dropped bits become guard, round and sticky information: guard is the first dropped bit, round the second, sticky the OR of the rest — and a tie, guard 1 with round and sticky 0, is resolved toward the candidate whose last kept bit is 0. Overflow past exponent 254 yields infinity; underflow past −126 yields zero or a subnormal, which this lab reports rather than steps through.</p>';
+  biSec.parentNode.insertBefore(fmSec, biSec.nextSibling);
+  fmSec.querySelectorAll("[data-fmlink]").forEach(b => b.addEventListener("click", () => {
+    if (b.dataset.fmlink === "add") { if (!clickMenuKeyT("arch-fpadd")) jumpT("fpMulCard"); }
+    else { if (!clickMenuKeyT("bb-fpu")) jumpT("fpMulCard"); }
+  }));
+  function fmtBinBig(big, n) { let s = big.toString(2); while (s.length < n) s = "0" + s; return s; }
+  function fmRender() {
+    const r = fpMul(fmCur.a, fmCur.b), st = r.steps;
+    fmSec.querySelector("#fmBits").textContent = "a = " + hexT(f32bitsT(fmCur.a), 8) + " · b = " + hexT(f32bitsT(fmCur.b), 8);
+    const host = fmSec.querySelector("#fmSteps"); host.innerHTML = "";
+    if (!st) {
+      host.innerHTML = '<div class="decimal-line">' + (r.note === "zero" ? "A zero operand: the product is zero (signed by the XOR of the signs) — no significand ever multiplies." : "A subnormal operand: the hidden bit is not 1, so the significand is not 24 bits wide. This lab steps through normal × normal only; the assembled result is still verified against the machine.") + "</div>";
+      fmSec.querySelector("#fmVerifyLine").textContent = "Self-test at load: the model reproduces the machine's float32 multiply on all 5 pairs plus 2,000 random pairs and the overflow/underflow edges (" + FM_V.checked + " checks) (window.__fpMulCheck).";
+      return;
+    }
+    const A = st.A, B = st.B;
+    const dec = f32fromBits(r.bits);
+    const steps = [];
+    steps.push({ q: "Step 1 — the sign of the product is the XOR of the signs: " + A.sign + " XOR " + B.sign + ". What is it?",
+      opts: ["0 — positive", "1 — negative"], want: st.sign === 1 ? "1 — negative" : "0 — positive",
+      good: "Signs multiply by XOR: " + (st.sign === 1 ? "one negative operand, so the product is negative." : "same signs, so the product is positive."),
+      bad: "XOR, not AND: the product is negative exactly when the signs differ. Here " + A.sign + " XOR " + B.sign + " = " + st.sign + "." });
+    const expOpts = [String(st.expSum - 1), String(st.expSum), String(st.expSum + 1), String(st.expSum + 2)].filter((v, i, arr) => arr.indexOf(v) === i);
+    steps.push({ q: "Step 2 — the unbiased exponents add: " + A.exp + " + " + B.exp + " = " + st.expSum + ". The product significand is " + (st.wide ? "48 bits wide, so normalisation costs one more exponent" : "47 bits wide, so normalisation costs nothing extra") + ". The result exponent, unbiased?",
+      opts: expOpts, want: String(st.exp),
+      good: "Exponent " + st.exp + ": the sum " + st.expSum + (st.wide ? " plus 1 for the 48-bit product's extra normalisation shift." : ", and the 47-bit product needs no extra shift."),
+      bad: "Add the unbiased exponents (" + st.expSum + "), then add 1 more only if the product reaches 2^47 — " + (st.wide ? "it does here, so the exponent is " + st.exp + "." : "it does not here, so the exponent stays " + st.exp + ".") });
+    const prodHex = "0x" + st.prod.toString(16).toUpperCase().padStart(12, "0");
+    const w1 = "0x" + ((A.sig & 0x7FFFFFn) * (B.sig & 0x7FFFFFn)).toString(16).toUpperCase().padStart(12, "0");
+    const w2 = "0x" + (st.prod << 1n).toString(16).toUpperCase().padStart(12, "0");
+    const w3 = "0x" + (st.prod >> 1n).toString(16).toUpperCase().padStart(12, "0");
+    const prodOpts = [prodHex, w1, w2, w3].filter((v, i, arr) => arr.indexOf(v) === i);
+    steps.push({ q: "Step 3 — multiply the two 24-bit significands (hidden 1 included). The product, all " + (st.wide ? "48" : "47") + " bits of it?",
+      opts: prodOpts, want: prodHex,
+      good: "The product is " + prodHex + " — an integer, not yet a float. Its width is what step 2 already told you: " + (st.wide ? "48 bits, leading bit at 2^47." : "47 bits, leading bit at 2^46."),
+      bad: "Multiply the FULL 24-bit significands, hidden 1 included: " + fmtBinBig(A.sig, 24) + " × " + fmtBinBig(B.sig, 24) + " = " + prodHex + ". Dropping the hidden bit is one of the options here — it is the classic float bug, and it is what makes that option look plausible." });
+    const g = Number((st.rem >> 2n) & 1n), rd = Number((st.rem >> 1n) & 1n), sk = Number(st.rem & 1n);
+    const dropDesc = st.dropped === 0n ? "nothing was dropped" : "dropped bits: guard " + g + ", round " + rd + ", sticky " + sk;
+    let roundLabel, roundWhy;
+    if (st.dropped === 0n) { roundLabel = "Exact — no bits dropped"; roundWhy = "The product fits in 24 bits after normalisation: nothing falls off, so there is nothing to round."; }
+    else if (st.rem > 4n || (st.rem === 4n && (st.keep & 1n) === 1n)) { roundLabel = "Rounds up"; roundWhy = st.rem === 4n ? "A tie: dropped bits exactly half an ulp, and the kept significand is odd — round-to-nearest-even rounds UP to the even neighbour." : "More than half an ulp was dropped (guard/round/sticky = " + g + "/" + rd + "/" + sk + "), so the nearest float is the one above."; }
+    else if (st.rem === 4n) { roundLabel = "Tie — rounds to even, stays"; roundWhy = "A tie: dropped bits exactly half an ulp, and the kept significand is already even — round-to-nearest-even stays put."; }
+    else { roundLabel = "Rounds down"; roundWhy = "Less than half an ulp was dropped (guard/round/sticky = " + g + "/" + rd + "/" + sk + "), so the nearest float is the one below."; }
+    const roundOpts = ["Rounds up", "Rounds down", "Tie — rounds to even, stays", "Exact — no bits dropped"].filter(v => v !== roundLabel);
+    roundOpts.splice(1, 0, roundLabel);
+    steps.push({ q: "Step 4 — normalise to 24 bits and round. The top 27 bits are " + fmtBinBig(st.top27, 27) + " (24 kept + 3 rounding bits); " + dropDesc + ". What happens?",
+      opts: roundOpts, want: roundLabel,
+      good: roundWhy + " The kept significand is 0x" + (st.keep & 0xFFFFFFn).toString(16).toUpperCase() + ".",
+      bad: "Read the rounding bits: guard " + g + ", round " + rd + ", sticky " + sk + ". " + roundWhy });
+    const finalOpts = [hexT(r.bits, 8), hexT((r.bits + 0x800000) >>> 0, 8), hexT((r.bits - 0x800000) >>> 0, 8), hexT((r.bits ^ 0x80000000) >>> 0, 8)].filter((v, i, arr) => arr.indexOf(v) === i);
+    steps.push({ q: "Step 5 — assemble: sign " + st.sign + ", exponent field " + (st.exp + 127) + " (" + st.exp + " + 127), fraction the top 23 bits of the rounded significand. The final 32-bit pattern?",
+      opts: finalOpts, want: hexT(r.bits, 8),
+      good: "Assembled and verified: 0x" + hexT(r.bits, 8) + " is bit-for-bit what the machine's own float32 multiply of " + fmCur.a + " × (" + fmCur.b + ") produces — and as a decimal it stores " + dec + (String(fmCur.a * fmCur.b) !== String(dec) ? ", while the exact product is " + (fmCur.a * fmCur.b) + ". The gap is the rounding this lab is about." : ", and here the exact product fits in 24 bits, so float and truth agree."),
+      bad: "Assemble carefully: sign, then exponent + 127 in 8 bits, then the TOP 23 fraction bits after rounding — the exponent-off-by-one patterns are both in this list, and so is the sign-flipped one. The model's exact assembly is 0x" + hexT(r.bits, 8) + "." });
+    steps.forEach(s => {
+      const d = document.createElement("div"); d.className = "rx-panel"; d.style.marginTop = "10px";
+      d.innerHTML = '<div class="lab-check-q"></div><span class="fp-opts" style="display:flex;gap:6px;flex-wrap:wrap"></span><span class="lab-check-fb" aria-live="polite"></span>';
+      d.querySelector(".lab-check-q").textContent = s.q;
+      const fbEl = d.querySelector(".lab-check-fb");
+      optBtnsT(d.querySelector(".fp-opts"), s.opts, (i, b) => {
+        const okOpt = b.textContent === s.want;
+        fbSetT(fbEl, okOpt, okOpt ? s.good : s.bad);
+      });
+      host.appendChild(d);
+    });
+    fmSec.querySelector("#fmVerifyLine").textContent = "Self-test at load: the model reproduces the machine's float32 multiply on all 5 pairs plus 2,000 random pairs and the overflow/underflow edges (" + FM_V.checked + " checks) (window.__fpMulCheck).";
+  }
+  fmSec.querySelector("#fmSel").addEventListener("change", e => {
+    if (e.target.value === "gen") {
+      const rng = rngT(9000 + Math.floor(Math.random() * 100000));
+      const a = (Math.floor(rng() * 160) - 40) / 8, b = (Math.floor(rng() * 160) - 80) / 16;
+      fmCur = { a: a === 0 ? 0.5 : a, b: b === 0 ? 0.25 : b, why: "generated" };
+    } else fmCur = FM_PAIRS[+e.target.value];
+    fmRender();
+  });
+  fmRender();
+
+  /* ---------------- verification handles + self-tests ---------------- */
+  window.__keypad = { keys: KP_KEYS, scanRow: kpScanRow, fullScan: kpFullScan, verify: kpVerify };
+  window.__bist = { cut: cutEval, lfsrStep, misrStep, run: bistRun, verify: bistVerify, golden: BI_V.golden };
+  window.__fpMul = { mul: fpMul, bits: f32bitsT, pairs: FM_PAIRS, verify: fpMulVerify };
+  try {
+    window.__keypadCheck = KP_V;
+    window.__bistCheck = BI_V;
+    window.__fpMulCheck = FM_V;
+    window.__roundATSelfTest = { keypad: KP_V, bist: BI_V, fpMul: FM_V };
+    const bad = Object.keys(window.__roundATSelfTest).filter(k => !window.__roundATSelfTest[k].pass);
+    if (bad.length && window.console) console.warn("[Round AT self-test] failures:", bad);
+  } catch (e) { window.__roundATSelfTest = { error: String(e && e.message || e) }; }
+
+  /* ---------------- MENU REGISTRATION + COUNT REBUILD ---------------- */
+  function addMenuItemT(groupName, afterKey, spec) {
+    const list = $T("menuList"); if (!list) return false;
+    if (list.querySelector('[data-key="' + spec.key + '"]')) return false;
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "menu-item"; b.dataset.key = spec.key;
+    b.dataset.search = (spec.label + " " + spec.hint + " " + spec.search).toLowerCase();
+    if (spec.level) b.dataset.uxlevel = spec.level;
+    b.innerHTML = '<span class="mi-dot" aria-hidden="true"></span><span class="mi-label"></span><small></small>';
+    b.querySelector(".mi-label").textContent = spec.label;
+    b.querySelector("small").textContent = spec.hint;
+    b.addEventListener("click", () => { const p = $T("menuPanel"); if (p) p.hidden = true; const mb = $T("menuBtn"); if (mb) mb.setAttribute("aria-expanded", "false"); spec.go(); });
+    if (afterKey) {
+      const anchor = list.querySelector('[data-key="' + afterKey + '"]');
+      if (anchor) { anchor.parentNode.insertBefore(b, anchor.nextSibling); return true; }
+    }
+    let sib = null, inGroup = false;
+    Array.prototype.slice.call(list.children).forEach(el => {
+      if (el.classList.contains("menu-group")) inGroup = (el.dataset.group || "").trim() === groupName;
+      else if (inGroup && el.classList.contains("menu-item")) sib = el;
+    });
+    if (sib) sib.parentNode.insertBefore(b, sib.nextSibling); else list.appendChild(b);
+    return true;
+  }
+  addMenuItemT("Logic & Circuits", "predict-quiz", {
+    key: "keypad-scan", label: "4x4 keypad — sixteen keys through eight wires",
+    hint: "Strobe the rows one at a time, read the columns, and decode which key is pressed — with the debounce rule from the switch-bounce lab and a keycode readout",
+    search: "keypad matrix scanning rows columns strobe debounce keycode 4x4 input device arduino scan timing simulator lab",
+    level: "intermediate", go: () => { setTopArea("circuits"); syncRail("circuits"); jumpT("keypadCard"); }
+  });
+  addMenuItemT("Logic & Circuits", "keypad-scan", {
+    key: "scan-bist", label: "Scan chain and BIST — testing a chip from the outside",
+    hint: "Chain the flip-flops into a shift register, shift a pattern in, capture the answer, shift it out; then let an LFSR and a signature register test the chip itself, with a stuck-at fault to find",
+    search: "scan chain bist built-in self-test lfsr signature register misr stuck-at fault test pattern capture shift register design for test simulator lab",
+    level: "advanced", go: () => { setTopArea("circuits"); syncRail("circuits"); jumpT("bistCard"); }
+  });
+  addMenuItemT("Logic & Circuits", "scan-bist", {
+    key: "fp-mul", label: "Multiplying floats — IEEE 754 step by step",
+    hint: "Sign by XOR, exponents add, significands multiply to 48 bits, normalise, round-to-nearest-even: assemble a real 32-bit float product, with the tie case called out",
+    search: "ieee 754 floating point multiplication float multiply significand product normalize round nearest even tie ulp stepper simulator",
+    level: "intermediate", go: () => { setTopArea("circuits"); syncRail("circuits"); jumpT("fpMulCard"); }
+  });
+  (function rebuildCountsT() {
+    const RJ = window.__uxRoundJ; if (!RJ) return;
+    const groups = RJ.menuGroups(); const counts = {}; let total = 0;
+    groups.forEach(g => {
+      counts[g.name] = g.items.length; total += g.items.length;
+      const c = g.header.querySelector(".mi-count"); if (c) c.textContent = g.items.length;
+    });
+    window.LAB_MENU = { groups: groups.map(g => ({ name: g.name, items: g.items.map(b => { const l = b.querySelector(".mi-label"); return l ? l.textContent : ""; }) })), count: total };
+    window.LAB_MODULES = { modules: groups.map(g => ({ name: g.name, count: g.items.length })), total };
+    RJ.buildRailAndList(counts);
+    RJ.buildGallery();
+    ["boards", "arch", "os", "org"].forEach(id => {
+      const h = document.querySelector("#module-" + id + " .mh-count");
+      if (!h) return;
+      const name = { boards: "Boards, Modulation & Projects", arch: "Computer Architecture", os: "Operating Systems", org: "Computer Organization" }[id];
+      if (counts[name]) h.textContent = counts[name] + " items";
+    });
+    window.__countsAT = { total, counts };
+  })();
+})();
+</script>
+<style>
+/* ===== Round AT — keypad grid ===== */
+.kp-grid{display:grid;grid-template-columns:repeat(4,minmax(52px,72px));gap:6px;margin:12px 0}
+.kp-key{padding:12px 0;font-size:16px;text-align:center}
+.kp-key[aria-pressed="true"]{background:var(--amber);border-color:var(--amber);color:#111}
+</style>
