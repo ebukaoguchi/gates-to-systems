@@ -34208,3 +34208,694 @@ window.__CPU_PDF = "data:application/pdf;base64,JVBERi0xLjQKJZOMi54gUmVwb3J0TGFi
 .kp-key{padding:12px 0;font-size:16px;text-align:center}
 .kp-key[aria-pressed="true"]{background:var(--amber);border-color:var(--amber);color:#111}
 </style>
+<script>
+"use strict";
+/* ================================================================
+   ROUND AU — three new labs, all in Logic & Circuits:
+   1) eeprom-lab — "Programming an EEPROM — the AT28C16 and the
+      readout it feeds". A 2K x 8 EEPROM simulated honestly:
+      erased bytes read 0xFF, reads need /CE and /OE low with /WE
+      high (anything else is high-Z), a byte write needs /CE low
+      and a /WE pulse. The student programs the decimal-display
+      table the breadboard CPU's Stage 6 uses (three chips, one
+      identical image, leading-zero blanking in the table, segment
+      bytes stored active-low for the common-anode display) and
+      watches a 3-digit readout run off the programmed bytes.
+      Pin table checked against the Atmel AT28C16 datasheet
+      (24-pin DIP: 1 A7, 8 A0, 9-11 I/O0-2, 12 GND, 13-17 I/O3-7,
+      18 /CE, 19 A10, 20 /OE, 21 /WE, 22 A9, 23 A8, 24 VCC).
+      Verified at load: write/read round trips, control interlocks,
+      the full 768-byte table against the segment function, and
+      the decoded readout for all 256 values.
+   2) led-matrix — "8x8 LED matrix — a picture one row at a time".
+      Row scanning like the keypad lab's strobing and the
+      multiplexed 7-segment displays, with an adjustable scan
+      clock: slow it down and you see one row at a time and
+      flicker; speed it up and persistence of vision assembles
+      the frame. Editable pattern, or load short text and watch
+      it scroll. Verified at load: font bitmap, scroll shifting,
+      the 8-row scan cycle and the 1/8 duty cycle.
+   3) mux-logic — "One mux, any function — Shannon expansion".
+      Any 3-variable function built from a single 4-to-1 mux:
+      selects are A and B, each data input is 0, 1, C or C-prime.
+      The recipe always exists (that is the theorem), and the lab
+      checks the student's data inputs against the truth table
+      and shows the K-map minimiser's sum-of-products for the
+      same function to compare costs. Verified at load over all
+      256 three-variable functions: the recipe reproduces each
+      truth table exactly, and so does the minimised SOP.
+   Everything loads paused.
+   ================================================================ */
+(function roundAU() {
+  const $U = id => document.getElementById(id);
+  function jumpU(id) { const el = id && $U(id); if (el) setTimeout(() => el.scrollIntoView({ behavior: "smooth", block: "start" }), 60); }
+  function clickMenuKeyU(key) { const it = document.querySelector('#menuList .menu-item[data-key="' + key + '"]'); if (it) { it.click(); return true; } return false; }
+  function fbSetU(el, ok, msg) { if (!el) return; el.textContent = (ok ? "✓ " : "✗ ") + msg; el.style.color = ok ? "var(--green)" : "var(--red)"; }
+  function optBtnsU(host, labels, onPick) {
+    host.innerHTML = "";
+    labels.forEach((lab, i) => { const b = document.createElement("button"); b.type = "button"; b.className = "btn"; b.textContent = lab; b.addEventListener("click", () => onPick(i, b)); host.appendChild(b); });
+  }
+  function rngU(seed) { let a = seed >>> 0; return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+  const binU = (v, w) => (v >>> 0).toString(2).padStart(w, "0");
+  const hexU = (v, w) => (v >>> 0).toString(16).toUpperCase().padStart(w, "0");
+
+  /* ================================================================
+     1) EEPROM — model first.
+     Pin levels are stated as booleans: ceLow / oeLow / weLow mean
+     the active-low pin is pulled low. A read drives the bus only
+     when /CE low, /OE low and /WE high; every other combination
+     leaves the bus high-Z (null here). A write cycle needs /CE
+     low and /WE low (the pulse); the byte is latched as /WE
+     returns high, which this model folds into one call.
+     ================================================================ */
+  const EE_SIZE = 2048;
+  function eeNew() { return { mem: new Uint8Array(EE_SIZE).fill(0xFF), writes: 0 }; }
+  function eeRead(st, addr, ceLow, oeLow, weLow) {
+    if (!ceLow) return null;
+    if (weLow) return null;
+    if (!oeLow) return null;
+    return st.mem[addr & 0x7FF];
+  }
+  function eeWriteCycle(st, addr, data, ceLow, weLow) {
+    if (!ceLow) return { ok: false, why: "/CE is high: the chip is not selected, so the pulse lands nowhere." };
+    if (!weLow) return { ok: false, why: "/WE never went low: no write cycle happened." };
+    st.mem[addr & 0x7FF] = data & 0xFF; st.writes++;
+    return { ok: true, why: "Byte latched: 0x" + hexU(data & 0xFF, 2) + " is now stored at 0x" + hexU(addr & 0x7FF, 3) + "." };
+  }
+  /* The decimal table. Segments a..g are bits 0..6 in "on" form;
+     the CPU's display is common anode, so the stored byte is the
+     complement (0 = segment lit), bit 7 (decimal point) held at 1
+     (off). Layout: address = (position << 8) | value, position
+     0 = units, 1 = tens, 2 = hundreds; leading zeros are blanked
+     in the table itself (0xFF = every segment off). */
+  const EE_SEG_ON = [0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07, 0x7F, 0x6F];
+  function eeSegByte(d) { return ((~EE_SEG_ON[d]) & 0x7F) | 0x80; }
+  function eeTableByte(value, pos) {
+    if (pos === 0) return eeSegByte(value % 10);
+    if (pos === 1) return value < 10 ? 0xFF : eeSegByte(Math.floor(value / 10) % 10);
+    return value < 100 ? 0xFF : eeSegByte(Math.floor(value / 100));
+  }
+  function eeDecodeDigit(stored) {
+    if (stored === 0xFF) return " ";
+    const d = EE_SEG_ON.indexOf((~stored) & 0x7F);
+    return d >= 0 ? String(d) : "?";
+  }
+  function eeProgramTable(st) {
+    let n = 0;
+    for (let pos = 0; pos < 3; pos++) for (let v = 0; v < 256; v++) {
+      const r = eeWriteCycle(st, (pos << 8) | v, eeTableByte(v, pos), true, true);
+      if (r.ok) n++;
+    }
+    return n;
+  }
+  function eeVerify() {
+    let rtOk = true, zOk = true, wOk = true, tblOk = true, readOk = true, cleanOk = true;
+    const st = eeNew();
+    const samples = [0x000, 0x001, 0x123, 0x2AA, 0x7FF];
+    samples.forEach((a, i) => { const r = eeWriteCycle(st, a, 0x40 + i * 7, true, true); if (!r.ok) rtOk = false; });
+    samples.forEach((a, i) => { if (eeRead(st, a, true, true, false) !== ((0x40 + i * 7) & 0xFF)) rtOk = false; });
+    zOk = eeRead(st, 0, false, true, false) === null && eeRead(st, 0, true, false, false) === null && eeRead(st, 0, true, true, true) === null;
+    { const st2 = eeNew(); const before = st2.mem[5];
+      const r1 = eeWriteCycle(st2, 5, 0x00, false, true);
+      const r2 = eeWriteCycle(st2, 5, 0x00, true, false);
+      wOk = !r1.ok && !r2.ok && st2.mem[5] === before; }
+    { const st3 = eeNew(); if (eeProgramTable(st3) !== 768) tblOk = false;
+      for (let pos = 0; pos < 3; pos++) for (let v = 0; v < 256; v++)
+        if (st3.mem[(pos << 8) | v] !== eeTableByte(v, pos)) tblOk = false;
+      for (let a = 0x300; a < EE_SIZE; a++) if (st3.mem[a] !== 0xFF) cleanOk = false;
+      for (let v = 0; v < 256; v++) {
+        const s = eeDecodeDigit(st3.mem[(2 << 8) | v]) + eeDecodeDigit(st3.mem[(1 << 8) | v]) + eeDecodeDigit(st3.mem[v]);
+        const want = (v < 100 ? " " : String(Math.floor(v / 100))) + (v < 10 ? " " : String(Math.floor(v / 10) % 10)) + String(v % 10);
+        if (s !== want) readOk = false;
+      } }
+    return { rtOk, zOk, wOk, tblOk, readOk, cleanOk, pass: rtOk && zOk && wOk && tblOk && readOk && cleanOk };
+  }
+  const EE_V = eeVerify();
+
+  /* ================================================================
+     2) LED MATRIX — model first.
+     A frame is 8 columns x 8 rows of booleans, frame[y][x].
+     Text uses a 3x5 font placed on rows 1..5; the bitmap is a
+     list of columns (each an 8-bit column, bit y = row y), and
+     scrolling moves a window across bitmap + blank columns.
+     The scanner lights exactly one row per step.
+     ================================================================ */
+  const MX_FONT = {
+    "A": ["010", "101", "111", "101", "101"], "B": ["110", "101", "110", "101", "110"],
+    "C": ["011", "100", "100", "100", "011"], "D": ["110", "101", "101", "101", "110"],
+    "E": ["111", "100", "110", "100", "111"], "F": ["111", "100", "110", "100", "100"],
+    "G": ["011", "100", "101", "101", "011"], "H": ["101", "101", "111", "101", "101"],
+    "I": ["111", "010", "010", "010", "111"], "J": ["001", "001", "001", "101", "010"],
+    "K": ["101", "101", "110", "101", "101"], "L": ["100", "100", "100", "100", "111"],
+    "M": ["101", "111", "111", "101", "101"], "N": ["101", "111", "111", "111", "101"],
+    "O": ["010", "101", "101", "101", "010"], "P": ["110", "101", "110", "100", "100"],
+    "Q": ["010", "101", "101", "110", "011"], "R": ["110", "101", "110", "101", "101"],
+    "S": ["011", "100", "010", "001", "110"], "T": ["111", "010", "010", "010", "010"],
+    "U": ["101", "101", "101", "101", "111"], "V": ["101", "101", "101", "101", "010"],
+    "W": ["101", "101", "111", "111", "101"], "X": ["101", "101", "010", "101", "101"],
+    "Y": ["101", "101", "010", "010", "010"], "Z": ["111", "001", "010", "100", "111"],
+    "0": ["111", "101", "101", "101", "111"], "1": ["010", "010", "010", "010", "010"],
+    "2": ["110", "001", "010", "100", "111"], "3": ["110", "001", "010", "001", "110"],
+    "4": ["101", "101", "111", "001", "001"], "5": ["111", "100", "110", "001", "110"],
+    "6": ["011", "100", "110", "101", "010"], "7": ["111", "001", "010", "010", "010"],
+    "8": ["010", "101", "010", "101", "010"], "9": ["010", "101", "011", "001", "110"],
+    " ": ["000", "000", "000", "000", "000"], "-": ["000", "000", "111", "000", "000"],
+    ".": ["000", "000", "000", "000", "010"], "!": ["010", "010", "010", "000", "010"]
+  };
+  function mxTextColumns(text) {
+    const cols = [];
+    for (const ch of (text || "").toUpperCase()) {
+      const g = MX_FONT[ch] || MX_FONT[" "];
+      for (let x = 0; x < 3; x++) { let bits = 0; for (let r = 0; r < 5; r++) if (g[r][x] === "1") bits |= 1 << (r + 1); cols.push(bits); }
+      cols.push(0);
+    }
+    return cols;
+  }
+  function mxFrame(cols, offset) {
+    const f = [];
+    for (let y = 0; y < 8; y++) { f.push([]); for (let x = 0; x < 8; x++) {
+      const ci = offset + x;
+      f[y].push(ci >= 0 && ci < cols.length ? ((cols[ci] >> y) & 1) === 1 : false);
+    } }
+    return f;
+  }
+  function mxVerify() {
+    let fontOk = false, shiftOk = true, cycleOk = true, dutyOk = true;
+    const aCols = mxTextColumns("A");
+    fontOk = aCols.length === 4 && mxFrame(aCols, 0)[1][0] === false && mxFrame(aCols, 0)[1][1] === true && mxFrame(aCols, 0)[3][0] === true;
+    const cols = mxTextColumns("HI");
+    for (let o = 0; o < cols.length; o++) {
+      const f1 = mxFrame(cols, o), f2 = mxFrame(cols, o + 1);
+      for (let y = 0; y < 8; y++) for (let x = 0; x < 7; x++) if (f2[y][x] !== f1[y][x + 1]) shiftOk = false;
+    }
+    { let row = 0; const seen = []; for (let i = 0; i < 8; i++) { seen.push(row); row = (row + 1) % 8; } cycleOk = row === 0 && seen.join("") === "01234567"; }
+    { const counts = [0, 0, 0, 0, 0, 0, 0, 0]; for (let s = 0; s < 8; s++) counts[s % 8]++; dutyOk = counts.every(c => c === 1); }
+    return { fontOk, shiftOk, cycleOk, dutyOk, pass: fontOk && shiftOk && cycleOk && dutyOk };
+  }
+  const MX_V = mxVerify();
+
+  /* ================================================================
+     3) MUX LOGIC — model first.
+     Truth table tt[abc], index = 4A + 2B + C. Selects are A (S1)
+     and B (S0); data input D[2A+B] is a token: 0, 1, 2 (= C) or
+     3 (= C-prime). The Shannon recipe reads each D off the two
+     rows of the truth table that select it.
+     ================================================================ */
+  const MUX_TOKENS = ["0", "1", "C", "C′"];
+  function muxEval(tt, d) {
+    const out = [];
+    for (let abc = 0; abc < 8; abc++) {
+      const c = abc & 1, sel = abc >> 1, t = d[sel];
+      out.push(t === 0 ? 0 : t === 1 ? 1 : t === 2 ? c : 1 - c);
+    }
+    return out;
+  }
+  function muxRecipe(tt) {
+    const d = [];
+    for (let sel = 0; sel < 4; sel++) {
+      const f0 = tt[sel * 2], f1 = tt[sel * 2 + 1];
+      d.push(f0 === 0 && f1 === 0 ? 0 : f0 === 1 && f1 === 1 ? 1 : f0 === 0 ? 2 : 3);
+    }
+    return d;
+  }
+  function muxSOP(tt) {
+    const minterms = []; for (let i = 0; i < 8; i++) if (tt[i]) minterms.push(i);
+    if (!minterms.length) return "0";
+    if (minterms.length === 8) return "1";
+    let terms = minterms.map(m => ({ bits: m, mask: 7 }));
+    const primes = new Set();
+    let cur = terms;
+    while (cur.length) {
+      const used = new Set(); const next = [];
+      for (let i = 0; i < cur.length; i++) for (let j = i + 1; j < cur.length; j++) {
+        const a = cur[i], b = cur[j];
+        if (a.mask !== b.mask) continue;
+        const diff = a.bits ^ b.bits;
+        if (diff && (diff & (diff - 1)) === 0 && (diff & ~a.mask) === 0) {
+          used.add(i); used.add(j);
+          const nt = { bits: a.bits & ~diff, mask: a.mask & ~diff };
+          if (!next.some(t => t.bits === nt.bits && t.mask === nt.mask)) next.push(nt);
+        }
+      }
+      cur.forEach((t, i) => { if (!used.has(i)) primes.add(t.bits + "/" + t.mask); });
+      cur = next;
+    }
+    const primeList = [...primes].map(s => { const [b, m] = s.split("/").map(Number); return { bits: b, mask: m }; });
+    const covers = t => minterms.filter(m => (m & t.mask) === (t.bits & t.mask));
+    const chosen = []; const covered = new Set();
+    let pool = primeList.slice();
+    let progress = true;
+    while (progress) {
+      progress = false;
+      for (const m of minterms) {
+        if (covered.has(m)) continue;
+        const cand = pool.filter(t => (m & t.mask) === (t.bits & t.mask));
+        if (cand.length === 1) { chosen.push(cand[0]); covers(cand[0]).forEach(x => covered.add(x)); pool = pool.filter(t => t !== cand[0]); progress = true; }
+      }
+    }
+    while (covered.size < minterms.length) {
+      let best = null, bestN = -1;
+      for (const t of pool) { const n = covers(t).filter(m => !covered.has(m)).length; if (n > bestN) { bestN = n; best = t; } }
+      if (!best) break;
+      chosen.push(best); covers(best).forEach(x => covered.add(x)); pool = pool.filter(t => t !== best);
+    }
+    const names = ["A", "B", "C"];
+    return chosen.map(t => {
+      let s = "";
+      for (let v = 0; v < 3; v++) { const bit = 2 - v; if (t.mask & (1 << bit)) s += names[v] + (((t.bits >> bit) & 1) ? "" : "′"); }
+      return s || "1";
+    }).join(" + ");
+  }
+  function sopEval(sop, abc) {
+    if (sop === "0") return 0; if (sop === "1") return 1;
+    const vars = { A: (abc >> 2) & 1, B: (abc >> 1) & 1, C: abc & 1 };
+    return sop.split(" + ").some(term => {
+      let ok = true;
+      for (let i = 0; i < term.length; i++) {
+        const v = vars[term[i]]; if (v === undefined) continue;
+        const comp = term[i + 1] === "′"; if (comp) i++;
+        if ((comp ? 1 - v : v) !== 1) ok = false;
+      }
+      return ok;
+    }) ? 1 : 0;
+  }
+  function muxVerify() {
+    let recipeOk = true, sopOk = true;
+    for (let n = 0; n < 256; n++) {
+      const tt = []; for (let i = 0; i < 8; i++) tt.push((n >> i) & 1);
+      const out = muxEval(tt, muxRecipe(tt));
+      for (let i = 0; i < 8; i++) if (out[i] !== tt[i]) recipeOk = false;
+      const sop = muxSOP(tt);
+      for (let i = 0; i < 8; i++) if (sopEval(sop, i) !== tt[i]) sopOk = false;
+    }
+    return { recipeOk, sopOk, functions: 256, pass: recipeOk && sopOk };
+  }
+  const MUX_V = muxVerify();
+
+  window.__eeprom = { read: eeRead, writeCycle: eeWriteCycle, tableByte: eeTableByte, segByte: eeSegByte, decodeDigit: eeDecodeDigit, programTable: eeProgramTable, verify: eeVerify };
+  window.__ledMatrix = { font: MX_FONT, textColumns: mxTextColumns, frame: mxFrame, verify: mxVerify };
+  window.__muxLogic = { eval: muxEval, recipe: muxRecipe, sop: muxSOP, verify: muxVerify };
+  try {
+    window.__eepromCheck = EE_V;
+    window.__matrixCheck = MX_V;
+    window.__muxCheck = MUX_V;
+    window.__roundAUSelfTest = { eeprom: EE_V, matrix: MX_V, mux: MUX_V };
+    const bad = Object.keys(window.__roundAUSelfTest).filter(k => !window.__roundAUSelfTest[k].pass);
+    if (bad.length && window.console) console.warn("[Round AU self-test] failures:", bad);
+  } catch (e) { window.__roundAUSelfTest = { error: String(e && e.message || e) }; }
+
+  /* ================================================================
+     1) EEPROM — the card.
+     ================================================================ */
+  const ee = eeNew();
+  const eeCtl = { ce: false, oe: false, we: false };
+  const eeSec = document.createElement("section");
+  eeSec.className = "card stage-card"; eeSec.id = "eepromCard"; eeSec.style.marginTop = "16px";
+  eeSec.innerHTML =
+    "<h2>Programming an EEPROM — the AT28C16 and the readout it feeds</h2>" +
+    '<p class="what">The AT28C16 is a 2K x 8 EEPROM: eleven address pins (A0–A10) choose one of 2,048 bytes, eight I/O pins carry the byte, and three active-low control pins run the show. <b>/CE</b> selects the chip (it is exactly the chip-select the address-decoding lab builds from gates), <b>/OE</b> lets it drive the bus for a read, and a <b>/WE</b> pulse writes. Erased bytes read 0xFF. This is the chip the breadboard CPU\'s decimal readout is built from: three of them hold one identical table that turns a binary value into three digit patterns, with leading-zero blanking baked into the table. Set an address and a byte, work the control pins, and run cycles by hand; then program the whole table and watch the readout run off bytes you wrote.</p>' +
+    '<div class="au-panel"><h3>Before you power it — pin check (AT28C16, 24-pin DIP)</h3>' +
+    '<div class="au-pins">' +
+    "<span>1 · A7</span><span>24 · VCC</span><span>2 · A6</span><span>23 · A8</span><span>3 · A5</span><span>22 · A9</span><span>4 · A4</span><span>21 · /WE</span><span>5 · A3</span><span>20 · /OE</span><span>6 · A2</span><span>19 · A10</span><span>7 · A1</span><span>18 · /CE</span><span>8 · A0</span><span>17 · I/O7</span><span>9 · I/O0</span><span>16 · I/O6</span><span>10 · I/O1</span><span>15 · I/O5</span><span>11 · I/O2</span><span>14 · I/O4</span><span>12 · GND</span><span>13 · I/O3</span>" +
+    '</div><p class="au-note">Power is pin 24 (+5 V), ground is pin 12, and the body is the wide 0.6-inch DIP: it will not fit a narrow 24-pin socket. On the CPU board the three EEPROMs sit in wide sockets for exactly this reason.</p></div>' +
+    '<div class="share-row"><label>Address (hex) <input class="au-in" id="eeAddr" value="000" size="4" maxlength="3"></label>' +
+    '<label>Data (hex) <input class="au-in" id="eeData" value="3F" size="3" maxlength="2"></label>' +
+    '<button type="button" class="btn" id="eeCe">/CE: high</button>' +
+    '<button type="button" class="btn" id="eeOe">/OE: high</button>' +
+    '<button type="button" class="btn" id="eeWe">/WE: high</button>' +
+    '<button type="button" class="btn primary" id="eeCycle">Run one cycle</button></div>' +
+    '<div class="seq-state" id="eeBus" style="margin-top:8px" aria-live="polite">Bus: idle. With /WE low a cycle writes; with /WE high it reads, and only when /CE and /OE are both low does the chip drive the bus.</div>' +
+    '<div class="ac-trace" id="eePeek" aria-live="polite"></div>' +
+    '<div class="share-row"><button type="button" class="btn primary" id="eeProgram">Program the decimal table (768 bytes)</button>' +
+    '<button type="button" class="btn" id="eeErase">Erase chip (all 0xFF)</button></div>' +
+    '<div class="ctrl-label" style="margin-top:12px">The readout the table feeds — three common-anode digits</div>' +
+    '<div class="share-row" style="align-items:center"><label>Value <input class="au-in" id="eeValue" type="number" min="0" max="255" value="42" style="width:70px"></label><div class="au-digits" id="eeDigits"></div><span class="decimal-line" id="eeReadoutTxt"></span></div>' +
+    '<div class="decimal-line" id="eeVerifyLine" aria-live="polite"></div>' +
+    '<div class="ctrl-label" style="margin-top:10px">Predict first — then check</div>' +
+    '<div class="lab-check"><span class="lab-check-q" id="eeQ"></span><span id="eeOpts" style="display:flex;gap:6px;flex-wrap:wrap"></span><span class="lab-check-fb" id="eeFb" aria-live="polite"></span></div>' +
+    '<div class="share-row"><button type="button" class="btn" id="eeNewQ">New question</button>' +
+    '<button type="button" class="btn" data-eelink="addr">Address decoding &amp; memory-mapped I/O — where /CE comes from →</button>' +
+    '<button type="button" class="btn" data-eelink="cpu">The breadboard CPU — Stage 6 burns this table →</button>' +
+    '<button type="button" class="btn" data-eelink="seg">The 7447 seven-segment board →</button></div>' +
+    '<p class="cp-formal adv-only">Formally: the read is a combinational path from address to I/O gated by /CE · /OE · WE; the write is an edge-latched cycle (the byte is captured as /WE or /CE rises, whichever comes first) followed by an internal write cycle the datasheet bounds at 1 ms, during which the real part reports DATA polling on I/O7. The table is a pure function of (position, value) stored in memory: 768 of the 2,048 bytes carry the readout, the rest stay erased. That is the whole trick of the CPU\'s decimal output: no binary-to-BCD logic at all, just address lines wired to the value and three copies of one table.</p>';
+  const fmElU = $U("fpMulCard");
+  if (fmElU && fmElU.parentNode) fmElU.parentNode.insertBefore(eeSec, fmElU.nextSibling);
+  else { const cv = $U("circuitsView"); if (cv) cv.appendChild(eeSec); }
+  eeSec.querySelectorAll("[data-eelink]").forEach(b => b.addEventListener("click", () => {
+    const k = b.dataset.eelink === "addr" ? "addr-decode" : b.dataset.eelink === "cpu" ? "bb-cpu" : "mux-7seg";
+    if (!clickMenuKeyU(k)) jumpU("eepromCard");
+  }));
+  const eeDigits = eeSec.querySelector("#eeDigits");
+  const eeDigitEls = [];
+  for (let d = 0; d < 3; d++) {
+    const dg = document.createElement("div"); dg.className = "au-digit";
+    const segs = [];
+    for (let s = 0; s < 7; s++) { const i = document.createElement("i"); i.className = "au-seg s" + s; dg.appendChild(i); segs.push(i); }
+    eeDigits.appendChild(dg); eeDigitEls.push(segs);
+  }
+  function eeHexIn(id, max) {
+    const v = parseInt((eeSec.querySelector(id).value || "0").trim(), 16);
+    return isNaN(v) ? 0 : Math.max(0, Math.min(max, v));
+  }
+  function eeRenderReadout() {
+    const v = Math.max(0, Math.min(255, parseInt(eeSec.querySelector("#eeValue").value || "0", 10) || 0));
+    let txt = "";
+    for (let pos = 2; pos >= 0; pos--) {
+      const stored = eeRead(ee, (pos << 8) | v, true, true, false);
+      const segs = eeDigitEls[2 - pos];
+      for (let s = 0; s < 7; s++) segs[s].classList.toggle("on", stored !== null && ((stored >> s) & 1) === 0);
+      txt += stored === null ? "?" : eeDecodeDigit(stored);
+    }
+    eeSec.querySelector("#eeReadoutTxt").textContent = "Readout shows: \"" + txt + "\"" + (txt.indexOf("?") >= 0 ? " — a stored pattern that is no digit: the table has a wrong byte." : txt.trim() === "" ? " — blank: those table bytes are still erased (0xFF) or programmed blank." : "");
+  }
+  function eeRenderPeek() {
+    const a = eeHexIn("#eeAddr", 0x7FF) & 0x7F0;
+    let s = "Memory 0x" + hexU(a, 3) + "–0x" + hexU(a + 15, 3) + ": ";
+    for (let i = 0; i < 16; i++) s += hexU(ee.mem[a + i], 2) + " ";
+    eeSec.querySelector("#eePeek").textContent = s + " · total writes so far: " + ee.writes;
+  }
+  function eeCtlRender() {
+    const map = [["#eeCe", "ce", "/CE"], ["#eeOe", "oe", "/OE"], ["#eeWe", "we", "/WE"]];
+    map.forEach(([id, k, name]) => { const b = eeSec.querySelector(id); b.textContent = name + ": " + (eeCtl[k] ? "low" : "high"); b.setAttribute("aria-pressed", eeCtl[k] ? "true" : "false"); });
+  }
+  [["#eeCe", "ce"], ["#eeOe", "oe"], ["#eeWe", "we"]].forEach(([id, k]) =>
+    eeSec.querySelector(id).addEventListener("click", () => { eeCtl[k] = !eeCtl[k]; eeCtlRender(); }));
+  eeSec.querySelector("#eeCycle").addEventListener("click", () => {
+    const addr = eeHexIn("#eeAddr", 0x7FF), data = eeHexIn("#eeData", 0xFF);
+    const bus = eeSec.querySelector("#eeBus");
+    if (eeCtl.we) {
+      const r = eeWriteCycle(ee, addr, data, eeCtl.ce, true);
+      bus.textContent = "Write cycle at 0x" + hexU(addr, 3) + ": " + r.why;
+      bus.style.color = r.ok ? "var(--green)" : "var(--red)";
+    } else {
+      const v = eeRead(ee, addr, eeCtl.ce, eeCtl.oe, false);
+      bus.textContent = v === null
+        ? "Read cycle at 0x" + hexU(addr, 3) + ": high-Z — the chip is not driving the bus (check /CE low, /OE low, /WE high)."
+        : "Read cycle at 0x" + hexU(addr, 3) + ": the bus carries 0x" + hexU(v, 2) + " (" + binU(v, 8) + ").";
+      bus.style.color = v === null ? "var(--red)" : "var(--green)";
+    }
+    eeRenderPeek(); eeRenderReadout();
+  });
+  eeSec.querySelector("#eeProgram").addEventListener("click", () => {
+    const n = eeProgramTable(ee);
+    eeSec.querySelector("#eeBus").textContent = "Programmed " + n + " bytes: the decimal table now occupies 0x000–0x2FF. Set a value and read the digits.";
+    eeSec.querySelector("#eeBus").style.color = "var(--green)";
+    eeRenderPeek(); eeRenderReadout();
+  });
+  eeSec.querySelector("#eeErase").addEventListener("click", () => {
+    ee.mem.fill(0xFF);
+    eeSec.querySelector("#eeBus").textContent = "Chip erased: every byte is 0xFF again, and the readout is blank until the table is programmed.";
+    eeSec.querySelector("#eeBus").style.color = "";
+    eeRenderPeek(); eeRenderReadout();
+  });
+  eeSec.querySelector("#eeValue").addEventListener("input", eeRenderReadout);
+  eeSec.querySelector("#eeAddr").addEventListener("input", eeRenderPeek);
+  eeSec.querySelector("#eeVerifyLine").textContent = "Self-test at load: write/read round trips pass, reads stay high-Z unless /CE and /OE are low with /WE high, writes with /CE high or no /WE pulse change nothing, the programmed table matches the segment function on all 768 bytes, addresses above the table stay erased, and the decoded readout is correct for all 256 values (window.__eepromCheck).";
+  const eeRng = rngU(20261126);
+  function eeQuestion() {
+    const v = Math.floor(eeRng() * 256), pos = Math.floor(eeRng() * 3);
+    const names = ["units", "tens", "hundreds"];
+    const want = eeTableByte(v, pos);
+    const digit = pos === 0 ? v % 10 : pos === 1 ? Math.floor(v / 10) % 10 : Math.floor(v / 100);
+    const cand = new Set([want, (EE_SEG_ON[digit] | 0x80), eeSegByte(digit) ^ 0xFF, eeTableByte((v + 1) & 0xFF, pos), 0x00]);
+    const opts = [...cand].filter(x => x !== want).sort(() => eeRng() - 0.5).slice(0, 3);
+    const all = [want, ...opts].sort(() => eeRng() - 0.5);
+    eeSec.querySelector("#eeQ").textContent = "Predict first: the table is programmed. What byte sits at address 0x" + hexU((pos << 8) | v, 3) + " — the " + names[pos] + " byte for value " + v + "?";
+    eeSec.querySelector("#eeFb").textContent = "";
+    optBtnsU(eeSec.querySelector("#eeOpts"), all.map(x => "0x" + hexU(x, 2)), (i) => {
+      const ok = all[i] === want;
+      fbSetU(eeSec.querySelector("#eeFb"), ok, ok
+        ? "0x" + hexU(want, 2) + " — stored active-low for the common-anode display" + (want === 0xFF ? " (blanked leading zero)." : ".")
+        : "It is 0x" + hexU(want, 2) + ". Remember the stored byte is the complement of the segment pattern: 0 lights a segment on a common-anode display.");
+    });
+  }
+  eeSec.querySelector("#eeNewQ").addEventListener("click", eeQuestion);
+  eeCtlRender(); eeRenderPeek(); eeRenderReadout(); eeQuestion();
+
+  /* ================================================================
+     2) LED MATRIX — the card.
+     ================================================================ */
+  const mx = { mode: "pattern", pattern: mxFrame(mxTextColumns("A"), 0), cols: mxTextColumns("HI"), offset: 0, row: 0, running: false, timer: null, rps: 60 };
+  const mxSec = document.createElement("section");
+  mxSec.className = "card stage-card"; mxSec.id = "matrixCard"; mxSec.style.marginTop = "16px";
+  mxSec.innerHTML =
+    "<h2>8x8 LED matrix — a picture one row at a time</h2>" +
+    '<p class="what">Sixty-four LEDs, sixteen wires: eight rows, eight columns, one LED at each crossing — the keypad\'s matrix turned into a display. Only <b>one row is ever driven at a time</b>: set the columns for row 0, light it, move to row 1, and so on. Scan slowly and you can watch it happen, one row per step, and the picture falls apart into flicker. Scan fast enough (about 50 full frames a second) and persistence of vision assembles the rows into a steady picture, each LED lit one eighth of the time. Click the right-hand grid to draw a pattern, or load short text and watch it scroll through the frame. The left grid shows what is physically lit at this instant; the right shows what your eye keeps.</p>' +
+    '<div class="au-matrix-wrap"><div><div class="ctrl-label">Lit right now (one row)</div><div class="au-matrix" id="mxNow"></div></div>' +
+    '<div><div class="ctrl-label">What your eye keeps (click to draw)</div><div class="au-matrix" id="mxEye"></div></div></div>' +
+    '<div class="share-row"><button type="button" class="btn primary" id="mxStep">Scan one row ▸</button>' +
+    '<button type="button" class="btn" id="mxRun">Run the scan</button>' +
+    '<button type="button" class="btn" id="mxScroll">Scroll one column ▸</button>' +
+    '<button type="button" class="btn" id="mxReset">Reset</button></div>' +
+    '<div class="share-row"><label>Text <input class="au-in" id="mxText" value="HI" size="10" maxlength="12"></label>' +
+    '<button type="button" class="btn" id="mxLoad">Load text &amp; scroll</button>' +
+    '<label>Scan clock <input type="range" id="mxSpeed" min="1" max="480" value="60" style="vertical-align:middle"></label><span class="decimal-line" id="mxRate"></span></div>' +
+    '<div class="seq-state" id="mxState" style="margin-top:6px" aria-live="polite"></div>' +
+    '<div class="decimal-line" id="mxVerifyLine" aria-live="polite"></div>' +
+    '<div class="ctrl-label" style="margin-top:10px">Predict first — then check</div>' +
+    '<div class="lab-check"><span class="lab-check-q" id="mxQ"></span><span id="mxOpts" style="display:flex;gap:6px;flex-wrap:wrap"></span><span class="lab-check-fb" id="mxFb" aria-live="polite"></span></div>' +
+    '<div class="share-row"><button type="button" class="btn" data-mxlink="seg">The multiplexed 7-segment displays — the same scan, fewer rows →</button>' +
+    '<button type="button" class="btn" data-mxlink="keypad">The 4x4 keypad — the same matrix, read instead of lit →</button></div>' +
+    '<p class="cp-formal adv-only">Formally: the display is time-multiplexed with duty cycle 1/8 per LED, so average LED current is one eighth of the row-drive current: brightness is bought with peak current, which is why real matrix drivers are rated for the pulsed row current, not the average. The frame rate is the row rate divided by 8; below the flicker-fusion threshold (roughly 50 frames per second for most viewers) the scan itself becomes visible. Scrolling is a window moving over a column bitmap: frame(x, y) = bitmap(offset + x, y), the same address arithmetic as the EEPROM table, one dimension over.</p>';
+  eeSec.parentNode.insertBefore(mxSec, eeSec.nextSibling);
+  mxSec.querySelectorAll("[data-mxlink]").forEach(b => b.addEventListener("click", () => {
+    if (!clickMenuKeyU(b.dataset.mxlink === "seg" ? "mux-7seg" : "keypad-scan")) jumpU("matrixCard");
+  }));
+  function mxGrid(el) {
+    const cells = [];
+    for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) { const d = document.createElement("div"); d.className = "au-cell"; el.appendChild(d); cells.push(d); }
+    return cells;
+  }
+  const mxNowCells = mxGrid(mxSec.querySelector("#mxNow"));
+  const mxEyeCells = mxGrid(mxSec.querySelector("#mxEye"));
+  mxEyeCells.forEach((d, i) => d.addEventListener("click", () => {
+    const y = Math.floor(i / 8), x = i % 8;
+    if (mx.mode !== "pattern") { mx.pattern = mxFrame(mx.cols, mx.offset); mx.mode = "pattern"; }
+    mx.pattern[y][x] = !mx.pattern[y][x];
+    mxRender();
+  }));
+  function mxCurFrame() { return mx.mode === "text" ? mxFrame(mx.cols, mx.offset) : mx.pattern; }
+  function mxRender() {
+    const f = mxCurFrame();
+    for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) {
+      mxNowCells[y * 8 + x].classList.toggle("on", y === mx.row && f[y][x]);
+      mxEyeCells[y * 8 + x].classList.toggle("on", f[y][x]);
+    }
+    const fps = mx.rps / 8;
+    mxSec.querySelector("#mxRate").textContent = mx.rps + " rows/s = " + (Math.round(fps * 10) / 10) + " frames/s — " + (fps >= 50 ? "steady: persistence of vision holds the frame together." : fps >= 10 ? "visible flicker: the frame rate is under the fusion threshold." : "stepping: you are watching the scan itself, row by row.");
+    mxSec.querySelector("#mxState").textContent = "Now driving row " + mx.row + " of 8 · mode: " + (mx.mode === "text" ? "scrolling text, column offset " + mx.offset + " of " + (mx.cols.length + 8) : "drawn pattern") + " · each LED's duty cycle is 1/8.";
+  }
+  function mxStepRow() {
+    mx.row = (mx.row + 1) % 8;
+    if (mx.row === 0 && mx.mode === "text") mx.offset = (mx.offset + 1) % (mx.cols.length + 8);
+    mxRender();
+  }
+  function mxTimer() {
+    if (mx.timer) { clearInterval(mx.timer); mx.timer = null; }
+    if (mx.running) mx.timer = setInterval(mxStepRow, Math.max(2, Math.round(1000 / mx.rps)));
+  }
+  mxSec.querySelector("#mxStep").addEventListener("click", mxStepRow);
+  mxSec.querySelector("#mxScroll").addEventListener("click", () => {
+    if (mx.mode !== "text") { mx.mode = "text"; }
+    mx.offset = (mx.offset + 1) % (mx.cols.length + 8); mxRender();
+  });
+  mxSec.querySelector("#mxRun").addEventListener("click", (e) => {
+    mx.running = !mx.running;
+    e.target.textContent = mx.running ? "Pause the scan" : "Run the scan";
+    mxTimer();
+  });
+  mxSec.querySelector("#mxReset").addEventListener("click", () => { mx.row = 0; mx.offset = 0; mxRender(); });
+  mxSec.querySelector("#mxLoad").addEventListener("click", () => {
+    mx.cols = mxTextColumns(mxSec.querySelector("#mxText").value || " ");
+    mx.mode = "text"; mx.offset = 0; mx.row = 0; mxRender();
+  });
+  mxSec.querySelector("#mxSpeed").addEventListener("input", (e) => { mx.rps = parseInt(e.target.value, 10) || 60; mxTimer(); mxRender(); });
+  mxSec.querySelector("#mxVerifyLine").textContent = "Self-test at load: the 3x5 font bitmap decodes, scrolling shifts the frame exactly one column per step, the scanner cycles rows 0–7 in order, and over any 8 steps each row is driven exactly once, a 1/8 duty cycle (window.__matrixCheck).";
+  optBtnsU(mxSec.querySelector("#mxOpts"), ["1/8 of the time", "1/4 of the time", "1/2 of the time", "All the time"], (i) => {
+    fbSetU(mxSec.querySelector("#mxFb"), i === 0, i === 0
+      ? "1/8: eight rows share the time, one row driven per step, so each LED is on for exactly one step in eight."
+      : "1/8: a LED is lit only during its own row's step, and there are eight rows sharing the scan.");
+  });
+  mxSec.querySelector("#mxQ").textContent = "Predict first: every LED is lit only while its own row is driven, and the scanner gives each of the eight rows an equal step. What fraction of the time is any given LED on?";
+  mxRender();
+
+  /* ================================================================
+     3) MUX LOGIC — the card.
+     ================================================================ */
+  const MUX_PRESETS = {
+    "Majority (at least two of A, B, C)": [0, 0, 0, 1, 0, 1, 1, 1],
+    "Parity (odd number of 1s)": [0, 1, 1, 0, 1, 0, 0, 1],
+    "AB + C": [0, 1, 0, 1, 0, 1, 1, 1]
+  };
+  const mux = { tt: MUX_PRESETS["Majority (at least two of A, B, C)"].slice(), d: [0, 0, 0, 0], answered: false };
+  const muxSec = document.createElement("section");
+  muxSec.className = "card stage-card"; muxSec.id = "muxCard"; muxSec.style.marginTop = "16px";
+  muxSec.innerHTML =
+    "<h2>One mux, any function — Shannon expansion</h2>" +
+    '<p class="what">A 4-to-1 multiplexer picks one of four data inputs with two select lines. Wire the selects to <b>A</b> and <b>B</b>, and each data input only has to answer for one row-pair of the truth table, where the function, seen as a function of <b>C</b> alone, can only be one of four things: <b>0</b>, <b>1</b>, <b>C</b>, or <b>C′</b>. So one mux, with the right four choices, builds <i>any</i> three-variable function: that is the Shannon expansion, F = A′B′·F(0,0,C) + A′B·F(0,1,C) + AB′·F(1,0,C) + AB·F(1,1,C), with each cofactor tied off as a constant or a literal. Set the function in the truth table (click the F cells, or take a preset), predict the data inputs, then set them and watch the match count.</p>' +
+    '<div class="share-row" id="muxPresets"></div>' +
+    '<div class="au-mux-wrap"><div><div class="ctrl-label">Truth table — click F to flip</div><div class="au-tt" id="muxTT"></div></div>' +
+    '<div><div class="ctrl-label">Data inputs — selects are A, B</div><div id="muxData"></div>' +
+    '<div class="seq-state" id="muxMatch" style="margin-top:8px" aria-live="polite"></div>' +
+    '<div class="decimal-line" id="muxSop" aria-live="polite"></div></div></div>' +
+    '<div class="ctrl-label" style="margin-top:10px">Predict first — then the recipe unlocks</div>' +
+    '<div class="lab-check"><span class="lab-check-q" id="muxQ"></span><span id="muxOpts" style="display:flex;gap:6px;flex-wrap:wrap"></span><span class="lab-check-fb" id="muxFb" aria-live="polite"></span></div>' +
+    '<div class="share-row"><button type="button" class="btn" id="muxNewQ">New question</button>' +
+    '<button type="button" class="btn primary" id="muxRecipe" disabled>Reveal the Shannon recipe</button>' +
+    '<button type="button" class="btn" data-muxlink="kmap">The K-map minimiser — price the same function in gates →</button></div>' +
+    '<div class="decimal-line" id="muxVerifyLine" aria-live="polite"></div>' +
+    '<p class="cp-formal adv-only">Formally: this is the Shannon expansion about A and B, and the reason it always works is that a one-variable function has only four forms. The cost comparison is the lesson: the mux price is constant (one 4-to-1 mux, plus an inverter for C′) whatever the function, while the minimised sum of products grows with the function: parity needs three 3-literal terms in gates and is still just four data inputs here (C′, C, C, C′). Universality at a fixed price is why lookup tables, the same idea scaled up, are the building block of FPGAs.</p>';
+  mxSec.parentNode.insertBefore(muxSec, mxSec.nextSibling);
+  muxSec.querySelector("[data-muxlink]").addEventListener("click", () => { if (!clickMenuKeyU("kmap")) jumpU("muxCard"); });
+  const muxTT = muxSec.querySelector("#muxTT");
+  const muxFCells = [];
+  {
+    const head = document.createElement("div"); head.className = "au-tt-row au-tt-head";
+    head.innerHTML = "<span>A</span><span>B</span><span>C</span><span>F</span>"; muxTT.appendChild(head);
+    for (let abc = 0; abc < 8; abc++) {
+      const row = document.createElement("div"); row.className = "au-tt-row";
+      row.innerHTML = "<span>" + ((abc >> 2) & 1) + "</span><span>" + ((abc >> 1) & 1) + "</span><span>" + (abc & 1) + "</span>";
+      const fb = document.createElement("button"); fb.type = "button"; fb.className = "btn au-f";
+      fb.addEventListener("click", () => { mux.tt[abc] = mux.tt[abc] ? 0 : 1; muxRender(); muxQuestion(true); });
+      row.appendChild(fb); muxTT.appendChild(row); muxFCells.push(fb);
+    }
+  }
+  const muxData = muxSec.querySelector("#muxData");
+  const muxDBtns = [];
+  for (let sel = 0; sel < 4; sel++) {
+    const row = document.createElement("div"); row.className = "share-row"; row.style.marginTop = "4px";
+    const lab = document.createElement("span"); lab.className = "ctrl-label"; lab.textContent = "D" + sel + " (A,B = " + (sel >> 1) + "," + (sel & 1) + ")";
+    row.appendChild(lab);
+    const btns = [];
+    MUX_TOKENS.forEach((tok, ti) => {
+      const b = document.createElement("button"); b.type = "button"; b.className = "btn"; b.textContent = tok;
+      b.addEventListener("click", () => { mux.d[sel] = ti; muxRender(); });
+      row.appendChild(b); btns.push(b);
+    });
+    muxData.appendChild(row); muxDBtns.push(btns);
+  }
+  function muxRender() {
+    muxFCells.forEach((fb, abc) => { fb.textContent = mux.tt[abc]; fb.setAttribute("aria-pressed", mux.tt[abc] ? "true" : "false"); });
+    muxDBtns.forEach((btns, sel) => btns.forEach((b, ti) => b.setAttribute("aria-pressed", mux.d[sel] === ti ? "true" : "false")));
+    const out = muxEval(mux.tt, mux.d);
+    let k = 0; for (let i = 0; i < 8; i++) if (out[i] === mux.tt[i]) k++;
+    const mEl = muxSec.querySelector("#muxMatch");
+    mEl.textContent = "The mux as wired matches the truth table on " + k + " of 8 rows." + (k === 8 ? " That is the whole function, from one mux." : "");
+    mEl.style.color = k === 8 ? "var(--green)" : "";
+    muxSec.querySelector("#muxSop").textContent = "The minimiser's price for the same function in gates: F = " + muxSOP(mux.tt) + ". The mux price never changes: four data inputs.";
+  }
+  const muxPresetHost = muxSec.querySelector("#muxPresets");
+  Object.keys(MUX_PRESETS).forEach(name => {
+    const b = document.createElement("button"); b.type = "button"; b.className = "btn"; b.textContent = name;
+    b.addEventListener("click", () => { mux.tt = MUX_PRESETS[name].slice(); muxRender(); muxQuestion(true); });
+    muxPresetHost.appendChild(b);
+  });
+  const rb = document.createElement("button"); rb.type = "button"; rb.className = "btn"; rb.textContent = "Random function";
+  const muxRng = rngU(987654);
+  rb.addEventListener("click", () => { mux.tt = Array.from({ length: 8 }, () => Math.floor(muxRng() * 2)); muxRender(); muxQuestion(true); });
+  muxPresetHost.appendChild(rb);
+  let muxQSel = 0;
+  function muxQuestion(reset) {
+    if (reset) { mux.answered = false; muxSec.querySelector("#muxRecipe").disabled = true; }
+    muxQSel = Math.floor(muxRng() * 4);
+    const want = muxRecipe(mux.tt)[muxQSel];
+    muxSec.querySelector("#muxQ").textContent = "Predict first: for A,B = " + (muxQSel >> 1) + "," + (muxQSel & 1) + ", the output as a function of C alone must be which data input?";
+    muxSec.querySelector("#muxFb").textContent = "";
+    optBtnsU(muxSec.querySelector("#muxOpts"), MUX_TOKENS, (i) => {
+      mux.answered = true; muxSec.querySelector("#muxRecipe").disabled = false;
+      fbSetU(muxSec.querySelector("#muxFb"), i === want, i === want
+        ? "D" + muxQSel + " = " + MUX_TOKENS[want] + ": read the two truth-table rows with A,B = " + (muxQSel >> 1) + "," + (muxQSel & 1) + " and that is the function of C they spell. The recipe is unlocked."
+        : "It is " + MUX_TOKENS[want] + ": the two rows with A,B = " + (muxQSel >> 1) + "," + (muxQSel & 1) + " read F = " + mux.tt[muxQSel * 2] + " then " + mux.tt[muxQSel * 2 + 1] + " as C goes 0, 1. The recipe is unlocked anyway: check where the prediction went wrong.");
+    });
+  }
+  muxSec.querySelector("#muxNewQ").addEventListener("click", () => muxQuestion(false));
+  muxSec.querySelector("#muxRecipe").addEventListener("click", () => { mux.d = muxRecipe(mux.tt); muxRender(); });
+  muxSec.querySelector("#muxVerifyLine").textContent = "Self-test at load: all 256 three-variable functions were checked: the Shannon recipe reproduces every truth table exactly, and the minimised sum of products shown for comparison evaluates to the same function on every row (window.__muxCheck).";
+  muxRender(); muxQuestion(false);
+
+  /* ---------------- MENU REGISTRATION + COUNT REBUILD ---------------- */
+  function addMenuItemAU(groupName, afterKey, spec) {
+    const list = $U("menuList"); if (!list) return false;
+    if (list.querySelector('[data-key="' + spec.key + '"]')) return false;
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "menu-item"; b.dataset.key = spec.key;
+    b.dataset.search = (spec.label + " " + spec.hint + " " + spec.search).toLowerCase();
+    if (spec.level) b.dataset.uxlevel = spec.level;
+    b.innerHTML = '<span class="mi-dot" aria-hidden="true"></span><span class="mi-label"></span><small></small>';
+    b.querySelector(".mi-label").textContent = spec.label;
+    b.querySelector("small").textContent = spec.hint;
+    b.addEventListener("click", () => { const p = $U("menuPanel"); if (p) p.hidden = true; const mb = $U("menuBtn"); if (mb) mb.setAttribute("aria-expanded", "false"); spec.go(); });
+    if (afterKey) {
+      const anchor = list.querySelector('[data-key="' + afterKey + '"]');
+      if (anchor) { anchor.parentNode.insertBefore(b, anchor.nextSibling); return true; }
+    }
+    let sib = null, inGroup = false;
+    Array.prototype.slice.call(list.children).forEach(el => {
+      if (el.classList.contains("menu-group")) inGroup = (el.dataset.group || "").trim() === groupName;
+      else if (inGroup && el.classList.contains("menu-item")) sib = el;
+    });
+    if (sib) sib.parentNode.insertBefore(b, sib.nextSibling); else list.appendChild(b);
+    return true;
+  }
+  addMenuItemAU("Logic & Circuits", "fp-mul", {
+    key: "eeprom-lab", label: "Programming an EEPROM — the AT28C16 and the readout it feeds",
+    hint: "Write bytes with /CE, /OE and /WE, program the decimal-display table the breadboard CPU uses, and run the three-digit readout off the stored bytes",
+    search: "eeprom at28c16 programming write cycle read ce oe we chip enable output enable lookup table decimal display breadboard cpu memory simulator lab",
+    level: "intermediate", go: () => { setTopArea("circuits"); syncRail("circuits"); jumpU("eepromCard"); }
+  });
+  addMenuItemAU("Logic & Circuits", "eeprom-lab", {
+    key: "led-matrix", label: "8x8 LED matrix — a picture one row at a time",
+    hint: "Scan eight rows with an adjustable clock: watch flicker become a steady picture, draw a pattern, or scroll text through the frame",
+    search: "led matrix 8x8 row scanning multiplexing persistence of vision flicker duty cycle scrolling text display simulator lab",
+    level: "beginner", go: () => { setTopArea("circuits"); syncRail("circuits"); jumpU("matrixCard"); }
+  });
+  addMenuItemAU("Logic & Circuits", "led-matrix", {
+    key: "mux-logic", label: "One mux, any function — Shannon expansion",
+    hint: "Build any three-variable function from a single 4-to-1 mux: predict the data inputs (0, 1, C or C-prime), then check against the truth table and the minimiser",
+    search: "multiplexer mux shannon expansion cofactor 4-to-1 data inputs universal logic truth table k-map minimiser simulator lab",
+    level: "intermediate", go: () => { setTopArea("circuits"); syncRail("circuits"); jumpU("muxCard"); }
+  });
+  (function rebuildCountsAU() {
+    const RJ = window.__uxRoundJ; if (!RJ) return;
+    const groups = RJ.menuGroups(); const counts = {}; let total = 0;
+    groups.forEach(g => {
+      counts[g.name] = g.items.length; total += g.items.length;
+      const c = g.header.querySelector(".mi-count"); if (c) c.textContent = g.items.length;
+    });
+    window.LAB_MENU = { groups: groups.map(g => ({ name: g.name, items: g.items.map(b => { const l = b.querySelector(".mi-label"); return l ? l.textContent : ""; }) })), count: total };
+    window.LAB_MODULES = { modules: groups.map(g => ({ name: g.name, count: g.items.length })), total };
+    RJ.buildRailAndList(counts);
+    RJ.buildGallery();
+    ["boards", "arch", "os", "org"].forEach(id => {
+      const h = document.querySelector("#module-" + id + " .mh-count");
+      if (!h) return;
+      const name = { boards: "Boards, Modulation & Projects", arch: "Computer Architecture", os: "Operating Systems", org: "Computer Organization" }[id];
+      if (counts[name]) h.textContent = counts[name] + " items";
+    });
+    window.__countsAU = { total, counts };
+  })();
+})();
+</script>
+<style>
+/* ===== Round AU — EEPROM pin check, digits, matrix, mux table ===== */
+.au-panel{border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin:12px 0}
+.au-panel h3{margin:0 0 8px;font-size:15px}
+.au-pins{display:grid;grid-template-columns:1fr 1fr;gap:2px 18px;font-family:ui-monospace,Menlo,monospace;font-size:12.5px}
+.au-note{margin:8px 0 0;font-size:13px;line-height:1.45}
+.au-in{background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:5px 7px;font:inherit}
+.au-digits{display:flex;gap:10px}
+.au-digit{display:grid;grid-template-areas:". a ." "f . b" ". g ." "e . c" ". d .";grid-template-columns:6px 26px 6px;grid-template-rows:6px 22px 6px 22px 6px;gap:2px}
+.au-seg{background:var(--border);border-radius:3px;opacity:.35}
+.au-seg.s0{grid-area:a}.au-seg.s1{grid-area:b}.au-seg.s2{grid-area:c}.au-seg.s3{grid-area:d}.au-seg.s4{grid-area:e}.au-seg.s5{grid-area:f}.au-seg.s6{grid-area:g}
+.au-seg.on{background:var(--amber);opacity:1}
+.au-matrix-wrap{display:flex;gap:26px;flex-wrap:wrap;margin:10px 0}
+.au-matrix{display:grid;grid-template-columns:repeat(8,22px);gap:4px;margin-top:6px}
+.au-cell{width:22px;height:22px;border-radius:50%;background:var(--border);opacity:.35}
+.au-cell.on{background:var(--amber);opacity:1}
+#mxEye .au-cell{cursor:pointer}
+.au-mux-wrap{display:flex;gap:30px;flex-wrap:wrap}
+.au-tt-row{display:grid;grid-template-columns:26px 26px 26px 44px;gap:4px;align-items:center;margin-top:3px}
+.au-tt-head{font-weight:700;text-align:center}
+.au-tt-row span{text-align:center}
+.au-f{padding:3px 0}
+</style>
