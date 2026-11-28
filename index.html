@@ -35507,3 +35507,634 @@ window.__CPU_PDF = "data:application/pdf;base64,JVBERi0xLjQKJZOMi54gUmVwb3J0TGFi
 .av-cmp th{background:var(--surface)}
 .av-step-wrap{display:flex;gap:26px;flex-wrap:wrap;margin:10px 0;align-items:flex-start}
 </style>
+<script>
+"use strict";
+/* ================================================================
+   ROUND AW — three new labs, all in Logic & Circuits:
+   1) seg-decoder — "Gate-level 7-segment decoder — design the
+      chip". The 7447 project board treats the decoder as a black
+      box; here each segment is designed as a Boolean function of
+      D C B A with the site's own K-map minimiser (window.QM, the
+      K-map tool's engine), taking codes 10-15 as don't-cares the
+      way a BCD designer does. The bare equations would light
+      segments on 10-15, so the design adds the blanking layer
+      the real chip has: blank = D*B + D*C, one inverter, and an
+      AND per segment. Verified at load against window.BBKind's
+      segment table (the site's single source for the display):
+      the equations match on all ten BCD codes, the blanking
+      function is 1 exactly on codes 10-15, and the finished
+      decoder matches the table on all 16 codes, 112 checks.
+      Gate accounting uses the minimiser's own convention:
+      39 gates segment-by-segment, 26 with the three inverters
+      shared, 37 for the whole decoder with blanking — against
+      one 16-pin 7447.
+   2) schmitt-trigger — "Schmitt trigger — one clean edge out of
+      a noisy one". A slow sensor edge (0.5 V to 4.5 V and back
+      over ten seconds) with deterministic noise rides through a
+      comparator two ways. One threshold at 2.5 V: the output
+      chatters, 14 transitions on the sweep. Two thresholds
+      (VT+ 3.3 V, VT- 1.7 V, a 1.6 V hysteresis band wider than
+      the noise): exactly 2 transitions. Verified at load by
+      simulating the sweep at 2 ms steps.
+   3) ps2-keyboard — "PS/2 keyboard protocol — a key press, bit
+      by bit". The keyboard makes the clock and sends 11-bit
+      frames: start 0, eight data bits LSB first, odd parity,
+      stop 1. A press sends the key's set-2 make code; a release
+      sends F0 then the code again. Verified at load: all nine
+      keys' frames decode back with parity satisfied, every
+      break sequence decodes as F0 + code, all 256 bytes
+      round-trip through frame/decode, and no key's code is a
+      bit-palindrome (so the LSB-first trap answer is real).
+   Everything loads paused.
+   ================================================================ */
+(function roundAW() {
+  const $AW = id => document.getElementById(id);
+  function jumpAW(id) { const el = id && $AW(id); if (el) setTimeout(() => el.scrollIntoView({ behavior: "smooth", block: "start" }), 60); }
+  function clickMenuKeyAW(key) { const it = document.querySelector('#menuList .menu-item[data-key="' + key + '"]'); if (it) { it.click(); return true; } return false; }
+  function fbSetAW(el, ok, msg) { if (!el) return; el.textContent = (ok ? "✓ " : "✗ ") + msg; el.style.color = ok ? "var(--green)" : "var(--red)"; }
+  function optBtnsAW(host, labels, onPick) {
+    host.innerHTML = "";
+    labels.forEach((lab, i) => { const b = document.createElement("button"); b.type = "button"; b.className = "btn"; b.textContent = lab; b.addEventListener("click", () => onPick(i, b)); host.appendChild(b); });
+  }
+  function rngAW(seed) { let a = seed >>> 0; return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+  const binAW = (v, w) => (v >>> 0).toString(2).padStart(w, "0");
+  const hexAW = v => "0x" + v.toString(16).toUpperCase().padStart(2, "0");
+
+  /* ================================================================
+     1) SEGMENT DECODER — the model.
+     ================================================================ */
+  const SD_VARS = ["D", "C", "B", "A"];
+  const SD_NAMES = ["a", "b", "c", "d", "e", "f", "g"];
+  const SD_FALLBACK = [
+    [1, 1, 1, 1, 1, 1, 0], [0, 1, 1, 0, 0, 0, 0], [1, 1, 0, 1, 1, 0, 1], [1, 1, 1, 1, 0, 0, 1],
+    [0, 1, 1, 0, 0, 1, 1], [1, 0, 1, 1, 0, 1, 1], [1, 0, 1, 1, 1, 1, 1], [1, 1, 1, 0, 0, 0, 0],
+    [1, 1, 1, 1, 1, 1, 1], [1, 1, 1, 1, 0, 1, 1], [0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0]];
+  const SD_SEG = (window.BBKind && window.BBKind.SEG7447) || SD_FALLBACK;
+  const SD_DCS = [10, 11, 12, 13, 14, 15];
+  function sdBuildDesign() {
+    const QM = window.QM;
+    const segs = SD_NAMES.map((nm, si) => {
+      const ones = [];
+      for (let d = 0; d < 10; d++) if (SD_SEG[d][si]) ones.push(d);
+      const r = QM.minimise(4, ones, SD_DCS);
+      return { name: nm, ones, terms: r.terms, sop: QM.sopString(4, r.terms, SD_VARS), gatesAlone: QM.gateCount(4, r.terms, SD_VARS) };
+    });
+    const blankR = QM.minimise(4, SD_DCS, []);
+    const blank = { terms: blankR.terms, sop: QM.sopString(4, blankR.terms, SD_VARS), gates: QM.gateCount(4, blankR.terms, SD_VARS) };
+    let ands = 0, ors = 0; const comp = new Set();
+    segs.forEach(sg => {
+      sg.terms.forEach(t => {
+        if (QM.termLiterals(4, t) > 1) ands++;
+        for (let i = 0; i < 4; i++) { const bit = 3 - i; if (!((t.d >> bit) & 1) && !((t.v >> bit) & 1)) comp.add(SD_VARS[i]); }
+      });
+      if (sg.terms.length > 1) ors++;
+    });
+    const segShared = comp.size + ands + ors;
+    return { segs, blank, ands, ors, sharedNots: comp.size, segShared,
+             standalone: segs.reduce((s, x) => s + x.gatesAlone, 0),
+             total: segShared + blank.gates + 1 + 7 };
+  }
+  const SD_DESIGN = sdBuildDesign();
+  function sdRaw(si, m) { return window.QM.evalTerms(SD_DESIGN.segs[si].terms, m); }
+  function sdBlank(m) { return window.QM.evalTerms(SD_DESIGN.blank.terms, m); }
+  function sdOut(si, m) { return sdRaw(si, m) && !sdBlank(m) ? 1 : 0; }
+  function sdVerify() {
+    let bcdOk = true, blankOk = true, allOk = true, checks = 0;
+    for (let m = 0; m < 16; m++) {
+      if (sdBlank(m) !== (m >= 10 ? 1 : 0)) blankOk = false;
+      for (let si = 0; si < 7; si++) {
+        checks++;
+        if (m < 10 && sdRaw(si, m) !== SD_SEG[m][si]) bcdOk = false;
+        if (sdOut(si, m) !== SD_SEG[m][si]) allOk = false;
+      }
+    }
+    return { bcdOk, blankOk, allOk, checks, standalone: SD_DESIGN.standalone, segShared: SD_DESIGN.segShared,
+             blankGates: SD_DESIGN.blank.gates, total: SD_DESIGN.total, pass: bcdOk && blankOk && allOk };
+  }
+  const SD_V = sdVerify();
+
+  /* ================================================================
+     2) SCHMITT TRIGGER — the model.
+     ================================================================ */
+  const SC_VT = 2.5, SC_VTP = 3.3, SC_VTM = 1.7, SC_DUR = 10, SC_DT = 0.002;
+  function scBase(t) { if (t < 1) return 0.5; if (t < 5) return 0.5 + (t - 1) / 4 * 4.0; if (t < 6) return 4.5; return 4.5 - (t - 6) / 4 * 4.0; }
+  function scVin(t) {
+    const v = scBase(t) + 0.38 * Math.sin(2 * Math.PI * 2.9 * t) + 0.22 * Math.sin(2 * Math.PI * 6.3 * t + 1.3);
+    return Math.max(0, Math.min(5, v));
+  }
+  function scSimulate() {
+    const n = Math.round(SC_DUR / SC_DT) + 1;
+    const vin = new Float64Array(n), plain = new Uint8Array(n), sch = new Uint8Array(n);
+    let s = 0;
+    for (let i = 0; i < n; i++) {
+      const v = scVin(i * SC_DT);
+      vin[i] = v;
+      plain[i] = v >= SC_VT ? 1 : 0;
+      if (s === 0 && v >= SC_VTP) s = 1; else if (s === 1 && v <= SC_VTM) s = 0;
+      sch[i] = s;
+    }
+    const count = a => { let c = 0; for (let i = 1; i < a.length; i++) if (a[i] !== a[i - 1]) c++; return c; };
+    return { vin, plain, sch, plainTr: count(plain), schTr: count(sch), n };
+  }
+  const SC_SIM = scSimulate();
+  function scVerify() {
+    const schmittOk = SC_SIM.schTr === 2;
+    const chatterOk = SC_SIM.plainTr >= 10;
+    let levelsOk = true;
+    const at = t => Math.round(t / SC_DT);
+    if (SC_SIM.sch[at(5.5)] !== 1 || SC_SIM.sch[at(9.9)] !== 0 || SC_SIM.sch[at(0.5)] !== 0) levelsOk = false;
+    if (SC_SIM.plain[at(5.5)] !== 1 || SC_SIM.plain[at(0.5)] !== 0) levelsOk = false;
+    return { plainTr: SC_SIM.plainTr, schTr: SC_SIM.schTr, schmittOk, chatterOk, levelsOk,
+             vt: SC_VT, vtp: SC_VTP, vtm: SC_VTM, pass: schmittOk && chatterOk && levelsOk };
+  }
+  const SC_V = scVerify();
+
+  /* ================================================================
+     3) PS/2 KEYBOARD — the model.
+     ================================================================ */
+  const P2_KEYS = [
+    { k: "A", code: 0x1C }, { k: "S", code: 0x1B }, { k: "D", code: 0x23 }, { k: "F", code: 0x2B },
+    { k: "G", code: 0x34 }, { k: "H", code: 0x33 }, { k: "J", code: 0x3B }, { k: "L", code: 0x4B },
+    { k: "Space", code: 0x29 }];
+  const P2_BREAK = 0xF0;
+  const P2_ROLES = ["start bit", "data bit 0 (LSB)", "data bit 1", "data bit 2", "data bit 3", "data bit 4", "data bit 5", "data bit 6", "data bit 7 (MSB)", "parity bit (odd)", "stop bit"];
+  function p2Popcount(b) { let c = 0; for (let i = 0; i < 8; i++) c += (b >> i) & 1; return c; }
+  function p2Frame(byte) {
+    const bits = [0];
+    for (let i = 0; i < 8; i++) bits.push((byte >> i) & 1);
+    bits.push(p2Popcount(byte) % 2 === 0 ? 1 : 0);
+    bits.push(1);
+    return bits;
+  }
+  function p2Decode(bits) {
+    if (!bits || bits.length !== 11) return { ok: false, why: "a frame is 11 bits" };
+    if (bits[0] !== 0) return { ok: false, why: "start bit is not 0" };
+    if (bits[10] !== 1) return { ok: false, why: "stop bit is not 1" };
+    let byte = 0, ones = 0;
+    for (let i = 0; i < 8; i++) { byte |= bits[1 + i] << i; ones += bits[1 + i]; }
+    const parityOk = (ones + bits[9]) % 2 === 1;
+    return { ok: parityOk, byte, parityOk, why: parityOk ? "" : "parity fails: the ones do not total odd" };
+  }
+  function p2Reverse(b) { let r = 0; for (let i = 0; i < 8; i++) r |= ((b >> i) & 1) << (7 - i); return r; }
+  function p2Verify() {
+    let keysOk = true, breakOk = true, allBytesOk = true, trapOk = true;
+    P2_KEYS.forEach(K => {
+      const f = p2Frame(K.code), d = p2Decode(f);
+      if (!(f.length === 11 && f[0] === 0 && f[10] === 1 && d.ok && d.byte === K.code)) keysOk = false;
+      const b0 = p2Decode(p2Frame(P2_BREAK)), b1 = p2Decode(p2Frame(K.code));
+      if (!(b0.ok && b0.byte === P2_BREAK && b1.ok && b1.byte === K.code)) breakOk = false;
+      if (p2Reverse(K.code) === K.code) trapOk = false;
+    });
+    for (let b = 0; b < 256; b++) { const d = p2Decode(p2Frame(b)); if (!(d.ok && d.byte === b)) allBytesOk = false; }
+    return { keysOk, breakOk, allBytesOk, trapOk, keys: P2_KEYS.length, pass: keysOk && breakOk && allBytesOk && trapOk };
+  }
+  const P2_V = p2Verify();
+
+  window.__segDecoder = { design: SD_DESIGN, raw: sdRaw, blank: sdBlank, out: sdOut, table: SD_SEG, verify: sdVerify };
+  window.__schmitt = { vin: scVin, sim: SC_SIM, verify: scVerify, vt: SC_VT, vtp: SC_VTP, vtm: SC_VTM };
+  window.__ps2 = { keys: P2_KEYS, frame: p2Frame, decode: p2Decode, reverse: p2Reverse, verify: p2Verify };
+  try {
+    window.__segDecoderCheck = SD_V;
+    window.__schmittCheck = SC_V;
+    window.__ps2Check = P2_V;
+    window.__roundAWSelfTest = { seg: SD_V, schmitt: SC_V, ps2: P2_V };
+    const bad = Object.keys(window.__roundAWSelfTest).filter(k => !window.__roundAWSelfTest[k].pass);
+    if (bad.length && window.console) console.warn("[Round AW self-test] failures:", bad);
+  } catch (e) { window.__roundAWSelfTest = { error: String(e && e.message || e) }; }
+
+  /* ================================================================
+     1) SEGMENT DECODER — the card.
+     ================================================================ */
+  const sd = { val: 7, answered: false, qDigit: 7 };
+  const sdSec = document.createElement("section");
+  sdSec.className = "card stage-card"; sdSec.id = "segDecoderCard"; sdSec.style.marginTop = "16px";
+  sdSec.innerHTML =
+    "<h2>Gate-level 7-segment decoder — design the chip</h2>" +
+    '<p class="what">The 7447 project board treats the BCD-to-7-segment decoder as a black box: four switches in, seven segments out. This lab opens the box. Each segment is its own Boolean function of D C B A, and the design tool is the same one the K-map tool runs: the site\'s Quine–McCluskey minimiser, with codes 10–15 left as don\'t-cares, the way a BCD designer leaves them. The bare equations have a catch: on codes 10–15 they light segments, because a don\'t-care owes you nothing. The real 7447 blanks those codes, so the design adds the blanking layer the chip carries: a function that is 1 exactly on 10–15 (D is set, and C or B is set), inverted, ANDed into every segment. The display is the site\'s common-anode model, and the finished decoder is checked against the same segment table the 7447 board uses: all 16 codes, segment by segment.</p>' +
+    '<div class="share-row"><span class="av-biglab">Input D C B A</span><span id="aw-sd-toggles" style="display:flex;gap:6px;flex-wrap:wrap"></span>' +
+    '<span class="av-bigbits" id="aw-sd-code"></span></div>' +
+    '<div class="aw-seg-wrap"><div class="aw-digit" id="aw-sd-disp" aria-label="Seven-segment display"></div>' +
+    '<div><div class="ctrl-label">Segments for this input (after blanking)</div><div class="aw-chips" id="aw-sd-chips"></div>' +
+    '<div class="seq-state" id="aw-sd-state" aria-live="polite"></div></div></div>' +
+    '<div class="ctrl-label" style="margin-top:10px">The design: seven equations from the minimiser, plus blanking</div>' +
+    '<div id="aw-sd-eqs"></div>' +
+    '<div class="aw-cmp-wrap"><table class="aw-cmp"><tr><th>Design</th><th>Gates</th><th>What the count means</th></tr>' +
+    '<tr><td>Seven segment equations, each built alone</td><td>' + SD_DESIGN.standalone + '</td><td>Every segment pays for its own inverters: the K-map tool\'s gate count, summed over a–g</td></tr>' +
+    '<tr><td>The same equations, inverters shared</td><td>' + SD_DESIGN.segShared + '</td><td>¬A, ¬B and ¬C are each made once and fanned out: ' + SD_DESIGN.ands + ' ANDs, ' + SD_DESIGN.ors + ' ORs, ' + SD_DESIGN.sharedNots + ' NOTs</td></tr>' +
+    '<tr><td>Blanking layer</td><td>' + (SD_DESIGN.blank.gates + 1 + 7) + '</td><td>blank = ' + SD_DESIGN.blank.sop + ' (' + SD_DESIGN.blank.gates + ' gates), one inverter for ¬blank, one AND per segment</td></tr>' +
+    '<tr><td>Whole decoder, gates</td><td>' + SD_DESIGN.total + '</td><td>Thirty-seven gates to source, wire and debug as separate packages</td></tr>' +
+    '<tr><td>The 7447 on the project board</td><td>1 chip</td><td>All of the above inside one 16-pin package, with lamp-test and blanking pins spare</td></tr></table></div>' +
+    '<div class="decimal-line" id="aw-sd-verify" aria-live="polite"></div>' +
+    '<div class="ctrl-label" style="margin-top:10px">Predict first — then check</div>' +
+    '<div class="lab-check"><span class="lab-check-q" id="aw-sd-q"></span><span id="aw-sd-opts" style="display:flex;gap:6px;flex-wrap:wrap"></span><span class="lab-check-fb" id="aw-sd-fb" aria-live="polite"></span></div>' +
+    '<div class="share-row"><button type="button" class="btn" id="aw-sd-newq">New prediction</button>' +
+    '<button type="button" class="btn" data-sdlink="eeprom">These equations as a stored table — the EEPROM programming lab →</button></div>' +
+    '<p class="cp-formal adv-only">Formally: a segment function is F(D,C,B,A) = Σm(ones) + d(10–15) before blanking; minimising with the don\'t-care set is what makes the equations small, and it is also why they are unspecified outside BCD. The shipped function is F·¬blank, which pins the don\'t-cares to 0 and makes the design an exact match for the decoder\'s truth table on all 16 codes. The 7447 datasheet does the same thing with its blanking input held inactive and the codes 10–15 decoding to a blank display.</p>';
+  const stElAW = $AW("stepperCard");
+  if (stElAW && stElAW.parentNode) stElAW.parentNode.insertBefore(sdSec, stElAW.nextSibling);
+  else { const cv = $AW("circuitsView"); if (cv) cv.appendChild(sdSec); }
+  sdSec.querySelector("[data-sdlink]").addEventListener("click", () => { if (!clickMenuKeyAW("eeprom-lab")) jumpAW("segDecoderCard"); });
+  const sdDisp = sdSec.querySelector("#aw-sd-disp");
+  SD_NAMES.forEach((nm, i) => { const d = document.createElement("div"); d.className = "aw-seg s" + i; sdDisp.appendChild(d); });
+  const sdToggles = [];
+  SD_VARS.forEach((nm, vi) => {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "btn"; b.disabled = true;
+    b.addEventListener("click", () => { sd.val ^= (1 << (3 - vi)); sdRender(); });
+    sdSec.querySelector("#aw-sd-toggles").appendChild(b); sdToggles.push(b);
+  });
+  sdSec.querySelector("#aw-sd-eqs").innerHTML =
+    SD_DESIGN.segs.map(sg => '<div class="aw-eqrow"><span class="aw-eqname">' + sg.name + '</span><span class="aw-eqsop">= ' + sg.sop + '</span><span class="aw-eqg">' + sg.gatesAlone + (sg.gatesAlone === 1 ? " gate" : " gates") + ' alone</span></div>').join("") +
+    '<div class="aw-eqrow"><span class="aw-eqname">blank</span><span class="aw-eqsop">= ' + SD_DESIGN.blank.sop + '</span><span class="aw-eqg">segment out = equation · ¬blank</span></div>';
+  const sdSetOf = d => SD_NAMES.filter((_, i) => SD_SEG[d][i]);
+  function sdRender() {
+    SD_VARS.forEach((nm, vi) => { const bit = (sd.val >> (3 - vi)) & 1; sdToggles[vi].textContent = nm + " · " + bit; sdToggles[vi].setAttribute("aria-pressed", bit ? "true" : "false"); });
+    sdSec.querySelector("#aw-sd-code").textContent = binAW(sd.val, 4) + " · " + sd.val;
+    const segEls = sdDisp.querySelectorAll(".aw-seg");
+    SD_NAMES.forEach((nm, i) => { segEls[i].classList.toggle("on", sd.answered && sdOut(i, sd.val) === 1); });
+    sdSec.querySelector("#aw-sd-chips").innerHTML = SD_NAMES.map((nm, i) =>
+      '<span class="aw-chip' + (sd.answered && sdOut(i, sd.val) ? " on" : "") + '">' + nm + (sd.answered ? (sdOut(i, sd.val) ? " on" : " off") : " ?") + '</span>').join("");
+    sdSec.querySelector("#aw-sd-state").textContent = !sd.answered
+      ? "The display stays dark until you predict: work the pattern out from the equations above."
+      : (sd.val > 9
+        ? "Code " + sd.val + " is not a BCD digit: blank = 1, ¬blank = 0, and every segment AND is held at 0. The bare equations alone would have lit " + (SD_NAMES.filter((_, i) => sdRaw(i, sd.val)).join(", ") || "nothing") + " here: that is what the blanking layer is for."
+        : "Digit " + sd.val + ": the equations light " + (sdSetOf(sd.val).join(", ") || "nothing") + ", and blank = 0, so the pattern reaches the display unchanged.");
+  }
+  const sdRng = rngAW(20261128);
+  function sdQuestion() {
+    sd.qDigit = Math.floor(sdRng() * 10);
+    sd.val = sd.qDigit;
+    sd.answered = false;
+    sdToggles.forEach(b => { b.disabled = true; });
+    const correct = sdSetOf(sd.qDigit);
+    const tog = correct.slice();
+    const gi = tog.indexOf("g"); if (gi >= 0) tog.splice(gi, 1); else tog.push("g");
+    const togSorted = SD_NAMES.filter(n => tog.indexOf(n) >= 0);
+    const opts = [];
+    [correct, sdSetOf((sd.qDigit + 1) % 10), sdSetOf((sd.qDigit + 9) % 10), togSorted].forEach(s => {
+      const str = s.length ? s.join(" ") : "(blank)";
+      if (opts.indexOf(str) < 0) opts.push(str);
+    });
+    const correctStr = correct.length ? correct.join(" ") : "(blank)";
+    sdSec.querySelector("#aw-sd-q").textContent = "Predict first: the input is " + binAW(sd.qDigit, 4) + " (digit " + sd.qDigit + "). Which segments does the finished decoder light?";
+    sdSec.querySelector("#aw-sd-fb").textContent = "";
+    optBtnsAW(sdSec.querySelector("#aw-sd-opts"), opts, i => {
+      sd.answered = true;
+      sdToggles.forEach(b => { b.disabled = false; });
+      const right = opts[i] === correctStr;
+      fbSetAW(sdSec.querySelector("#aw-sd-fb"), right, right
+        ? correctStr + ": read off the seven equations for " + binAW(sd.qDigit, 4) + ", with blank = 0. The switches are unlocked: try codes 10–15 and watch the blanking layer work."
+        : "It is " + correctStr + ": evaluate each segment equation at D C B A = " + binAW(sd.qDigit, 4) + " (blank = 0 for a digit). The switches are unlocked anyway.");
+      sdRender();
+    });
+    sdRender();
+  }
+  sdSec.querySelector("#aw-sd-newq").addEventListener("click", sdQuestion);
+  sdSec.querySelector("#aw-sd-verify").textContent = "Self-test at load: the seven minimised equations reproduce the segment table on all ten BCD codes, blank is 1 exactly on codes 10–15, and the finished decoder (equation · ¬blank) matches the site's 7447 table on all 16 codes, " + SD_V.checks + " segment checks (window.__segDecoderCheck). The display is the common-anode model the 7447 board uses, driven here by gates instead of the chip.";
+  sdQuestion();
+
+  /* ================================================================
+     2) SCHMITT TRIGGER — the card.
+     ================================================================ */
+  const sc = { mode: "plain", answered: false, running: false, timer: null, cursorT: null };
+  const scSec = document.createElement("section");
+  scSec.className = "card stage-card"; scSec.id = "schmittCard"; scSec.style.marginTop = "16px";
+  scSec.innerHTML =
+    "<h2>Schmitt trigger — one clean edge out of a noisy one</h2>" +
+    '<p class="what">A sensor left in the sun does not snap from low to high: it creeps, and noise rides on the creep. Feed that edge into a plain comparator, one threshold at ' + SC_VT + ' V, and every noise wiggle that straddles the threshold flips the output again: chatter, a burst of false edges for the counter or interrupt behind it. The Schmitt trigger is the standard cure, and it is one idea: two thresholds. It switches on at VT+ = ' + SC_VTP + ' V, and then refuses to switch back until the input falls all the way to VT− = ' + SC_VTM + ' V. The ' + (SC_VTP - SC_VTM).toFixed(1) + ' V gap between them is the hysteresis, and any noise smaller than the gap cannot retrigger it. The sweep below is ten seconds of one slow rise and fall, drawn from the lab\'s model: count the output transitions each way.</p>' +
+    '<div class="share-row"><button type="button" class="btn" id="aw-sc-mode">Comparator: plain (one threshold)</button>' +
+    '<button type="button" class="btn primary" id="aw-sc-sweep">Sweep the edge ▸</button>' +
+    '<button type="button" class="btn" id="aw-sc-reset">Reset view</button></div>' +
+    '<div class="schematic-box"><svg id="aw-sc-svg" viewBox="0 0 920 300" role="img" aria-label="Timing diagram: a slow noisy input edge, the comparator thresholds, and the output waveform" style="display:block;width:100%;height:auto"></svg></div>' +
+    '<div class="seq-state" id="aw-sc-state" style="margin-top:8px" aria-live="polite"></div>' +
+    '<div class="decimal-line" id="aw-sc-verify" aria-live="polite"></div>' +
+    '<div class="ctrl-label" style="margin-top:10px">Predict first — then check</div>' +
+    '<div class="lab-check"><span class="lab-check-q" id="aw-sc-q"></span><span id="aw-sc-opts" style="display:flex;gap:6px;flex-wrap:wrap"></span><span class="lab-check-fb" id="aw-sc-fb" aria-live="polite"></span></div>' +
+    '<div class="share-row"><button type="button" class="btn" data-sclink="bounce">The mechanical version of this noise — switch bounce and debounce →</button></div>' +
+    '<p class="cp-formal adv-only">Formally: a comparator with positive feedback has two switching thresholds, VT+ for a rising input and VT− for a falling one, and its transfer characteristic is a hysteresis loop: the output depends on the input\'s history, not just its value. The condition for a clean edge is VT+ − VT− greater than the peak-to-peak noise at the crossing. The 74HC14 on the bench is six of these in a package, and it is the standard input stage between a slow or noisy signal and fast logic.</p>';
+  sdSec.parentNode.insertBefore(scSec, sdSec.nextSibling);
+  scSec.querySelector("[data-sclink]").addEventListener("click", () => { if (!clickMenuKeyAW("bounce-debounce")) jumpAW("schmittCard"); });
+  const SC_X0 = 46, SC_X1 = 902, SC_YIN = v => 150 - v * 24, SC_YOUT = o => 252 - o * 54;
+  function scDraw() {
+    const X = t => SC_X0 + t / SC_DUR * (SC_X1 - SC_X0);
+    let s = "";
+    for (let v = 0; v <= 5; v++) {
+      s += '<line x1="' + SC_X0 + '" y1="' + SC_YIN(v) + '" x2="' + SC_X1 + '" y2="' + SC_YIN(v) + '" stroke="var(--line2)" stroke-dasharray="2 4"/>' +
+        '<text class="net-label" x="' + (SC_X0 - 6) + '" y="' + (SC_YIN(v) + 4) + '" text-anchor="end">' + v + " V</text>";
+    }
+    for (let t = 0; t <= 10; t += 2) s += '<text class="net-label" x="' + X(t) + '" y="292" text-anchor="middle">' + t + " s</text>";
+    const thr = sc.mode === "plain"
+      ? [{ v: SC_VT, lab: "threshold " + SC_VT + " V" }]
+      : [{ v: SC_VTP, lab: "VT+ " + SC_VTP + " V: switches on" }, { v: SC_VTM, lab: "VT− " + SC_VTM + " V: switches off" }];
+    thr.forEach(th => {
+      s += '<line x1="' + SC_X0 + '" y1="' + SC_YIN(th.v) + '" x2="' + SC_X1 + '" y2="' + SC_YIN(th.v) + '" stroke="var(--amber)" stroke-width="1.4" stroke-dasharray="7 4"/>' +
+        '<text class="net-label strong" x="' + (SC_X1 - 4) + '" y="' + (SC_YIN(th.v) - 5) + '" text-anchor="end">' + th.lab + "</text>";
+    });
+    let pin = "", pout = "";
+    const outArr = sc.mode === "plain" ? SC_SIM.plain : SC_SIM.sch;
+    for (let i = 0; i < SC_SIM.n; i += 4) {
+      const t = i * SC_DT;
+      pin += (i === 0 ? "M" : "L") + X(t).toFixed(1) + " " + SC_YIN(SC_SIM.vin[i]).toFixed(1) + " ";
+      pout += (i === 0 ? "M" : "L") + X(t).toFixed(1) + " " + SC_YOUT(outArr[i]).toFixed(1) + " ";
+    }
+    s += '<path d="' + pin + '" fill="none" stroke="var(--text)" stroke-width="1.6"/>';
+    s += '<path d="' + pout + '" fill="none" stroke="var(--amber)" stroke-width="2"/>';
+    s += '<text class="net-label strong" x="' + SC_X0 + '" y="20">IN — sensor voltage, slow rise and fall with noise</text>';
+    s += '<text class="net-label strong" x="' + SC_X0 + '" y="182">OUT — ' + (sc.mode === "plain" ? "plain comparator" : "Schmitt trigger") + "</text>";
+    if (sc.cursorT !== null) {
+      const i = Math.max(0, Math.min(SC_SIM.n - 1, Math.round(sc.cursorT / SC_DT)));
+      const cx = X(sc.cursorT);
+      s += '<line x1="' + cx + '" y1="26" x2="' + cx + '" y2="262" stroke="var(--red)" stroke-width="1.4"/>' +
+        '<circle cx="' + cx + '" cy="' + SC_YIN(SC_SIM.vin[i]) + '" r="4" fill="var(--red)"/>' +
+        '<circle cx="' + cx + '" cy="' + SC_YOUT(outArr[i]) + '" r="4" fill="var(--red)"/>';
+    }
+    scSec.querySelector("#aw-sc-svg").innerHTML = s;
+  }
+  function scRender() {
+    const tr = sc.mode === "plain" ? SC_SIM.plainTr : SC_SIM.schTr;
+    let msg = sc.mode === "plain"
+      ? "Plain comparator, threshold " + SC_VT + " V: the output changes " + SC_SIM.plainTr + " times on this sweep. Every change is an edge the next chip has to believe."
+      : "Schmitt trigger, VT+ " + SC_VTP + " V and VT− " + SC_VTM + " V: the output changes " + SC_SIM.schTr + " times on the same sweep: once on, once off.";
+    if (sc.cursorT !== null) {
+      const i = Math.max(0, Math.min(SC_SIM.n - 1, Math.round(sc.cursorT / SC_DT)));
+      const out = (sc.mode === "plain" ? SC_SIM.plain : SC_SIM.sch)[i];
+      msg += " At " + sc.cursorT.toFixed(1) + " s the input is " + SC_SIM.vin[i].toFixed(2) + " V and the output is " + (out ? "HIGH" : "LOW") + ".";
+    }
+    scSec.querySelector("#aw-sc-state").textContent = msg;
+    scSec.querySelector("#aw-sc-state").style.color = sc.mode === "plain" && sc.answered ? "var(--red)" : "";
+    scDraw();
+  }
+  function scStopSweep() {
+    if (sc.timer) { clearInterval(sc.timer); sc.timer = null; }
+    sc.running = false;
+    scSec.querySelector("#aw-sc-sweep").textContent = "Sweep the edge ▸";
+  }
+  scSec.querySelector("#aw-sc-sweep").addEventListener("click", () => {
+    if (sc.running) { scStopSweep(); scRender(); return; }
+    sc.running = true; sc.cursorT = 0;
+    scSec.querySelector("#aw-sc-sweep").textContent = "Pause";
+    sc.timer = setInterval(() => {
+      sc.cursorT += 0.08;
+      if (sc.cursorT >= SC_DUR) { sc.cursorT = SC_DUR; scStopSweep(); }
+      scRender();
+    }, 30);
+    scRender();
+  });
+  scSec.querySelector("#aw-sc-mode").addEventListener("click", e => {
+    sc.mode = sc.mode === "plain" ? "schmitt" : "plain";
+    e.target.textContent = sc.mode === "plain" ? "Comparator: plain (one threshold)" : "Comparator: Schmitt trigger (two thresholds)";
+    scRender();
+  });
+  scSec.querySelector("#aw-sc-reset").addEventListener("click", () => { scStopSweep(); sc.cursorT = null; scRender(); });
+  (function scQuestion() {
+    sc.answered = false;
+    scSec.querySelector("#aw-sc-sweep").disabled = true;
+    scSec.querySelector("#aw-sc-mode").disabled = true;
+    const correct = "Chatter: it flips back and forth several times around each crossing";
+    const opts = ["Switches exactly twice: once up, once down, cleanly", "Stays low: the noise averages the signal away", "Copies the noise: the output wiggles for the whole ten seconds"];
+    opts.splice(Math.floor(rngAW(777)() * (opts.length + 1)), 0, correct);
+    scSec.querySelector("#aw-sc-q").textContent = "Predict first: the input creeps up through the plain comparator's " + SC_VT + " V threshold with noise riding on it, holds, then falls back the same way. Across the whole sweep, the output will…";
+    optBtnsAW(scSec.querySelector("#aw-sc-opts"), opts, i => {
+      sc.answered = true;
+      scSec.querySelector("#aw-sc-sweep").disabled = false;
+      scSec.querySelector("#aw-sc-mode").disabled = false;
+      const right = opts[i] === correct;
+      fbSetAW(scSec.querySelector("#aw-sc-fb"), right, right
+        ? "Chatter: " + SC_SIM.plainTr + " output changes on this sweep, in bursts at the two crossings. Sweep it, then switch to the Schmitt trigger and count again: " + SC_SIM.schTr + "."
+        : "It chatters: " + SC_SIM.plainTr + " output changes, in bursts wherever the noisy input straddles " + SC_VT + " V. The Schmitt trigger's two thresholds are what stop it. Controls unlocked anyway.");
+      scRender();
+    });
+  })();
+  scSec.querySelector("#aw-sc-verify").textContent = "Self-test at load: the sweep is simulated at 2 ms steps; the Schmitt output changes exactly " + SC_SIM.schTr + " times (on at VT+, off at VT−, high on the plateau, low at both ends) and the plain comparator changes " + SC_SIM.plainTr + " times (window.__schmittCheck). The noise is a fixed two-sine model, so the counts are the same on every visit.";
+  scRender();
+
+  /* ================================================================
+     3) PS/2 KEYBOARD — the card.
+     ================================================================ */
+  const p2 = { keyIdx: 0, answered: false, frames: [], fi: 0, bi: 0, context: "", phase: "idle", decoded: [] };
+  const p2Sec = document.createElement("section");
+  p2Sec.className = "card stage-card"; p2Sec.id = "ps2Card"; p2Sec.style.marginTop = "16px";
+  p2Sec.innerHTML =
+    "<h2>PS/2 keyboard protocol — a key press, bit by bit</h2>" +
+    '<p class="what">Before USB, a keyboard spoke PS/2, and the protocol is a serial frame a student can read entire. The keyboard generates the clock itself (about 10–16.7 kHz) and changes the data line while the clock is high; the host reads each bit on the falling edge. Every frame is eleven bits: a start bit (0), eight data bits sent <b>least-significant bit first</b>, an odd-parity bit (the ones in the data and parity bits together total odd), and a stop bit (1). Pressing a key sends its set-2 make code; releasing it sends a break prefix, F0, then the same code again. Step a press and a release through below and watch the decoder on the right rebuild the byte.</p>' +
+    '<div class="share-row"><span class="av-biglab">Key</span><span id="aw-p2-keys" style="display:flex;gap:6px;flex-wrap:wrap"></span></div>' +
+    '<div class="share-row"><button type="button" class="btn primary" id="aw-p2-press">Press the key ▸</button>' +
+    '<button type="button" class="btn" id="aw-p2-step">Send next bit</button>' +
+    '<button type="button" class="btn" id="aw-p2-release">Release the key</button>' +
+    '<button type="button" class="btn" id="aw-p2-reset">Reset</button></div>' +
+    '<div class="schematic-box"><svg id="aw-p2-svg" viewBox="0 0 920 196" role="img" aria-label="Timing diagram of the PS/2 clock and data lines for the current frame" style="display:block;width:100%;height:auto"></svg></div>' +
+    '<div class="seq-state" id="aw-p2-state" style="margin-top:8px" aria-live="polite"></div>' +
+    '<div class="decimal-line" id="aw-p2-decoded" aria-live="polite"></div>' +
+    '<div class="decimal-line" id="aw-p2-verify" aria-live="polite"></div>' +
+    '<div class="ctrl-label" style="margin-top:10px">Predict first — then check</div>' +
+    '<div class="lab-check"><span class="lab-check-q" id="aw-p2-q"></span><span id="aw-p2-opts" style="display:flex;gap:6px;flex-wrap:wrap"></span><span class="lab-check-fb" id="aw-p2-fb" aria-live="polite"></span></div>' +
+    '<div class="share-row"><button type="button" class="btn" data-p2link="uart">The other serial frame on this site — the UART simulator →</button>' +
+    '<button type="button" class="btn" data-p2link="keypad">Where the keys are scanned instead — the 4×4 keypad lab →</button></div>' +
+    '<p class="cp-formal adv-only">Formally: PS/2 is a synchronous serial link with the clock sourced by the device and data framed at 11 bits per byte, odd parity, LSB first; the host may inhibit the bus by holding the clock low, which is why the keyboard checks for an idle bus before starting a frame. Set-2 scan codes are one byte for the keys here; some keys (arrows, the editing cluster) send multi-byte sequences beginning with E0, which this lab leaves out.</p>';
+  scSec.parentNode.insertBefore(p2Sec, scSec.nextSibling);
+  p2Sec.querySelector("[data-p2link='uart']").addEventListener("click", () => { if (!clickMenuKeyAW("uart-sim")) jumpAW("ps2Card"); });
+  p2Sec.querySelector("[data-p2link='keypad']").addEventListener("click", () => { if (!clickMenuKeyAW("keypad-scan")) jumpAW("ps2Card"); });
+  const p2KeyBtns = [];
+  P2_KEYS.forEach((K, i) => {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "btn"; b.textContent = K.k + " · " + hexAW(K.code);
+    b.addEventListener("click", () => { p2.keyIdx = i; p2Reset(); p2Question(); });
+    p2Sec.querySelector("#aw-p2-keys").appendChild(b); p2KeyBtns.push(b);
+  });
+  function p2Cur() { return p2.frames[p2.fi] || null; }
+  function p2Draw() {
+    const X0 = 64, CW = 76, CLK_H = 26, CLK_L = 58, DAT_H = 108, DAT_L = 140;
+    let s = "";
+    s += '<text class="net-label strong" x="6" y="' + (CLK_H + 4) + '">CLK</text>';
+    s += '<text class="net-label strong" x="6" y="' + (DAT_H + 4) + '">DATA</text>';
+    const fr = p2Cur();
+    if (!fr) {
+      s += '<line x1="' + X0 + '" y1="' + CLK_H + '" x2="' + (X0 + 11 * CW) + '" y2="' + CLK_H + '" stroke="var(--text)" stroke-width="1.8"/>';
+      s += '<line x1="' + X0 + '" y1="' + DAT_H + '" x2="' + (X0 + 11 * CW) + '" y2="' + DAT_H + '" stroke="var(--amber)" stroke-width="2"/>';
+      s += '<text class="net-label" x="' + X0 + '" y="182">Both lines idle high. Nothing is sent until the key is pressed.</text>';
+      p2Sec.querySelector("#aw-p2-svg").innerHTML = s;
+      return;
+    }
+    if (p2.bi > 0 && p2.bi <= 11) {
+      const hx = X0 + (p2.bi - 1) * CW;
+      s += '<rect x="' + hx + '" y="12" width="' + CW + '" height="146" fill="var(--amber)" opacity=".14"/>';
+    }
+    let clk = "M" + X0 + " " + CLK_H, dat = "M" + X0 + " " + (fr.bits[0] ? DAT_H : DAT_L);
+    fr.bits.forEach((bit, i) => {
+      const x = X0 + i * CW, fall = x + CW * 0.45;
+      clk += " L" + fall + " " + CLK_H + " L" + fall + " " + CLK_L + " L" + (x + CW) + " " + CLK_L + " L" + (x + CW) + " " + CLK_H;
+      const y = bit ? DAT_H : DAT_L;
+      dat += " L" + (x + CW) + " " + y;
+      if (i < 10) { const ny = fr.bits[i + 1] ? DAT_H : DAT_L; if (ny !== y) dat += " L" + (x + CW) + " " + ny; }
+      s += '<text class="net-label" x="' + (x + CW / 2) + '" y="176" text-anchor="middle">' + (i === 0 ? "S" : i === 9 ? "P" : i === 10 ? "T" : (i - 1)) + "</text>";
+      s += '<text class="net-label strong" x="' + (x + CW / 2) + '" y="94" text-anchor="middle">' + bit + "</text>";
+    });
+    s += '<path d="' + clk + '" fill="none" stroke="var(--text)" stroke-width="1.8"/>';
+    s += '<path d="' + dat + '" fill="none" stroke="var(--amber)" stroke-width="2"/>';
+    s += '<text class="net-label" x="' + X0 + '" y="192">Frame ' + (p2.fi + 1) + " of " + p2.frames.length + ": " + fr.role + " · the host samples DATA on each falling edge of CLK</text>";
+    p2Sec.querySelector("#aw-p2-svg").innerHTML = s;
+  }
+  function p2Render() {
+    const K = P2_KEYS[p2.keyIdx];
+    p2KeyBtns.forEach((b, i) => b.setAttribute("aria-pressed", i === p2.keyIdx ? "true" : "false"));
+    const fr = p2Cur();
+    let msg;
+    if (p2.phase === "idle") msg = "Idle. The lines sit high. Predict the bit order, then press " + K.k + " (make code " + hexAW(K.code) + ").";
+    else if (p2.phase === "held") msg = "Make frame complete: the host has " + hexAW(K.code) + ", the make code for " + K.k + ", and the key is down. Release it to send the break sequence.";
+    else if (!fr) msg = "";
+    else if (p2.bi === 0) msg = "Frame " + (p2.fi + 1) + " of " + p2.frames.length + " ready: " + fr.role + ", byte " + hexAW(fr.byte) + ". Send its bits one at a time.";
+    else if (p2.bi <= 11) {
+      const sent = fr.bits.slice(0, p2.bi).join("");
+      msg = "Bit " + p2.bi + " of 11 sent: the " + P2_ROLES[p2.bi - 1] + " = " + fr.bits[p2.bi - 1] + ". On the wire so far: " + sent + ".";
+      if (p2.bi === 11) {
+        const d = p2Decode(fr.bits);
+        msg += " Frame complete: the host rebuilds " + hexAW(d.byte) + " (parity " + (d.parityOk ? "odd, OK" : "FAILS") + ") — " + fr.meaning + ".";
+      }
+    }
+    p2Sec.querySelector("#aw-p2-state").textContent = msg;
+    p2Sec.querySelector("#aw-p2-decoded").textContent = p2.decoded.length ? "Decoded stream: " + p2.decoded.join(" · ") : "";
+    p2Sec.querySelector("#aw-p2-press").disabled = !p2.answered || p2.phase !== "idle";
+    p2Sec.querySelector("#aw-p2-step").disabled = !p2.answered || p2.phase !== "sending";
+    p2Sec.querySelector("#aw-p2-release").disabled = !p2.answered || p2.phase !== "held";
+    p2Draw();
+  }
+  function p2Reset() {
+    p2.frames = []; p2.fi = 0; p2.bi = 0; p2.context = ""; p2.phase = "idle"; p2.decoded = [];
+    p2Render();
+  }
+  p2Sec.querySelector("#aw-p2-press").addEventListener("click", () => {
+    const K = P2_KEYS[p2.keyIdx];
+    p2.frames = [{ byte: K.code, bits: p2Frame(K.code), role: "make code", meaning: "the make code for " + K.k + ": the key went down" }];
+    p2.fi = 0; p2.bi = 0; p2.context = "make"; p2.phase = "sending";
+    p2Render();
+  });
+  p2Sec.querySelector("#aw-p2-release").addEventListener("click", () => {
+    const K = P2_KEYS[p2.keyIdx];
+    p2.frames = [
+      { byte: P2_BREAK, bits: p2Frame(P2_BREAK), role: "break prefix", meaning: "F0, the break prefix: the next code is a release" },
+      { byte: K.code, bits: p2Frame(K.code), role: "the code again", meaning: "the make code for " + K.k + " after F0: the key came up" }];
+    p2.fi = 0; p2.bi = 0; p2.context = "break"; p2.phase = "sending";
+    p2Render();
+  });
+  p2Sec.querySelector("#aw-p2-step").addEventListener("click", () => {
+    if (p2.phase !== "sending") return;
+    if (p2.bi >= 11) {
+      const fr = p2Cur();
+      if (fr) p2.decoded.push(hexAW(fr.byte) + " (" + fr.role + ")");
+      p2.fi++; p2.bi = 0;
+      if (p2.fi >= p2.frames.length) { p2.phase = p2.context === "make" ? "held" : "idle"; if (p2.phase === "idle") p2.frames = []; }
+      p2Render();
+      return;
+    }
+    p2.bi++;
+    if (p2.bi === 11) { /* frame complete; decode announced in render */ }
+    p2Render();
+  });
+  p2Sec.querySelector("#aw-p2-reset").addEventListener("click", p2Reset);
+  const p2Rng = rngAW(424242);
+  function p2Question() {
+    const K = P2_KEYS[p2.keyIdx];
+    p2.answered = false;
+    const lsb = []; for (let i = 0; i < 8; i++) lsb.push((K.code >> i) & 1);
+    const lsbStr = lsb.join(""), msbStr = binAW(K.code, 8), invStr = lsb.map(b => 1 - b).join("");
+    const opts = [lsbStr + " — least-significant bit first", msbStr + " — most-significant bit first", invStr + " — inverted, LSB first"];
+    const parity = p2Frame(K.code)[9];
+    p2Sec.querySelector("#aw-p2-q").textContent = "Predict first: " + K.k + "'s make code is " + hexAW(K.code) + " = " + msbStr + ". In what order do its eight data bits leave the keyboard?";
+    p2Sec.querySelector("#aw-p2-fb").textContent = "";
+    optBtnsAW(p2Sec.querySelector("#aw-p2-opts"), opts, i => {
+      p2.answered = true;
+      const right = i === 0;
+      fbSetAW(p2Sec.querySelector("#aw-p2-fb"), right, right
+        ? lsbStr + ": PS/2 sends the least-significant bit first, so the byte on the wire reads backwards from the way it is written. Its parity bit will be " + parity + " (odd parity). Press the key and step it through."
+        : "It is " + lsbStr + ", least-significant bit first: written binary reads MSB-first, the wire runs the other way. Its parity bit will be " + parity + ". Controls unlocked anyway.");
+      p2Render();
+    });
+    p2Render();
+  }
+  p2Sec.querySelector("#aw-p2-verify").textContent = "Self-test at load: all " + P2_KEYS.length + " keys' frames are 11 bits with start 0 and stop 1 and decode back to their codes with odd parity satisfied, every break sequence decodes as F0 then the code again, and all 256 possible bytes round-trip through frame and decode (window.__ps2Check). Multi-byte E0 keys are left out of this lab.";
+  p2Question();
+  p2Reset();
+
+  /* ---------------- MENU REGISTRATION + COUNT REBUILD ---------------- */
+  function addMenuItemAW(groupName, afterKey, spec) {
+    const list = $AW("menuList"); if (!list) return false;
+    if (list.querySelector('[data-key="' + spec.key + '"]')) return false;
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "menu-item"; b.dataset.key = spec.key;
+    b.dataset.search = (spec.label + " " + spec.hint + " " + spec.search).toLowerCase();
+    if (spec.level) b.dataset.uxlevel = spec.level;
+    b.innerHTML = '<span class="mi-dot" aria-hidden="true"></span><span class="mi-label"></span><small></small>';
+    b.querySelector(".mi-label").textContent = spec.label;
+    b.querySelector("small").textContent = spec.hint;
+    b.addEventListener("click", () => { const p = $AW("menuPanel"); if (p) p.hidden = true; const mb = $AW("menuBtn"); if (mb) mb.setAttribute("aria-expanded", "false"); spec.go(); });
+    if (afterKey) {
+      const anchor = list.querySelector('[data-key="' + afterKey + '"]');
+      if (anchor) { anchor.parentNode.insertBefore(b, anchor.nextSibling); return true; }
+    }
+    let sib = null, inGroup = false;
+    Array.prototype.slice.call(list.children).forEach(el => {
+      if (el.classList.contains("menu-group")) inGroup = (el.dataset.group || "").trim() === groupName;
+      else if (inGroup && el.classList.contains("menu-item")) sib = el;
+    });
+    if (sib) sib.parentNode.insertBefore(b, sib.nextSibling); else list.appendChild(b);
+    return true;
+  }
+  addMenuItemAW("Logic & Circuits", "stepper-driver", {
+    key: "seg-decoder", label: "Gate-level 7-segment decoder — design the chip",
+    hint: "Design each segment from a 4-bit BCD input with the K-map minimiser's equations, add the blanking layer, and count the gates against the single 7447 chip",
+    search: "seven segment decoder design boolean function karnaugh map minimiser quine mccluskey bcd 7447 gate count blanking dont care common anode simulator lab",
+    level: "intermediate", go: () => { setTopArea("circuits"); syncRail("circuits"); jumpAW("segDecoderCard"); }
+  });
+  addMenuItemAW("Logic & Circuits", "seg-decoder", {
+    key: "schmitt-trigger", label: "Schmitt trigger — one clean edge out of a noisy one",
+    hint: "A slow, noisy input edge chatters a plain comparator's output; two thresholds and a hysteresis band turn it into a single clean transition",
+    search: "schmitt trigger hysteresis comparator threshold chatter noisy edge slow rising input vt+ vt- 74hc14 debounce analogue timing diagram simulator lab",
+    level: "beginner", go: () => { setTopArea("circuits"); syncRail("circuits"); jumpAW("schmittCard"); }
+  });
+  addMenuItemAW("Logic & Circuits", "schmitt-trigger", {
+    key: "ps2-keyboard", label: "PS/2 keyboard protocol — a key press, bit by bit",
+    hint: "Decode a key press from the clock and data lines: start bit, eight data bits LSB first, odd parity, stop bit, then the make code and the F0 break code",
+    search: "ps2 keyboard protocol scan code make break f0 serial frame start bit parity stop bit lsb first clock data timing diagram simulator lab",
+    level: "intermediate", go: () => { setTopArea("circuits"); syncRail("circuits"); jumpAW("ps2Card"); }
+  });
+  (function rebuildCountsAW() {
+    const RJ = window.__uxRoundJ; if (!RJ) return;
+    const groups = RJ.menuGroups(); const counts = {}; let total = 0;
+    groups.forEach(g => {
+      counts[g.name] = g.items.length; total += g.items.length;
+      const c = g.header.querySelector(".mi-count"); if (c) c.textContent = g.items.length;
+    });
+    window.LAB_MENU = { groups: groups.map(g => ({ name: g.name, items: g.items.map(b => { const l = b.querySelector(".mi-label"); return l ? l.textContent : ""; }) })), count: total };
+    window.LAB_MODULES = { modules: groups.map(g => ({ name: g.name, count: g.items.length })), total };
+    RJ.buildRailAndList(counts);
+    RJ.buildGallery();
+    ["boards", "arch", "os", "org"].forEach(id => {
+      const h = document.querySelector("#module-" + id + " .mh-count");
+      if (!h) return;
+      const name = { boards: "Boards, Modulation & Projects", arch: "Computer Architecture", os: "Operating Systems", org: "Computer Organization" }[id];
+      if (counts[name]) h.textContent = counts[name] + " items";
+    });
+    window.__countsAW = { total, counts };
+  })();
+})();
+</script>
+<style>
+/* ===== Round AW — decoder display, equations, schmitt scope, ps/2 ===== */
+.aw-seg-wrap{display:flex;gap:26px;flex-wrap:wrap;margin:10px 0;align-items:flex-start}
+.aw-digit{display:grid;grid-template-areas:". a ." "f . b" ". g ." "e . c" ". d .";grid-template-columns:8px 40px 8px;grid-template-rows:8px 34px 8px 34px 8px;gap:2px}
+.aw-seg{background:var(--border);border-radius:3px;opacity:.35}
+.aw-seg.s0{grid-area:a}.aw-seg.s1{grid-area:b}.aw-seg.s2{grid-area:c}.aw-seg.s3{grid-area:d}.aw-seg.s4{grid-area:e}.aw-seg.s5{grid-area:f}.aw-seg.s6{grid-area:g}
+.aw-seg.on{background:var(--amber);opacity:1}
+.aw-chips{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0}
+.aw-chip{border:1px solid var(--border);border-radius:6px;padding:3px 9px;font-family:ui-monospace,Menlo,monospace;font-size:12.5px;background:var(--surface);opacity:.6}
+.aw-chip.on{background:var(--amber);border-color:var(--amber);color:#111;opacity:1;font-weight:700}
+.aw-eqrow{display:flex;gap:10px;align-items:baseline;padding:3px 0;border-bottom:1px dashed var(--border);font-size:13.5px;flex-wrap:wrap}
+.aw-eqname{font-family:ui-monospace,Menlo,monospace;font-weight:700;min-width:44px}
+.aw-eqsop{font-family:ui-monospace,Menlo,monospace}
+.aw-eqg{margin-left:auto;color:var(--muted,#888);font-size:12.5px}
+.aw-cmp-wrap{overflow-x:auto;margin:10px 0}
+.aw-cmp{border-collapse:collapse;font-size:13.5px}
+.aw-cmp th,.aw-cmp td{border:1px solid var(--border);padding:5px 10px;text-align:left}
+.aw-cmp th{background:var(--surface)}
+</style>
