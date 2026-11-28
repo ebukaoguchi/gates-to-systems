@@ -34899,3 +34899,611 @@ window.__CPU_PDF = "data:application/pdf;base64,JVBERi0xLjQKJZOMi54gUmVwb3J0TGFi
 .au-tt-row span{text-align:center}
 .au-f{padding:3px 0}
 </style>
+<script>
+"use strict";
+/* ================================================================
+   ROUND AV — three new labs, all in Logic & Circuits:
+   1) ripple-sync — "Ripple vs synchronous counters — one clock,
+      two landings". Two 4-bit up-counters on the same clock. In
+      the ripple counter each stage is clocked by the stage below,
+      so a toggling bit lands one flip-flop delay after the bit
+      that clocked it and the count walks through wrong values on
+      any carry (0111 -> 0110 -> 0100 -> 0000 -> 1000). In the
+      synchronous counter every stage shares the clock and the
+      enables are ready before the edge, so all bits land together.
+      Delays come from the site's gate-delay model: a gate is
+      10 ns (window.LAB.GATE_DELAYS) and a flip-flop clock-to-Q is
+      priced at two gate delays, 20 ns. Verified at load: 32
+      clocks of settled counts, strictly increasing ripple landing
+      times, the worst-case transient sequence and skew, and the
+      value a decoder would sample 50 ns after the worst edge.
+   2) flash-adc — "Flash ADC — every comparator at once". A 3-bit
+      flash converter on the SAR lab's terms (VREF = 5 V): seven
+      comparators make a thermometer code, a priority encoder
+      (textbook equations, gates counted) turns it into 3 bits in
+      one step. Verified at load over a 0.005 V sweep plus every
+      exact threshold: the code matches the floor rule the SAR lab
+      converges to, the thermometer code is monotone, and the
+      encoder equations agree with the thermometer popcount. The
+      comparison is priced both ways: this flash (7 comparators,
+      11 encoder gates, 1 step), the site's SAR (1 comparator,
+      8 verdicts), and a hypothetical 8-bit flash (255 comparators).
+   3) stepper-driver — "Stepper-motor driver — a counter walks
+      the phases". A unipolar stepper (the 28BYJ-48 pattern) driven
+      the way the Arduino libraries drive it: a counter advances
+      an index, a decoder turns the index into phase patterns —
+      full-step (two phases on) and half-step (alternating one and
+      two). The motor model has a pull-in limit of 200 steps/s:
+      command steps faster and the rotor misses them, counted
+      exactly by a deterministic spacing rule. Verified at load:
+      both phase tables (uniqueness, on-counts, neighbour Hamming
+      distances), a legal-rate run with no misses, a 600 steps/s
+      run with exactly 20 of 30 steps missed, and reverse running.
+   Everything loads paused.
+   ================================================================ */
+(function roundAV() {
+  const $AV = id => document.getElementById(id);
+  function jumpAV(id) { const el = id && $AV(id); if (el) setTimeout(() => el.scrollIntoView({ behavior: "smooth", block: "start" }), 60); }
+  function clickMenuKeyAV(key) { const it = document.querySelector('#menuList .menu-item[data-key="' + key + '"]'); if (it) { it.click(); return true; } return false; }
+  function fbSetAV(el, ok, msg) { if (!el) return; el.textContent = (ok ? "✓ " : "✗ ") + msg; el.style.color = ok ? "var(--green)" : "var(--red)"; }
+  function optBtnsAV(host, labels, onPick) {
+    host.innerHTML = "";
+    labels.forEach((lab, i) => { const b = document.createElement("button"); b.type = "button"; b.className = "btn"; b.textContent = lab; b.addEventListener("click", () => onPick(i, b)); host.appendChild(b); });
+  }
+  function rngAV(seed) { let a = seed >>> 0; return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+  const binAV = (v, w) => (v >>> 0).toString(2).padStart(w, "0");
+  const fmtAV = (v, d) => (Math.round(v * Math.pow(10, d)) / Math.pow(10, d)).toFixed(d);
+  const AV_GATE_NS = (window.LAB && window.LAB.gateDelay) ? window.LAB.gateDelay("AND") : 10;
+  const AV_TPD = 2 * AV_GATE_NS; /* flip-flop clock-to-Q = two gate delays = 20 ns */
+
+  /* ================================================================
+     1) RIPPLE vs SYNC — the model.
+     ================================================================ */
+  function rcTransition(from) {
+    const to = (from + 1) & 15;
+    const rip = [], syn = [];
+    for (let k = 0; k < 4; k++) {
+      const bFrom = (from >> k) & 1, bTo = (to >> k) & 1;
+      if (bFrom !== bTo) {
+        rip.push({ bit: k, t: (k + 1) * AV_TPD, val: bTo });
+        syn.push({ bit: k, t: AV_TPD, val: bTo });
+      }
+    }
+    rip.sort((a, b) => a.t - b.t);
+    const transients = [];
+    let cur = from;
+    rip.forEach(ev => { cur = (cur & ~(1 << ev.bit)) | (ev.val << ev.bit); transients.push(cur); });
+    return { from, to, ripple: rip, sync: syn, transients };
+  }
+  function rcValueAt(tr, tNs) {
+    let v = tr.from;
+    tr.ripple.forEach(ev => { if (ev.t <= tNs) v = (v & ~(1 << ev.bit)) | (ev.val << ev.bit); });
+    return v;
+  }
+  function rcVerify() {
+    let countsOk = true, skewOk = true, syncOk = true, transOk = true;
+    for (let n = 0; n < 32; n++) {
+      const tr = rcTransition(n & 15);
+      if (tr.to !== ((n + 1) & 15)) countsOk = false;
+      if (tr.transients[tr.transients.length - 1] !== tr.to) countsOk = false;
+      for (let i = 1; i < tr.ripple.length; i++) if (!(tr.ripple[i].t > tr.ripple[i - 1].t)) skewOk = false;
+      tr.sync.forEach(ev => { if (ev.t !== AV_TPD) syncOk = false; });
+    }
+    const worst = rcTransition(7); /* 0111 -> 1000: every bit toggles */
+    if (!(worst.ripple.length === 4 && worst.ripple[3].t === 4 * AV_TPD && (worst.ripple[3].t - worst.ripple[0].t) === 3 * AV_TPD)) skewOk = false;
+    if (JSON.stringify(worst.transients) !== JSON.stringify([6, 4, 0, 8])) transOk = false;
+    if (rcValueAt(worst, 50) !== 4) transOk = false;
+    return { countsOk, skewOk, syncOk, transOk, tpdNs: AV_TPD, worstSkewNs: 3 * AV_TPD, worstSettleNs: 4 * AV_TPD, clocksChecked: 32, pass: countsOk && skewOk && syncOk && transOk };
+  }
+  const RC_V = rcVerify();
+
+  /* ================================================================
+     2) FLASH ADC — the model.
+     ================================================================ */
+  const FL_VREF = 5, FL_BITS = 3, FL_CODES = 8, FL_LSB = FL_VREF / FL_CODES;
+  function flTherm(vin) {
+    const T = [];
+    for (let k = 1; k <= 7; k++) T.push(vin >= k * FL_LSB - 1e-12 ? 1 : 0);
+    return T;
+  }
+  function flEncode(T) {
+    const b2 = T[3] ? 1 : 0;
+    const b1 = ((T[1] && !T[3]) || T[5]) ? 1 : 0;
+    const b0 = ((T[0] && !T[1]) || (T[2] && !T[3]) || (T[4] && !T[5]) || T[6]) ? 1 : 0;
+    return (b2 << 2) | (b1 << 1) | b0;
+  }
+  function flConvert(vin) {
+    vin = Math.max(0, Math.min(FL_VREF, vin));
+    const therm = flTherm(vin);
+    const code = flEncode(therm);
+    return { vin, therm, code, dacV: code * FL_LSB, err: vin - code * FL_LSB };
+  }
+  function flRule(vin) { return Math.max(0, Math.min(7, Math.floor(vin / FL_VREF * FL_CODES + 1e-9))); }
+  function flGateCount() { return { comparators: 7, encoderGates: 11, total: 18 }; }
+  function flVerify() {
+    let pts = 0, ruleOk = 0, monoOk = 0, encOk = 0;
+    for (let v = 0; v <= 5.0001; v += 0.005) {
+      const c = flConvert(v); pts++;
+      if (c.code === flRule(v)) ruleOk++;
+      let m = true, seen0 = false;
+      c.therm.forEach(t => { if (t === 0) seen0 = true; else if (seen0) m = false; });
+      if (m) monoOk++;
+      if (c.therm.reduce((s, t) => s + t, 0) === c.code) encOk++;
+    }
+    let thr = 0, thrOk = 0;
+    for (let k = 0; k <= 7; k++) { thr++; if (flConvert(k * FL_LSB).code === k && flRule(k * FL_LSB) === k) thrOk++; }
+    return { points: pts, ruleMatch: ruleOk, monotone: monoOk, encoderMatch: encOk, thresholds: thrOk + "/" + thr, pass: ruleOk === pts && monoOk === pts && encOk === pts && thrOk === thr };
+  }
+  const FL_V = flVerify();
+
+  /* ================================================================
+     3) STEPPER DRIVER — the model.
+     ================================================================ */
+  const ST_FULL = [[1, 1, 0, 0], [0, 1, 1, 0], [0, 0, 1, 1], [1, 0, 0, 1]];
+  const ST_HALF = [[1, 0, 0, 0], [1, 1, 0, 0], [0, 1, 0, 0], [0, 1, 1, 0], [0, 0, 1, 0], [0, 0, 1, 1], [0, 0, 0, 1], [1, 0, 0, 1]];
+  const ST_MAX_SPS = 200;
+  function stSeq(mode) { return mode === "half" ? ST_HALF : ST_FULL; }
+  function stSimulate(mode, dir, rate, steps) {
+    const seq = stSeq(mode);
+    let idx = 0, accepted = 0, missed = 0, lastT = -Infinity;
+    const dt = 1 / rate, minDt = 1 / ST_MAX_SPS;
+    for (let i = 0; i < steps; i++) {
+      const t = i * dt;
+      if (t - lastT >= minDt - 1e-12) { idx = (idx + dir + seq.length) % seq.length; accepted++; lastT = t; }
+      else missed++;
+    }
+    return { idx, accepted, missed, pattern: seq[idx].slice() };
+  }
+  function stVerify() {
+    const diff = (a, b) => a.reduce((s, v, i) => s + (v !== b[i] ? 1 : 0), 0);
+    let seqOk = true;
+    if (new Set(ST_FULL.map(p => p.join(""))).size !== 4) seqOk = false;
+    ST_FULL.forEach((p, i) => { if (p.reduce((s, v) => s + v, 0) !== 2) seqOk = false; if (diff(p, ST_FULL[(i + 1) % 4]) !== 2) seqOk = false; });
+    if (new Set(ST_HALF.map(p => p.join(""))).size !== 8) seqOk = false;
+    ST_HALF.forEach((p, i) => { if (diff(p, ST_HALF[(i + 1) % 8]) !== 1) seqOk = false; if (p.reduce((s, v) => s + v, 0) !== (i % 2 === 0 ? 1 : 2)) seqOk = false; });
+    const legal = stSimulate("half", 1, 100, 16);
+    const legalOk = legal.missed === 0 && legal.accepted === 16 && legal.idx === 0;
+    const fast = stSimulate("full", 1, 600, 30);
+    const fastOk = fast.accepted === 10 && fast.missed === 20 && fast.idx === 2;
+    const rev = stSimulate("full", -1, 100, 4);
+    const revOk = rev.idx === 0 && rev.missed === 0 && rev.accepted === 4;
+    return { seqOk, legalOk, fastOk, revOk, maxSps: ST_MAX_SPS, pass: seqOk && legalOk && fastOk && revOk };
+  }
+  const ST_V = stVerify();
+
+  window.__rippleSync = { transition: rcTransition, valueAt: rcValueAt, verify: rcVerify, tpdNs: AV_TPD };
+  window.__flashAdc = { convert: flConvert, encode: flEncode, therm: flTherm, rule: flRule, gateCount: flGateCount, verify: flVerify, vref: FL_VREF, lsb: FL_LSB };
+  window.__stepper = { full: ST_FULL, half: ST_HALF, simulate: stSimulate, verify: stVerify, maxSps: ST_MAX_SPS };
+  try {
+    window.__rippleSyncCheck = RC_V;
+    window.__flashAdcCheck = FL_V;
+    window.__stepperCheck = ST_V;
+    window.__roundAVSelfTest = { ripple: RC_V, flash: FL_V, stepper: ST_V };
+    const bad = Object.keys(window.__roundAVSelfTest).filter(k => !window.__roundAVSelfTest[k].pass);
+    if (bad.length && window.console) console.warn("[Round AV self-test] failures:", bad);
+  } catch (e) { window.__roundAVSelfTest = { error: String(e && e.message || e) }; }
+
+  /* ================================================================
+     1) RIPPLE vs SYNC — the card.
+     ================================================================ */
+  const rc = { value: 7, running: false, timer: null, answered: false, animating: false, lastTr: rcTransition(7) };
+  const rcSec = document.createElement("section");
+  rcSec.className = "card stage-card"; rcSec.id = "rippleSyncCard"; rcSec.style.marginTop = "16px";
+  rcSec.innerHTML =
+    "<h2>Ripple vs synchronous counters — one clock, two landings</h2>" +
+    '<p class="what">Two 4-bit up-counters, one clock. In the <b>ripple counter</b> each flip-flop is clocked by the output of the one below it, so a carry has to fall stage by stage: on the step 0111 → 1000 the count walks through 0110, 0100 and 0000 before it arrives, and anything reading the counter mid-flight reads a lie. In the <b>synchronous counter</b> every flip-flop shares the clock and the toggle enables are worked out before the edge, so all four bits land at once. The delays are priced with this site\'s gate-delay model: a gate is ' + AV_GATE_NS + ' ns, a flip-flop clock-to-Q is two gate delays, ' + AV_TPD + ' ns. The timing diagram below is drawn to that scale, in nanoseconds.</p>' +
+    '<div class="share-row"><span class="av-biglab">Count now</span><span class="av-bigbits" id="avRcNow">0111 · 7</span>' +
+    '<button type="button" class="btn primary" id="avRcClock">Clock once ▸</button>' +
+    '<button type="button" class="btn" id="avRcRun">Run the clock</button>' +
+    '<button type="button" class="btn" id="avRcReset">Back to 0111</button></div>' +
+    '<div class="schematic-box"><svg id="avRcSvg" viewBox="0 0 920 254" role="img" aria-label="Timing diagram: ripple counter bits landing one stage delay apart, synchronous bits landing together" style="display:block;width:100%;height:auto"></svg></div>' +
+    '<div class="seq-state" id="avRcState" style="margin-top:8px" aria-live="polite"></div>' +
+    '<div class="decimal-line" id="avRcVerifyLine" aria-live="polite"></div>' +
+    '<div class="ctrl-label" style="margin-top:10px">Predict first — then check</div>' +
+    '<div class="lab-check"><span class="lab-check-q" id="avRcQ"></span><span id="avRcOpts" style="display:flex;gap:6px;flex-wrap:wrap"></span><span class="lab-check-fb" id="avRcFb" aria-live="polite"></span></div>' +
+    '<div class="share-row"><button type="button" class="btn" id="avRcNewQ">New prediction</button>' +
+    '<button type="button" class="btn" data-rclink="hold">Setup and hold — the flip-flop timing this delay feeds →</button></div>' +
+    '<p class="cp-formal adv-only">Formally: the ripple counter\'s worst-case settling time is n·t<sub>pd</sub> for n stages, so its outputs are only a valid count in the window after n·t<sub>pd</sub> and before the next edge; a decoder gated earlier produces glitches on the transient codes. The synchronous counter settles in t<sub>pd</sub> (plus the enable logic\'s delay, paid before the edge), which is why synchronous design is the rule wherever a count is read by other logic.</p>';
+  const muxElAV = $AV("muxCard");
+  if (muxElAV && muxElAV.parentNode) muxElAV.parentNode.insertBefore(rcSec, muxElAV.nextSibling);
+  else { const cv = $AV("circuitsView"); if (cv) cv.appendChild(rcSec); }
+  rcSec.querySelector("[data-rclink]").addEventListener("click", () => { if (!clickMenuKeyAV("setup-hold")) jumpAV("rippleSyncCard"); });
+
+  function rcDraw(tr) {
+    const X0 = 86, X1 = 884, T0 = -12, T1 = 102;
+    const X = t => X0 + (t - T0) / (T1 - T0) * (X1 - X0);
+    let s = "";
+    [0, 20, 40, 60, 80, 100].forEach(t => {
+      s += '<line x1="' + X(t) + '" y1="14" x2="' + X(t) + '" y2="232" stroke="var(--line2)" stroke-dasharray="2 4"/>' +
+        '<text class="net-label" x="' + X(t) + '" y="246" text-anchor="middle">' + t + " ns</text>";
+    });
+    s += '<line x1="' + X(50) + '" y1="14" x2="' + X(50) + '" y2="232" stroke="var(--red)" stroke-width="1.6" stroke-dasharray="7 4"/>' +
+      '<text class="net-label strong" x="' + (X(50) + 5) + '" y="26" fill="var(--red)">sample at 50 ns</text>';
+    function row(y, label, fromBit, ev, group) {
+      let r = '<text class="net-label strong" x="6" y="' + (y + 4) + '">' + label + "</text>";
+      const hi = y - 6, lo = y + 6;
+      const yOf = b => b ? hi : lo;
+      if (!ev) {
+        r += '<path d="M ' + X(T0) + " " + yOf(fromBit) + " H " + X(T1) + '" fill="none" stroke="var(--muted)" stroke-width="2"/>';
+      } else {
+        r += '<path d="M ' + X(T0) + " " + yOf(fromBit) + " H " + X(ev.t) + " V " + yOf(ev.val) + " H " + X(T1) + '" fill="none" stroke="' + (group === "r" ? "var(--amber)" : "var(--teal)") + '" stroke-width="2.4"/>' +
+          '<text class="gate-delay" x="' + X(ev.t) + '" y="' + (y - 12) + '">+' + ev.t + " ns</text>";
+      }
+      return r;
+    }
+    /* clock row */
+    s += '<text class="net-label strong" x="6" y="30">CLK</text>' +
+      '<path d="M ' + X(T0) + " 36 H " + X(0) + " V 24 H " + X(T1) + '" fill="none" stroke="var(--text)" stroke-width="2.4"/>';
+    s += '<text class="net-label strong" x="6" y="54">RIPPLE</text>';
+    for (let k = 3; k >= 0; k--) {
+      const y = 66 + (3 - k) * 20;
+      const ev = tr.ripple.find(e => e.bit === k);
+      s += row(y, "Q" + k, (tr.from >> k) & 1, ev, "r");
+    }
+    s += '<text class="net-label strong" x="6" y="152">SYNC</text>';
+    for (let k = 3; k >= 0; k--) {
+      const y = 164 + (3 - k) * 20;
+      const ev = tr.sync.find(e => e.bit === k);
+      s += row(y, "Q" + k, (tr.from >> k) & 1, ev, "s");
+    }
+    rcSec.querySelector("#avRcSvg").innerHTML = s;
+  }
+  function rcDescribe(tr) {
+    const times = tr.ripple.map(e => e.t);
+    const settle = Math.max.apply(null, times);
+    const skew = times.length > 1 ? settle - Math.min.apply(null, times) : 0;
+    let msg = binAV(tr.from, 4) + " → " + binAV(tr.to, 4) + ": ";
+    if (tr.ripple.length === 1) {
+      msg += "only Q0 toggles, so both counters settle together at " + AV_TPD + " ns. Skew needs a carry: it appears on the steps where a 1 rolls over.";
+    } else {
+      msg += "ripple bits land at " + times.join(", ") + " ns, passing through " + tr.transients.slice(0, -1).map(v => binAV(v, 4)).join(", ") + " on the way. " +
+        "Sync bits all land at " + AV_TPD + " ns. Ripple skew, first bit to last: " + skew + " ns; the count is not safe to read until " + settle + " ns after the edge" +
+        (tr.from === 7 ? ", and a decoder sampling at 50 ns reads " + binAV(rcValueAt(tr, 50), 4) + ", a value the count never officially holds." : ".");
+    }
+    return msg;
+  }
+  function rcRender() {
+    rcSec.querySelector("#avRcNow").textContent = binAV(rc.value, 4) + " · " + rc.value;
+    rcDraw(rc.lastTr);
+    rcSec.querySelector("#avRcState").textContent = rcDescribe(rc.lastTr);
+  }
+  function rcClock(animate) {
+    if (rc.animating) return;
+    const tr = rcTransition(rc.value);
+    rc.lastTr = tr;
+    if (!animate) { rc.value = tr.to; rcRender(); return; }
+    rc.animating = true;
+    const stateEl = rcSec.querySelector("#avRcState");
+    const nowEl = rcSec.querySelector("#avRcNow");
+    let i = 0;
+    stateEl.textContent = "Clock edge: the ripple count is in flight…";
+    (function step() {
+      if (i < tr.transients.length) {
+        nowEl.textContent = binAV(tr.transients[i], 4) + " · " + tr.transients[i] + " (in flight)";
+        i++;
+        setTimeout(step, 170);
+      } else {
+        rc.value = tr.to; rc.animating = false; rcRender();
+      }
+    })();
+  }
+  function rcTimer() {
+    if (rc.timer) { clearInterval(rc.timer); rc.timer = null; }
+    if (rc.running) rc.timer = setInterval(() => rcClock(false), 1100);
+  }
+  rcSec.querySelector("#avRcClock").addEventListener("click", () => rcClock(true));
+  rcSec.querySelector("#avRcRun").addEventListener("click", (e) => {
+    rc.running = !rc.running;
+    e.target.textContent = rc.running ? "Pause the clock" : "Run the clock";
+    rcTimer();
+  });
+  rcSec.querySelector("#avRcReset").addEventListener("click", () => { rc.value = 7; rc.lastTr = rcTransition(7); rcRender(); });
+  function rcQuestion() {
+    rc.value = 7; rc.lastTr = rcTransition(7); rc.answered = false;
+    rcSec.querySelector("#avRcClock").disabled = true;
+    rcSec.querySelector("#avRcRun").disabled = true;
+    rcSec.querySelector("#avRcQ").textContent = "Predict first: the counter shows 0111 and the clock edge arrives. 50 ns later, before the ripple counter has settled, what does it read?";
+    rcSec.querySelector("#avRcFb").textContent = "";
+    optBtnsAV(rcSec.querySelector("#avRcOpts"), ["0110", "0100", "0000", "1000"], (i) => {
+      rc.answered = true;
+      rcSec.querySelector("#avRcClock").disabled = false;
+      rcSec.querySelector("#avRcRun").disabled = false;
+      fbSetAV(rcSec.querySelector("#avRcFb"), i === 1, i === 1
+        ? "0100: Q0 lands at 20 ns and Q1 at 40 ns, Q2 not until 60 ns and Q3 at 80 ns, so at 50 ns the count reads 0100 — a value it never holds once settled. The clock is unlocked."
+        : "It reads 0100 at 50 ns: Q0 and Q1 have landed (20 and 40 ns), Q2 lands at 60 ns and Q3 at 80 ns. The clock is unlocked anyway: watch the diagram's landing times.");
+    });
+    rcRender();
+  }
+  rcSec.querySelector("#avRcNewQ").addEventListener("click", rcQuestion);
+  rcSec.querySelector("#avRcVerifyLine").textContent = "Self-test at load: 32 clocks of settled counts check out, ripple landing times strictly increase stage by stage, the synchronous bits all land at " + AV_TPD + " ns, and the 0111 → 1000 step passes through 0110, 0100, 0000 with " + RC_V.worstSkewNs + " ns of skew (window.__rippleSyncCheck).";
+  rcRender();
+  rcQuestion();
+
+  /* ================================================================
+     2) FLASH ADC — the card.
+     ================================================================ */
+  const flRng = rngAV(20261127);
+  const fl = { vin: 2.6, answered: false };
+  const flSec = document.createElement("section");
+  flSec.className = "card stage-card"; flSec.id = "flashAdcCard"; flSec.style.marginTop = "16px";
+  flSec.innerHTML =
+    "<h2>Flash ADC — every comparator at once</h2>" +
+    '<p class="what">The SAR lab measures a voltage by asking one comparator eight questions in a row. A <b>flash converter</b> asks every question at the same time: for 3 bits, seven comparators watch the input against seven thresholds (' + FL_LSB.toFixed(3) + ' V apart on the same 5 V reference the SAR lab uses), and their outputs form a <b>thermometer code</b> — filled from the bottom up to the input. A <b>priority encoder</b> then turns the thermometer into the 3-bit answer in a single step. No clock, no search: the price is hardware, and the table below prices it honestly against the SAR and against the 8-bit flash nobody builds.</p>' +
+    '<div class="share-row"><span class="av-biglab">Analog input</span><span class="av-bigbits" id="avFlVinLab">Vin = 2.60 V</span>' +
+    '<label>Vin <input type="range" id="avFlVin" min="0" max="5" step="0.01" value="2.6" style="width:200px;vertical-align:middle" disabled></label></div>' +
+    '<div class="av-therm" id="avFlTherm"></div>' +
+    '<div class="share-row"><span class="av-biglab">Digital out</span><span class="av-bigbits" id="avFlOut">? ? ?</span><span class="decimal-line" id="avFlErr"></span></div>' +
+    '<div class="seq-state" id="avFlState" aria-live="polite"></div>' +
+    '<div class="av-cmp-wrap"><table class="av-cmp"><thead><tr><th>Converter</th><th>Comparators</th><th>Other hardware</th><th>Steps to an answer</th></tr></thead><tbody>' +
+    "<tr><td>This flash, 3-bit</td><td>7</td><td>Priority encoder, 11 gates</td><td><b>1</b></td></tr>" +
+    "<tr><td>The SAR lab, 8-bit</td><td>1</td><td>DAC + SAR register</td><td>8 (one verdict per bit)</td></tr>" +
+    "<tr><td>A flash at 8-bit</td><td>255</td><td>An encoder of hundreds of gates</td><td><b>1</b></td></tr>" +
+    '</tbody></table></div>' +
+    '<p class="au-note">Same input, two strategies: flash pays 2<sup>n</sup> − 1 comparators to finish in one step whatever the resolution; SAR pays one comparator and a DAC, and spends n steps. That is why flash lives at low resolution and high speed (inside oscilloscopes and as the stages inside pipelined converters), and SAR owns the middle ground.</p>' +
+    '<div class="decimal-line" id="avFlVerifyLine" aria-live="polite"></div>' +
+    '<div class="ctrl-label" style="margin-top:10px">Predict first — then check</div>' +
+    '<div class="lab-check"><span class="lab-check-q" id="avFlQ"></span><span id="avFlOpts" style="display:flex;gap:6px;flex-wrap:wrap"></span><span class="lab-check-fb" id="avFlFb" aria-live="polite"></span></div>' +
+    '<div class="share-row"><button type="button" class="btn" id="avFlNewQ">New prediction</button>' +
+    '<button type="button" class="btn" data-fllink="sar">The successive-approximation ADC — one comparator, eight verdicts →</button></div>';
+  rcSec.parentNode.insertBefore(flSec, rcSec.nextSibling);
+  flSec.querySelector("[data-fllink]").addEventListener("click", () => { if (!clickMenuKeyAV("sar-adc")) jumpAV("flashAdcCard"); });
+  const flThermHost = flSec.querySelector("#avFlTherm");
+  const flRows = [];
+  for (let k = 7; k >= 1; k--) {
+    const row = document.createElement("div");
+    row.className = "av-therm-row";
+    row.innerHTML = '<span class="av-therm-lab">Comparator ' + k + " · threshold " + (k * FL_LSB).toFixed(3) + ' V</span><span class="av-therm-cell"></span>';
+    flThermHost.appendChild(row);
+    flRows[7 - k] = { cell: row.querySelector(".av-therm-cell"), k };
+  }
+  function flRender() {
+    const c = flConvert(fl.vin);
+    flSec.querySelector("#avFlVinLab").textContent = "Vin = " + fl.vin.toFixed(2) + " V";
+    flRows.forEach(r => {
+      const on = c.therm[r.k - 1] === 1;
+      r.cell.classList.toggle("on", fl.answered && on);
+      r.cell.textContent = fl.answered ? (on ? "1 — Vin is above" : "0") : "·";
+    });
+    flSec.querySelector("#avFlOut").textContent = fl.answered ? binAV(c.code, 3) + " · " + c.code : "? ? ?";
+    flSec.querySelector("#avFlErr").textContent = fl.answered
+      ? "DAC equivalent " + c.dacV.toFixed(3) + " V · error " + (c.err >= 0 ? "+" : "") + c.err.toFixed(3) + " V (1 LSB = " + FL_LSB.toFixed(3) + " V)"
+      : "";
+    flSec.querySelector("#avFlState").textContent = fl.answered
+      ? c.therm.reduce((s, t) => s + t, 0) + " of 7 comparators are high: the thermometer fills to the input, and the encoder reads its top edge as code " + c.code + " — in one step, with no clock."
+      : "Predict the code first: the comparators and the readout unlock when you answer.";
+  }
+  flSec.querySelector("#avFlVin").addEventListener("input", (e) => { fl.vin = parseFloat(e.target.value) || 0; flRender(); });
+  function flQuestion() {
+    const picks = [0.4, 1.1, 1.9, 2.6, 3.3, 4.1, 4.7];
+    fl.vin = picks[Math.floor(flRng() * picks.length)];
+    fl.answered = false;
+    const slider = flSec.querySelector("#avFlVin");
+    slider.value = fl.vin; slider.disabled = true;
+    const c = flConvert(fl.vin);
+    const optVals = Array.from(new Set([c.code, (c.code + 1) % 8, (c.code + 7) % 8, (c.code + 2) % 8])).sort((a, b) => a - b);
+    flSec.querySelector("#avFlQ").textContent = "Predict first: Vin is " + fl.vin.toFixed(2) + " V and each step is " + FL_LSB.toFixed(3) + " V. What 3-bit code does the flash converter output?";
+    flSec.querySelector("#avFlFb").textContent = "";
+    optBtnsAV(flSec.querySelector("#avFlOpts"), optVals.map(v => binAV(v, 3) + " · " + v), (i) => {
+      fl.answered = true;
+      slider.disabled = false;
+      const right = optVals[i] === c.code;
+      fbSetAV(flSec.querySelector("#avFlFb"), right, right
+        ? "Code " + c.code + ": " + fl.vin.toFixed(2) + " V crosses " + c.code + " thresholds of " + FL_LSB.toFixed(3) + " V, so " + c.code + " comparators stand high and the encoder reads " + binAV(c.code, 3) + ". The converter is unlocked: sweep Vin and watch the thermometer fill."
+        : "It is code " + c.code + ": count the thresholds below " + fl.vin.toFixed(2) + " V — " + c.code + " of them — and that count is the code. The converter is unlocked anyway: sweep Vin and watch the thermometer fill.");
+      flRender();
+    });
+    flRender();
+  }
+  flSec.querySelector("#avFlNewQ").addEventListener("click", flQuestion);
+  flSec.querySelector("#avFlVerifyLine").textContent = "Self-test at load: over a 0.005 V sweep of the full 5 V range (" + FL_V.points + " points) plus every exact threshold, the flash code matches the floor rule the SAR lab converges to, the thermometer code never has a gap, and the priority-encoder equations agree with the thermometer count at every point (window.__flashAdcCheck).";
+  flQuestion();
+
+  /* ================================================================
+     3) STEPPER DRIVER — the card.
+     ================================================================ */
+  const st = { mode: "half", dir: 1, rate: 120, idx: 0, cmd: 0, accepted: 0, missed: 0, lastT: -Infinity, angle: 0, running: false, timer: null, answered: false, hist: [] };
+  st.hist.push(ST_HALF[0].slice());
+  const stSec = document.createElement("section");
+  stSec.className = "card stage-card"; stSec.id = "stepperCard"; stSec.style.marginTop = "16px";
+  stSec.innerHTML =
+    "<h2>Stepper-motor driver — a counter walks the phases</h2>" +
+    '<p class="what">A unipolar stepper does not spin when you power it: it steps, one phase pattern at a time, and the driver\'s whole job is to walk the patterns in order. That is a counter and a decoder, nothing more: the counter advances an index, the decoder turns the index into the four phase outputs A–D. <b>Full-step</b> drives two phases at a time (AB, BC, CD, DA); <b>half-step</b> alternates one and two (A, AB, B, BC, …) for twice the steps at half the size. This is exactly how the Arduino stepper libraries drive the 28BYJ-48 motor in the ELEGOO kit, through its ULN2003 board: the library hides this table, and the table is all there is. The motor in this lab has a pull-in limit of ' + ST_MAX_SPS + ' steps/s: command steps faster than the rotor can follow and it misses them, which the lab counts.</p>' +
+    '<div class="share-row"><button type="button" class="btn" id="avStMode">Mode: half-step</button>' +
+    '<button type="button" class="btn" id="avStDir">Direction: clockwise</button>' +
+    '<button type="button" class="btn primary" id="avStStep">Step once ▸</button>' +
+    '<button type="button" class="btn" id="avStRun">Run</button>' +
+    '<button type="button" class="btn" id="avStReset">Reset</button></div>' +
+    '<div class="share-row"><label>Step rate <input type="range" id="avStRate" min="20" max="600" step="10" value="120" style="width:200px;vertical-align:middle"></label><span class="decimal-line" id="avStRateLab"></span></div>' +
+    '<div class="av-step-wrap"><div><div class="ctrl-label">Phase outputs, last steps (newest at right)</div><svg id="avStSvg" viewBox="0 0 560 118" role="img" aria-label="Timing diagram of the four stepper phase outputs over the last steps" style="display:block;width:100%;height:auto"></svg></div>' +
+    '<div><div class="ctrl-label">Rotor (one turn = one 4-step cycle)</div><svg id="avStRotor" viewBox="0 0 120 120" role="img" aria-label="Rotor position indicator" style="display:block;width:120px;height:auto"></svg></div></div>' +
+    '<div class="seq-state" id="avStState" aria-live="polite"></div>' +
+    '<div class="decimal-line" id="avStVerifyLine" aria-live="polite"></div>' +
+    '<div class="ctrl-label" style="margin-top:10px">Predict first — then check</div>' +
+    '<div class="lab-check"><span class="lab-check-q" id="avStQ"></span><span id="avStOpts" style="display:flex;gap:6px;flex-wrap:wrap"></span><span class="lab-check-fb" id="avStFb" aria-live="polite"></span></div>' +
+    '<div class="share-row"><button type="button" class="btn" id="avStNewQ">New prediction</button>' +
+    '<button type="button" class="btn" data-stlink="ripple">The counters that pace this — ripple vs synchronous →</button></div>';
+  flSec.parentNode.insertBefore(stSec, flSec.nextSibling);
+  stSec.querySelector("[data-stlink]").addEventListener("click", () => { if (!clickMenuKeyAV("ripple-sync")) jumpAV("stepperCard"); });
+  const stPatName = p => "ABCD".split("").filter((_, i) => p[i]).join("+") || "none";
+  function stDraw() {
+    const rows = ["A", "B", "C", "D"];
+    let s = "";
+    const x0 = 30, cw = 42, y0 = 8, rh = 26;
+    st.hist.forEach((p, ci) => {
+      rows.forEach((r, ri) => {
+        const on = p[ri] === 1;
+        s += '<rect x="' + (x0 + ci * cw + 2) + '" y="' + (y0 + ri * rh + 2) + '" width="' + (cw - 4) + '" height="' + (rh - 6) + '" rx="3" fill="' + (on ? "var(--amber)" : "var(--border)") + '" opacity="' + (on ? "1" : ".4") + '"' + (ci === st.hist.length - 1 ? ' stroke="var(--text)" stroke-width="1.4"' : "") + "/>";
+      });
+    });
+    rows.forEach((r, ri) => { s += '<text class="net-label strong" x="4" y="' + (y0 + ri * rh + 15) + '">' + r + "</text>"; });
+    stSec.querySelector("#avStSvg").innerHTML = s;
+    const a = (st.angle % 360) * Math.PI / 180;
+    const x2 = 60 + 44 * Math.sin(a), y2 = 60 - 44 * Math.cos(a);
+    stSec.querySelector("#avStRotor").innerHTML =
+      '<circle cx="60" cy="60" r="50" fill="none" stroke="var(--line2)" stroke-width="2"/>' +
+      '<line x1="60" y1="60" x2="' + x2.toFixed(1) + '" y2="' + y2.toFixed(1) + '" stroke="var(--amber)" stroke-width="4" stroke-linecap="round"/>' +
+      '<circle cx="60" cy="60" r="5" fill="var(--text)"/>';
+  }
+  function stRender() {
+    const seq = stSeq(st.mode);
+    const p = seq[st.idx];
+    stDraw();
+    stSec.querySelector("#avStRateLab").textContent = st.rate + " steps/s" + (st.rate > ST_MAX_SPS ? " — past the motor's " + ST_MAX_SPS + " steps/s pull-in limit: steps will be missed" : " — inside the motor's " + ST_MAX_SPS + " steps/s pull-in limit");
+    stSec.querySelector("#avStState").textContent =
+      "Phases now: " + stPatName(p) + " (" + p.join("") + ") · " + st.mode + "-step, " + (st.dir > 0 ? "clockwise" : "counter-clockwise") +
+      " · commanded " + st.cmd + " steps, rotor followed " + st.accepted + ", missed " + st.missed + (st.missed ? " — the driver walked on without the rotor: position is lost, and nothing in the driver knows." : "");
+    stSec.querySelector("#avStState").style.color = st.missed ? "var(--red)" : "";
+  }
+  function stCommand() {
+    const seq = stSeq(st.mode);
+    const t = st.cmd / st.rate, minDt = 1 / ST_MAX_SPS;
+    st.cmd++;
+    if (t - st.lastT >= minDt - 1e-12) {
+      st.idx = (st.idx + st.dir + seq.length) % seq.length;
+      st.accepted++; st.lastT = t;
+      st.angle += st.dir * (st.mode === "half" ? 45 : 90);
+    } else st.missed++;
+    st.hist.push(seq[st.idx].slice());
+    if (st.hist.length > 12) st.hist.shift();
+    stRender();
+  }
+  function stTimer() {
+    if (st.timer) { clearInterval(st.timer); st.timer = null; }
+    if (st.running) st.timer = setInterval(stCommand, Math.max(33, Math.round(1000 / Math.min(st.rate, 30))));
+  }
+  stSec.querySelector("#avStStep").addEventListener("click", stCommand);
+  stSec.querySelector("#avStRun").addEventListener("click", (e) => {
+    st.running = !st.running;
+    e.target.textContent = st.running ? "Pause" : "Run";
+    stTimer();
+  });
+  stSec.querySelector("#avStMode").addEventListener("click", (e) => {
+    st.mode = st.mode === "half" ? "full" : "half";
+    st.idx = st.idx % stSeq(st.mode).length;
+    st.hist = [stSeq(st.mode)[st.idx].slice()];
+    e.target.textContent = "Mode: " + st.mode + "-step";
+    stQuestion(true);
+    stRender();
+  });
+  stSec.querySelector("#avStDir").addEventListener("click", (e) => {
+    st.dir = -st.dir;
+    e.target.textContent = "Direction: " + (st.dir > 0 ? "clockwise" : "counter-clockwise");
+    stQuestion(true);
+    stRender();
+  });
+  stSec.querySelector("#avStRate").addEventListener("input", (e) => { st.rate = parseInt(e.target.value, 10) || 120; stTimer(); stRender(); });
+  stSec.querySelector("#avStReset").addEventListener("click", () => {
+    st.idx = 0; st.cmd = 0; st.accepted = 0; st.missed = 0; st.lastT = -Infinity; st.angle = 0;
+    st.hist = [stSeq(st.mode)[0].slice()];
+    stRender();
+  });
+  const stRng = rngAV(987654321);
+  function stQuestion(keepIdx) {
+    const seq = stSeq(st.mode);
+    if (!keepIdx) st.idx = Math.floor(stRng() * seq.length);
+    st.answered = false;
+    stSec.querySelector("#avStRun").disabled = true;
+    const cur = seq[st.idx];
+    const next = seq[(st.idx + st.dir + seq.length) % seq.length];
+    const prev = seq[(st.idx - st.dir + seq.length) % seq.length];
+    const two = seq[(st.idx + 2 * st.dir + seq.length * 2) % seq.length];
+    const opp = seq[(st.idx + seq.length / 2) % seq.length];
+    const opts = [];
+    [next, prev, two, opp].forEach(p => { if (!opts.some(o => o.join("") === p.join(""))) opts.push(p); });
+    stSec.querySelector("#avStQ").textContent = "Predict first: the driver is in " + st.mode + "-step, running " + (st.dir > 0 ? "clockwise" : "counter-clockwise") + ", and the phases now read " + stPatName(cur) + " (" + cur.join("") + "). What pattern does it output next?";
+    stSec.querySelector("#avStFb").textContent = "";
+    optBtnsAV(stSec.querySelector("#avStOpts"), opts.map(stPatName), (i) => {
+      st.answered = true;
+      stSec.querySelector("#avStRun").disabled = false;
+      const right = opts[i].join("") === next.join("");
+      fbSetAV(stSec.querySelector("#avStFb"), right, right
+        ? stPatName(next) + " (" + next.join("") + "): the " + st.mode + "-step table advances one row " + (st.dir > 0 ? "down" : "up") + " from " + stPatName(cur) + ". Run is unlocked."
+        : "It is " + stPatName(next) + " (" + next.join("") + "): read one row " + (st.dir > 0 ? "down" : "up") + " from " + stPatName(cur) + " in the " + st.mode + "-step table. Run is unlocked anyway.");
+      stRender();
+    });
+    st.hist = [seq[st.idx].slice()];
+    stRender();
+  }
+  stSec.querySelector("#avStNewQ").addEventListener("click", () => stQuestion(false));
+  stSec.querySelector("#avStVerifyLine").textContent = "Self-test at load: both phase tables check out (full-step: four patterns, two phases on, neighbours two bits apart; half-step: eight patterns, neighbours one bit apart), 16 half-steps at 100 steps/s complete with no misses, and at 600 steps/s exactly 20 of 30 commanded steps are missed (window.__stepperCheck). The diagram runs slowed down; the missed-step accounting always uses the rate you set.";
+  stQuestion(true);
+  stRender();
+
+  /* ---------------- MENU REGISTRATION + COUNT REBUILD ---------------- */
+  function addMenuItemAV(groupName, afterKey, spec) {
+    const list = $AV("menuList"); if (!list) return false;
+    if (list.querySelector('[data-key="' + spec.key + '"]')) return false;
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "menu-item"; b.dataset.key = spec.key;
+    b.dataset.search = (spec.label + " " + spec.hint + " " + spec.search).toLowerCase();
+    if (spec.level) b.dataset.uxlevel = spec.level;
+    b.innerHTML = '<span class="mi-dot" aria-hidden="true"></span><span class="mi-label"></span><small></small>';
+    b.querySelector(".mi-label").textContent = spec.label;
+    b.querySelector("small").textContent = spec.hint;
+    b.addEventListener("click", () => { const p = $AV("menuPanel"); if (p) p.hidden = true; const mb = $AV("menuBtn"); if (mb) mb.setAttribute("aria-expanded", "false"); spec.go(); });
+    if (afterKey) {
+      const anchor = list.querySelector('[data-key="' + afterKey + '"]');
+      if (anchor) { anchor.parentNode.insertBefore(b, anchor.nextSibling); return true; }
+    }
+    let sib = null, inGroup = false;
+    Array.prototype.slice.call(list.children).forEach(el => {
+      if (el.classList.contains("menu-group")) inGroup = (el.dataset.group || "").trim() === groupName;
+      else if (inGroup && el.classList.contains("menu-item")) sib = el;
+    });
+    if (sib) sib.parentNode.insertBefore(b, sib.nextSibling); else list.appendChild(b);
+    return true;
+  }
+  addMenuItemAV("Logic & Circuits", "mux-logic", {
+    key: "ripple-sync", label: "Ripple vs synchronous counters — the skew, measured",
+    hint: "Two 4-bit counters on one clock: the ripple bits land one stage delay apart and pass through wrong values, the synchronous bits land together, and the gate-delay model prices the difference in nanoseconds",
+    search: "ripple counter synchronous counter skew propagation delay clock to q transient wrong values glitch decoding settling time timing diagram simulator lab",
+    level: "intermediate", go: () => { setTopArea("circuits"); syncRail("circuits"); jumpAV("rippleSyncCard"); }
+  });
+  addMenuItemAV("Logic & Circuits", "ripple-sync", {
+    key: "flash-adc", label: "Flash ADC — seven comparators, one step",
+    hint: "A 3-bit flash converter: seven comparators and a priority encoder answer in a single step; price it against the SAR lab's eight verdicts and against a 255-comparator 8-bit flash",
+    search: "flash adc parallel comparator bank priority encoder thermometer code quantization conversion time hardware cost sar comparison simulator lab",
+    level: "intermediate", go: () => { setTopArea("circuits"); syncRail("circuits"); jumpAV("flashAdcCard"); }
+  });
+  addMenuItemAV("Logic & Circuits", "flash-adc", {
+    key: "stepper-driver", label: "Stepper-motor driver — phases from a counter",
+    hint: "Drive a unipolar stepper the way the Arduino libraries do: a counter and decoder walk the full-step and half-step phase sequences, and past the motor's step rate the rotor starts missing steps",
+    search: "stepper motor driver unipolar phase sequence full step half step counter decoder uln2003 28byj-48 missed steps pull-in rate timing diagram simulator lab",
+    level: "beginner", go: () => { setTopArea("circuits"); syncRail("circuits"); jumpAV("stepperCard"); }
+  });
+  (function rebuildCountsAV() {
+    const RJ = window.__uxRoundJ; if (!RJ) return;
+    const groups = RJ.menuGroups(); const counts = {}; let total = 0;
+    groups.forEach(g => {
+      counts[g.name] = g.items.length; total += g.items.length;
+      const c = g.header.querySelector(".mi-count"); if (c) c.textContent = g.items.length;
+    });
+    window.LAB_MENU = { groups: groups.map(g => ({ name: g.name, items: g.items.map(b => { const l = b.querySelector(".mi-label"); return l ? l.textContent : ""; }) })), count: total };
+    window.LAB_MODULES = { modules: groups.map(g => ({ name: g.name, count: g.items.length })), total };
+    RJ.buildRailAndList(counts);
+    RJ.buildGallery();
+    ["boards", "arch", "os", "org"].forEach(id => {
+      const h = document.querySelector("#module-" + id + " .mh-count");
+      if (!h) return;
+      const name = { boards: "Boards, Modulation & Projects", arch: "Computer Architecture", os: "Operating Systems", org: "Computer Organization" }[id];
+      if (counts[name]) h.textContent = counts[name] + " items";
+    });
+    window.__countsAV = { total, counts };
+  })();
+})();
+</script>
+<style>
+/* ===== Round AV — counter timing, flash thermometer, stepper phases ===== */
+.av-biglab{font-weight:700;font-size:14px}
+.av-bigbits{font-family:ui-monospace,Menlo,monospace;font-size:19px;font-weight:700;letter-spacing:1px}
+.av-therm{display:flex;flex-direction:column;gap:4px;margin:10px 0}
+.av-therm-row{display:flex;align-items:center;gap:10px}
+.av-therm-lab{font-family:ui-monospace,Menlo,monospace;font-size:12.5px;min-width:270px}
+.av-therm-cell{flex:1;border:1px solid var(--border);border-radius:6px;padding:4px 10px;font-family:ui-monospace,Menlo,monospace;font-size:12.5px;background:var(--surface);opacity:.55}
+.av-therm-cell.on{background:var(--amber);border-color:var(--amber);color:#111;opacity:1;font-weight:700}
+.av-cmp-wrap{overflow-x:auto;margin:10px 0}
+.av-cmp{border-collapse:collapse;font-size:13.5px}
+.av-cmp th,.av-cmp td{border:1px solid var(--border);padding:5px 10px;text-align:left}
+.av-cmp th{background:var(--surface)}
+.av-step-wrap{display:flex;gap:26px;flex-wrap:wrap;margin:10px 0;align-items:flex-start}
+</style>
